@@ -3,24 +3,26 @@
 //   · 파일: R2 에 저장하고 키를 돌려준다 → 기존 GET /api/clipfile?k=<키> 로 내려받는다
 //   · 오류: { error } JSON (+ 이미지는 attempts, 폴백 결과는 /api/ai 와 같은 { provider, model, attempts })
 //
-// 기존 /api/clipfile, /api/tts 는 이미 있으므로 여기서는 /api/image, /api/kling 두 개만 추가한다.
+// 저장소는 Supabase 하나로 쓴다: 프로젝트·사용량 기록은 Postgres 테이블, 이미지·영상·음성 파일은 Storage 버킷.
+// Supabase 키(service_role)는 서버에만 두고 브라우저에는 내려보내지 않는다. 스키마는 supabase/schema.sql.
 //
-// 연결 (Cloudflare Pages Functions 예):
-//   functions/api/image.js  →  import { handleImage } from '../../studio-api.js'; export const onRequest = c => handleImage(c.request, c.env);
-//   functions/api/kling.js  →  import { handleKling } from '../../studio-api.js'; export const onRequest = c => handleKling(c.request, c.env);
-// 단독 Worker 로 쓰면 아래 default export 의 fetch 가 두 경로를 나눠 준다.
+// 경로: /api/image /api/kling /api/file /api/projects /api/usage /api/tts /api/admin
+// 연결 (Cloudflare Pages Functions): functions/api/*.js 가 아래 handleXxx 를 불러 쓴다.
+// 단독 Worker 로 쓰면 아래 default export 의 fetch 가 경로를 나눠 준다.
 //
-// 환경변수·바인딩 이름은 기존 함수에 맞게 아래 ENV 에서 바꾸세요.
+// 환경변수 이름은 아래 ENV 에서 바꿀 수 있다.
 const ENV = {
   pw: 'ADMIN_PASSWORD',      // 관리자 비밀번호
-  bucket: 'CLIPS',           // R2 버킷 바인딩 (기존 /api/clipfile 이 쓰는 것과 같은 버킷)
+  sbUrl: 'SUPABASE_URL',                   // https://xxxx.supabase.co
+  sbKey: 'SUPABASE_SERVICE_ROLE_KEY',      // service_role 키 (서버 전용 비밀)
+  sbBucket: 'SUPABASE_BUCKET',             // 선택. 기본 studio (비공개 버킷)
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
-  klAK: 'KLING_ACCESS_KEY',
+  klKey: 'KLING_API_KEY',    // 새 클링 API: 키 하나 (Authorization: Bearer 키). 있으면 이 방식을 쓴다
+  klAK: 'KLING_ACCESS_KEY',  // 옛 클링 API: Access Key + Secret Key 로 JWT 서명 (KLING_API_KEY 가 없을 때)
   klSK: 'KLING_SECRET_KEY',
   klBase: 'KLING_API_BASE',  // 선택. 기본 https://api-singapore.klingai.com
 };
-// 기존 /api/clipfile 이 특정 접두어의 키만 내려준다면 거기에 맞추세요.
 const KEY_PREFIX = 'studio/';
 
 const NO_TEXT = 'Strictly no text of any kind: no letters, no speech balloons, no captions, no sound-effect lettering, no watermark.';
@@ -32,17 +34,39 @@ function authed(req, env) {
   const got = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
   return !!want && got === want;
 }
-const bucket = env => { const b = env[ENV.bucket]; if (!b) throw new Error(`R2 바인딩 ${ENV.bucket} 이 없습니다`); return b; };
-function newKey(ext) { return `${KEY_PREFIX}${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}.${ext}`; }
-async function r2Put(env, data, type, ext) {
-  const key = newKey(ext);
-  await bucket(env).put(key, data, { httpMetadata: { contentType: type } });
+function sb(env) {
+  const url = (env[ENV.sbUrl] || '').replace(/\/+$/, ''), key = env[ENV.sbKey];
+  if (!url || !key) throw new Error(ENV.sbUrl + ' / ' + ENV.sbKey + ' 가 설정되지 않았습니다');
+  return { url, h: { apikey: key, Authorization: 'Bearer ' + key }, bucket: env[ENV.sbBucket] || 'studio' };
+}
+const objURL = (c, key, mid = '') => c.url + '/storage/v1/object/' + mid + c.bucket + '/' + key.split('/').map(encodeURIComponent).join('/');
+function newKey(ext) { return KEY_PREFIX + Date.now().toString(36) + '-' + crypto.randomUUID().slice(0, 8) + '.' + ext; }
+const safeKey = k => { k = String(k || ''); if (!k.startsWith(KEY_PREFIX) || k.includes('..')) throw Object.assign(new Error('잘못된 파일 키'), { status: 400 }); return k; };
+async function filePut(env, key, data, type) {
+  const c = sb(env);
+  const r = await fetch(objURL(c, key), { method: 'POST', headers: { ...c.h, 'Content-Type': type || 'application/octet-stream', 'x-upsert': 'true' }, body: data });
+  if (!r.ok) throw new Error('Storage 저장 실패: ' + (await r.text().catch(() => r.status)));
   return key;
 }
+async function fileGet(env, key) {
+  const c = sb(env);
+  const r = await fetch(objURL(c, key, 'authenticated/'), { headers: c.h });
+  if (r.status === 404 || r.status === 400) return null;
+  if (!r.ok) throw new Error('Storage 읽기 실패: ' + r.status);
+  return { body: r.body, type: r.headers.get('content-type') || 'application/octet-stream', res: r };
+}
+async function r2Put(env, data, type, ext) { return filePut(env, newKey(ext), data, type); }
 async function r2Get(env, key) {
-  const o = await bucket(env).get(key);
-  if (!o) throw Object.assign(new Error('파일을 찾지 못했습니다: ' + key), { status: 400 });
-  return { bytes: new Uint8Array(await o.arrayBuffer()), type: o.httpMetadata?.contentType || 'image/jpeg' };
+  const f = await fileGet(env, safeKey(key));
+  if (!f) throw Object.assign(new Error('파일을 찾지 못했습니다: ' + key), { status: 400 });
+  return { bytes: new Uint8Array(await f.res.arrayBuffer()), type: f.type };
+}
+async function db(env, path, opt = {}) {
+  const c = sb(env);
+  const r = await fetch(c.url + '/rest/v1/' + path, { ...opt, headers: { ...c.h, 'Content-Type': 'application/json', ...(opt.headers || {}) } });
+  const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { /* 본문 없음 */ }
+  if (!r.ok) throw new Error('DB 오류: ' + (j?.message || t || r.status));
+  return j;
 }
 function b64(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); }
 function unb64(str) { const bin = atob(str); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
@@ -148,9 +172,55 @@ async function kling(env, path, opt = {}) {
 }
 const doneKey = id => `${KEY_PREFIX}kling/${String(id).replace(/[^\w-]/g, '')}.mp4`;
 
+/* 새 API: POST /image-to-video/<model> {contents, settings}, 조회 GET /tasks?task_ids= → data[0].status / outputs[].url */
+async function klingNew(env, path, opt = {}) {
+  const base = (env[ENV.klBase] || 'https://api-singapore.klingai.com').replace(/\/+$/, '');
+  const r = await fetch(base + path, { ...opt, headers: { Authorization: 'Bearer ' + env[ENV.klKey], 'Content-Type': 'application/json' } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || (j.code !== undefined && j.code !== 0)) throw new GenError(r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad', (j.message || 'HTTP ' + r.status) + ' (code ' + (j.code ?? r.status) + ')');
+  return j.data;
+}
+async function handleKlingNew(req, env) {
+  if (req.method === 'POST') {
+    const b = await req.json();
+    const img = await r2Get(env, String(b.image || ''));
+    const model = /^kling-\d/.test(b.model || '') ? b.model : 'kling-3.0'; // 옛 이름(kling-v2-1)은 새 API 에 없으니 3.0 으로
+    const prompt = String(b.prompt || '') + (b.negative ? '\n\nAvoid: ' + b.negative : '');
+    const contents = [{ type: 'prompt', text: prompt.slice(0, 2500) }, { type: 'first_frame', url: b64(img.bytes) }];
+    if (b.tail) contents.push({ type: 'last_frame', url: b64((await r2Get(env, String(b.tail))).bytes) });
+    const d = await klingNew(env, '/image-to-video/' + encodeURIComponent(model), { method: 'POST', body: JSON.stringify({
+      contents,
+      settings: { resolution: b.mode === 'pro' ? '1080p' : '720p', duration: Math.min(15, Math.max(3, +b.duration || 5)), audio: 'off', multi_shot: false },
+      options: { watermark_info: { enabled: false } },
+    }) });
+    return json({ taskId: d.id });
+  }
+  if (req.method === 'GET') {
+    const id = new URL(req.url).searchParams.get('id');
+    if (!id) return json({ error: 'id 가 없습니다' }, 400);
+    const meta = await fileGet(env, doneKey(id) + '.json');
+    if (meta) return json({ status: 'succeed', key: doneKey(id), duration: +(await meta.res.json().catch(() => ({}))).duration || undefined });
+    const t = (await klingNew(env, '/tasks?task_ids=' + encodeURIComponent(id)))?.[0];
+    if (!t) return json({ status: 'processing' });
+    if (t.status === 'succeeded') {
+      const v = t.outputs?.find(o => o.type === 'video');
+      if (!v?.url) return json({ status: 'failed', error: '결과 영상 주소가 없습니다' });
+      const r = await fetch(v.url);
+      if (!r.ok) return json({ status: 'processing', error: '완성 영상 내려받기 재시도 중 (' + r.status + ')' });
+      await filePut(env, doneKey(id), await r.arrayBuffer(), 'video/mp4');
+      await filePut(env, doneKey(id) + '.json', JSON.stringify({ duration: +v.duration || 0 }), 'application/json');
+      return json({ status: 'succeed', key: doneKey(id), duration: +v.duration || undefined });
+    }
+    if (t.status === 'failed') return json({ status: 'failed', error: t.message || '클링에서 실패로 처리했습니다' });
+    return json({ status: t.status || 'processing' });
+  }
+  return json({ error: 'GET 또는 POST만 됩니다' }, 405);
+}
+
 export async function handleKling(req, env) {
   if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
   try {
+    if (env[ENV.klKey]) return await handleKlingNew(req, env);
     if (req.method === 'POST') {
       const b = await req.json();
       const img = await r2Get(env, String(b.image || ''));
@@ -168,16 +238,17 @@ export async function handleKling(req, env) {
     if (req.method === 'GET') {
       const id = new URL(req.url).searchParams.get('id');
       if (!id) return json({ error: 'id 가 없습니다' }, 400);
-      // 이미 R2 로 옮겼으면 다시 받지 않는다
-      const saved = await bucket(env).head(doneKey(id));
-      if (saved) return json({ status: 'succeed', key: doneKey(id), duration: +(saved.customMetadata?.duration || 0) || undefined });
+      // 이미 Storage 로 옮겼으면 다시 받지 않는다
+      const meta = await fileGet(env, doneKey(id) + '.json');
+      if (meta) return json({ status: 'succeed', key: doneKey(id), duration: +(await meta.res.json().catch(() => ({}))).duration || undefined });
       const d = await kling(env, '/v1/videos/image2video/' + encodeURIComponent(id));
       if (d.task_status === 'succeed') {
         const v = d.task_result?.videos?.[0];
         if (!v?.url) return json({ status: 'failed', error: '결과 영상 주소가 없습니다' });
         const r = await fetch(v.url);
         if (!r.ok) return json({ status: 'processing', error: '완성 영상 내려받기 재시도 중 (' + r.status + ')' });
-        await bucket(env).put(doneKey(id), await r.arrayBuffer(), { httpMetadata: { contentType: 'video/mp4' }, customMetadata: { duration: String(v.duration || '') } });
+        await filePut(env, doneKey(id), await r.arrayBuffer(), 'video/mp4');
+        await filePut(env, doneKey(id) + '.json', JSON.stringify({ duration: v.duration || 0 }), 'application/json');
         return json({ status: 'succeed', key: doneKey(id), duration: +v.duration || undefined });
       }
       if (d.task_status === 'failed') return json({ status: 'failed', error: d.task_status_msg || '클링에서 실패로 처리했습니다' });
@@ -189,12 +260,129 @@ export async function handleKling(req, env) {
   }
 }
 
+/* ---------- 파일: 올리기(POST ?name=) / 내려받기(GET ?k=) — 비공개 버킷이라 인증 필요 ---------- */
+export async function handleFile(req, env) {
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    const u = new URL(req.url);
+    if (req.method === 'POST') {
+      const name = u.searchParams.get('name') || 'file.bin';
+      const ext = (name.match(/\.([a-z0-9]{2,5})$/i)?.[1] || 'bin').toLowerCase();
+      const type = req.headers.get('content-type') || 'application/octet-stream';
+      return json({ key: await r2Put(env, await req.arrayBuffer(), type, ext) });
+    }
+    if (req.method === 'GET') {
+      const f = await fileGet(env, safeKey(u.searchParams.get('k')));
+      if (!f) return json({ error: '파일 없음' }, 404);
+      return new Response(f.body, { headers: { 'content-type': f.type, 'cache-control': 'private, max-age=3600' } });
+    }
+    return json({ error: 'GET 또는 POST만 됩니다' }, 405);
+  } catch (e) { return json({ error: e.message }, e.status || 502); }
+}
+
+/* ---------- 프로젝트: 목록 / 읽기 / 저장 / 삭제 (테이블 projects) ---------- */
+export async function handleProjects(req, env) {
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    const id = new URL(req.url).searchParams.get('id');
+    const q = encodeURIComponent;
+    if (req.method === 'GET' && !id) return json({ projects: await db(env, 'projects?select=id,title,updated_at&order=updated_at.desc&limit=100') });
+    if (req.method === 'GET') {
+      const rows = await db(env, 'projects?id=eq.' + q(id) + '&select=id,title,data,updated_at');
+      return rows?.[0] ? json(rows[0]) : json({ error: '프로젝트 없음' }, 404);
+    }
+    if (req.method === 'PUT') {
+      const b = await req.json();
+      const pid = String(b.id || crypto.randomUUID());
+      await db(env, 'projects?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: pid, title: String(b.title || '새 무빙툰').slice(0, 200), data: b.data || {}, updated_at: new Date().toISOString() }) });
+      return json({ id: pid });
+    }
+    if (req.method === 'DELETE') {
+      if (!id) return json({ error: 'id 가 없습니다' }, 400);
+      await db(env, 'projects?id=eq.' + q(id), { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      return json({ ok: true });
+    }
+    return json({ error: '지원하지 않는 메서드' }, 405);
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
+/* ---------- 사용량·비용 기록 (테이블 usage_log) ---------- */
+export async function handleUsage(req, env) {
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    if (req.method === 'POST') {
+      const b = await req.json();
+      await db(env, 'usage_log', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({
+        project_id: b.project_id || null, kind: String(b.kind || '').slice(0, 40), provider: String(b.provider || '').slice(0, 40),
+        ok: !!b.ok, cost: +b.cost || 0, ms: +b.ms || null, error: b.msg ? String(b.msg).slice(0, 400) : null,
+      }) });
+      return json({ ok: true });
+    }
+    if (req.method === 'GET') {
+      const pid = new URL(req.url).searchParams.get('project_id');
+      const rows = await db(env, 'usage_log?select=created_at,kind,provider,ok,cost,ms,error&order=created_at.desc&limit=200' + (pid ? '&project_id=eq.' + encodeURIComponent(pid) : ''));
+      return json({ rows, total: rows.reduce((a, r) => a + (r.ok ? +r.cost || 0 : 0), 0) });
+    }
+    return json({ error: 'GET 또는 POST만 됩니다' }, 405);
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
+/* ---------- 로그인 확인 / 음성(OpenAI TTS) ---------- */
+export async function handleAdmin(req, env) {
+  return authed(req, env) ? json({ ok: true }) : json({ error: '비밀번호가 맞지 않습니다' }, 401);
+}
+/* Gemini TTS 는 16bit 24kHz 모노 PCM 을 주므로 WAV 헤더를 붙여 돌려준다 */
+function pcmToWav(pcm, rate = 24000) {
+  const h = new DataView(new ArrayBuffer(44)), w = (o, t) => [...t].forEach((c, i) => h.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); h.setUint32(4, 36 + pcm.length, true); w(8, 'WAVEfmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+  h.setUint32(24, rate, true); h.setUint32(28, rate * 2, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, pcm.length, true);
+  const out = new Uint8Array(44 + pcm.length); out.set(new Uint8Array(h.buffer)); out.set(pcm, 44); return out;
+}
+async function geminiTts(env, b) {
+  const key = env[ENV.gemini]; if (!key) return json({ error: 'GEMINI_API_KEY 없음', kind: 'auth' }, 502);
+  const model = b.model || 'gemini-2.5-flash-preview-tts';
+  const text = String(b.text || '').slice(0, 4000), style = String(b.instructions || '').slice(0, 500);
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: style ? style + ': ' + text : text }] }],
+      generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: b.voice || 'Kore' } } } },
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 || r.status === 403 ? 'auth' : 'bad' }, 502);
+  const d = j.candidates?.[0]?.content?.parts?.find(p => p.inlineData || p.inline_data);
+  const data = (d?.inlineData || d?.inline_data)?.data;
+  if (!data) return json({ error: '음성이 반환되지 않았습니다 (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '이유 불명') + ')', kind: 'empty' }, 502);
+  return json({ key: await r2Put(env, pcmToWav(unb64(data)), 'audio/wav', 'wav') });
+}
+export async function handleTts(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    const b = await req.json();
+    if (b.provider === 'gemini') return await geminiTts(env, b);
+    if (b.provider !== 'openai') return json({ error: '이 서버는 OpenAI·Gemini 음성만 지원합니다 (일레븐랩스 미구현)' }, 400);
+    const key = env[ENV.openai]; if (!key) return json({ error: 'OPENAI_API_KEY 없음', kind: 'auth' }, 502);
+    const body = { model: b.model || 'gpt-4o-mini-tts', voice: b.voice || 'coral', input: String(b.text || '').slice(0, 4000), speed: +b.speed || 1, response_format: 'mp3' };
+    if (b.instructions && !/^tts-1/.test(body.model)) body.instructions = String(b.instructions).slice(0, 1000);
+    const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : 'bad' }, 502); }
+    return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3') });
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
 /* 단독 Worker 로 쓸 때 */
 export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
     if (p === '/api/image') return handleImage(req, env);
     if (p === '/api/kling') return handleKling(req, env);
+    if (p === '/api/file') return handleFile(req, env);
+    if (p === '/api/projects') return handleProjects(req, env);
+    if (p === '/api/usage') return handleUsage(req, env);
+    if (p === '/api/tts') return handleTts(req, env);
+    if (p === '/api/admin') return handleAdmin(req, env);
     return json({ error: 'not found' }, 404);
   },
 };

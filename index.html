@@ -183,6 +183,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   <div class="brand">MANTRA<b>무빙툰 스튜디오</b></div>
   <input id="title" class="title-in" aria-label="프로젝트 제목" placeholder="프로젝트 제목">
   <div class="bar-r">
+    <span id="cloudSt" class="note" style="margin:0;white-space:nowrap"></span>
     <button type="button" id="costBadge" class="badge" title="성공한 호출 기준 추정 누적 비용 · 클릭하면 생성 기록">$0.00</button>
     <button type="button" class="b ghost sm" id="setBtn">설정</button>
     <button type="button" class="b ghost sm" id="helpBtn">도움말</button>
@@ -190,6 +191,9 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
       <button type="button" class="b ghost sm" id="fileBtn" aria-haspopup="true" aria-expanded="false">파일 ▾</button>
       <div class="menu-pop" id="fileMenu" hidden>
         <button type="button" data-m="new">새 프로젝트</button>
+        <hr>
+        <button type="button" data-m="cloudSave">클라우드에 저장 (Supabase)</button>
+        <button type="button" data-m="cloudOpen">클라우드에서 불러오기…</button>
         <hr>
         <button type="button" data-m="backup">백업 파일로 저장</button>
         <button type="button" data-m="import">백업 파일 불러오기</button>
@@ -261,7 +265,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
           <label>서버 주소 (같은 사이트면 비움)<input type="text" data-s="apiBase" placeholder="https://내사이트 (비우면 현재 주소)"></label>
           <label>관리자 비밀번호 (이 탭에만 기억)<input type="password" id="pwIn" autocomplete="current-password"></label>
         </div>
-        <p class="note">서버 모드는 <code>/api/image</code>·<code>/api/kling</code>·<code>/api/clipfile</code>·<code>/api/tts</code>를 씁니다. 앞의 둘은 함께 드린 <code>studio-api.js</code>로 추가하고, 뒤의 둘은 지금 관리자 페이지가 쓰는 것을 그대로 씁니다.</p>
+        <p class="note">서버 모드는 <code>functions/api/</code>의 <code>image·kling·file·tts·projects·usage·admin</code>을 씁니다. 프로젝트·파일·사용량은 Supabase에 저장되고, 키는 서버 환경변수에만 둡니다.</p>
       </fieldset>
       <p class="note warn" id="directWarn">직접 모드: 키가 이 브라우저에 저장되고 각 API로 직접 전송됩니다. 혼자 테스트할 때만 쓰세요.</p>
       <fieldset><legend>이미지 엔진</legend>
@@ -306,8 +310,10 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
       </fieldset>
       <fieldset><legend>대사 음성 (TTS)</legend>
         <div class="g2">
-          <label>엔진<select data-s="ttsEngine"><option value="openai">OpenAI</option><option value="eleven">일레븐랩스 (서버 모드)</option></select></label>
+          <label>엔진<select data-s="ttsEngine"><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="eleven">일레븐랩스 (서버 모드)</option></select></label>
           <label>목소리 (OpenAI 이름 또는 일레븐랩스 voice ID)<input type="text" data-s="ttsVoice" list="ttsVoices"></label>
+          <label>Gemini 목소리 (Kore, Puck, Zephyr, Charon, Aoede …)<input type="text" data-s="gmVoice" list="gmVoices"></label>
+          <label>Gemini 음성 모델<input type="text" data-s="gmTtsModel"></label>
           <label>OpenAI 모델<input type="text" data-s="ttsModel" list="ttsModels"></label>
           <label>일레븐랩스 모델<input type="text" data-s="elModel"></label>
           <label>속도<input type="number" step="0.05" min="0.25" max="4" data-s="ttsSpeed"></label>
@@ -338,6 +344,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 <datalist id="oaSizes"><option value="1024x1536"><option value="1024x1024"><option value="1536x1024"><option value="auto"></datalist>
 <datalist id="gmModels"><option value="gemini-2.5-flash-image"><option value="gemini-3.1-flash-image-preview"><option value="gemini-3-pro-image-preview"></datalist>
 <datalist id="ttsVoices"><option value="coral"><option value="nova"><option value="shimmer"><option value="sage"><option value="alloy"><option value="ash"><option value="ballad"><option value="echo"><option value="fable"><option value="onyx"><option value="verse"></datalist>
+<datalist id="gmVoices"><option value="Kore"><option value="Puck"><option value="Zephyr"><option value="Charon"><option value="Aoede"><option value="Leda"><option value="Fenrir"><option value="Orus"><option value="Sulafat"><option value="Achird"></datalist>
 <datalist id="ttsModels"><option value="gpt-4o-mini-tts"><option value="tts-1-hd"><option value="tts-1"></datalist>
 <datalist id="klModels"><option value="kling-v2-1"><option value="kling-v2-1-master"><option value="kling-v2-5-turbo"><option value="kling-v1-6"></datalist>
 
@@ -458,7 +465,7 @@ function rgba(hex, a) {
 const S_DEF = {
   mode: /^https?:$/.test(location.protocol) && !/^(localhost|127\.|\[::1\])/.test(location.hostname) ? 'server' : 'direct', apiBase: '',
   provider: 'auto', maxRefs: 6,
-  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', autoFit: true, cTts: 0.015,
+  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', gmVoice: 'Kore', gmTtsModel: 'gemini-2.5-flash-preview-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', autoFit: true, cTts: 0.015,
   oaKey: '', oaModel: 'gpt-image-2', oaSize: '1024x1536', oaQuality: 'medium',
   gmKey: '', gmModel: 'gemini-2.5-flash-image', gmAspect: '9:16',
   klAK: '', klSK: '', klBase: 'https://api-singapore.klingai.com', klModel: 'kling-v2-1', klFetchProxy: '',
@@ -485,8 +492,8 @@ async function srv(path, opt = {}) {
   return d;
 }
 const srvJSON = (path, body) => srv(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-/* 로컬 파일 → R2 키. 한 번 올린 파일은 P.keys에 기억해 다시 올리지 않는다 */
-async function uploadBlob(blob, name) { return (await srv('/api/clipfile?name=' + encodeURIComponent(name), { method: 'POST', body: blob })).key; }
+/* 로컬 파일 → Storage 키. 한 번 올린 파일은 P.keys에 기억해 다시 올리지 않는다 */
+async function uploadBlob(blob, name) { return (await srv('/api/file?name=' + encodeURIComponent(name), { method: 'POST', body: blob })).key; }
 async function ensureKey(cid, blob, name) {
   if (cid && P.keys[cid]) return P.keys[cid];
   const key = await uploadBlob(blob, name || (cid || uid()) + (/png/.test(blob.type) ? '.png' : /webm/.test(blob.type) ? '.webm' : /mp4/.test(blob.type) ? '.mp4' : /audio|mpeg/.test(blob.type) ? '.mp3' : '.jpg'));
@@ -494,8 +501,8 @@ async function ensureKey(cid, blob, name) {
   return key;
 }
 async function fetchKey(key) {
-  const r = await fetch(apiURL('/api/clipfile?k=' + encodeURIComponent(key)));
-  if (!r.ok) throw new Error('R2 파일을 받지 못했습니다 (' + r.status + ')');
+  const r = await fetch(apiURL('/api/file?k=' + encodeURIComponent(key)), { headers: { authorization: 'Bearer ' + PW } });
+  if (!r.ok) throw new Error('저장소 파일을 받지 못했습니다 (' + r.status + ')');
   return r.blob();
 }
 async function addAssetFromKey(key) { const id = await addAsset(await fetchKey(key)); P.keys[id] = key; return id; }
@@ -651,7 +658,72 @@ function save() {
   saveT = setTimeout(() => {
     const json = JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v));
     DB.put('kv', 'project', json).catch(() => toast('프로젝트 저장 실패 — 백업 파일로 저장하세요'));
+    cloudSaveSoon();
   }, 350);
+}
+
+/* =========================================================
+   Supabase 클라우드 저장 (서버 모드): 프로젝트 JSON → /api/projects, 파일 → /api/file(Storage)
+   파일은 한 번 올리면 P.keys에 키가 남아 다시 올리지 않는다. 브라우저 IndexedDB는 그대로 쓰는 로컬 캐시.
+   ========================================================= */
+let cloudT = null, cloudBusy = false, cloudDirty = false;
+function cloudSaveSoon() {
+  if (!isServer() || !PW) return;
+  clearTimeout(cloudT); cloudT = setTimeout(cloudSave, 4000);
+}
+async function cloudSave(manual) {
+  if (!isServer() || !PW) { if (manual) toast('서버 모드에서 관리자 비밀번호를 넣어야 클라우드에 저장됩니다'); return; }
+  if (cloudBusy) { cloudDirty = true; return; }
+  cloudBusy = true; cloudDirty = false; setCloudSt('저장 중…');
+  try {
+    for (const id of referencedIds()) {
+      const a = assets.get(id); if (a && !P.keys[id]) await ensureKey(id, a.blob);
+    }
+    const data = JSON.parse(JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v)));
+    data.log = []; // 사용량은 usage_log 테이블에 따로 쌓는다
+    const d = await srv('/api/projects', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: P.cloudId, title: P.title, data }) });
+    if (P.cloudId !== d.id) { P.cloudId = d.id; DB.put('kv', 'project', JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v))).catch(() => {}); }
+    setCloudSt('☁ 저장됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
+    if (manual) toast('클라우드에 저장했습니다');
+  } catch (e) { setCloudSt('☁ 저장 실패'); if (manual) toast('클라우드 저장 실패: ' + e.message, 4000); }
+  cloudBusy = false; if (cloudDirty) cloudSaveSoon();
+}
+function setCloudSt(t) { const el = document.getElementById('cloudSt'); if (el) el.textContent = t; }
+async function cloudOpenList() {
+  let d; try { d = await srv('/api/projects'); } catch (e) { return toast('목록을 불러오지 못했습니다: ' + e.message, 4000); }
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = '<form method="dialog" style="padding:18px 20px;min-width:min(420px,86vw)"><h3>클라우드 프로젝트</h3><div id="cpl" style="display:grid;gap:6px;max-height:50vh;overflow:auto"></div><div style="margin-top:14px;text-align:right"><button class="b ghost sm" value="x">닫기</button></div></form>';
+  const box = dlg.querySelector('#cpl');
+  if (!d.projects.length) box.innerHTML = '<p class="note">저장된 프로젝트가 없습니다.</p>';
+  d.projects.forEach(pr => {
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px;align-items:center';
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'b ghost sm'; open.style.cssText = 'flex:1;justify-content:flex-start';
+    open.textContent = (pr.title || '(제목 없음)') + ' · ' + new Date(pr.updated_at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    open.onclick = () => { dlg.close(); cloudOpen(pr.id); };
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'b danger sm'; del.textContent = '삭제';
+    del.onclick = async () => {
+      if (!confirm('클라우드에서 ‘' + pr.title + '’ 프로젝트를 삭제할까요? (되돌릴 수 없습니다)')) return;
+      try { await srv('/api/projects?id=' + encodeURIComponent(pr.id), { method: 'DELETE' }); row.remove(); } catch (e) { toast('삭제 실패: ' + e.message, 4000); }
+    };
+    row.append(open, del); box.append(row);
+  });
+  dlg.addEventListener('close', () => dlg.remove()); document.body.append(dlg); dlg.showModal();
+}
+async function cloudOpen(id) {
+  if (!confirm('지금 프로젝트를 클라우드 프로젝트로 바꿀까요? (현재 내용은 이 브라우저에만 남습니다)')) return;
+  try {
+    toast('클라우드에서 불러오는 중…', 8000);
+    const d = await srv('/api/projects?id=' + encodeURIComponent(id));
+    stop();
+    const pr = migrate(Object.assign(d.data, { cloudId: d.id, title: d.title, log: [] }));
+    for (const aid of new Set(Object.keys(pr.keys))) {
+      if (assets.has(aid) || aid.includes(':')) continue;
+      try { const blob = await fetchKey(pr.keys[aid]); assets.set(aid, { blob, url: URL.createObjectURL(blob) }); await DB.put('assets', aid, blob).catch(() => {}); }
+      catch (e) { /* 파일 하나가 없어도 나머지는 연다 */ }
+    }
+    P = pr; sel = P.panels[0].id; selOv = null; save(); renderAll(); updateCost(); toast('불러왔습니다');
+    if (P.panels.some(p => p.job?.status === 'processing')) ensurePolling();
+  } catch (e) { toast('불러오기 실패: ' + e.message, 4000); }
 }
 
 /* =========================================================
@@ -921,7 +993,7 @@ async function fetchBlob(url) {
   if (S.klFetchProxy) { const r = await fetch(S.klFetchProxy + encodeURIComponent(url)); if (r.ok) return await r.blob(); }
   throw new Error('완성된 영상 파일을 가져오지 못했습니다(CORS)');
 }
-/* 서버 모드: /api/kling 이 서명·전송을 맡고, 완성 영상을 R2에 저장해 키로 돌려준다(링크 만료·CORS 문제 없음) */
+/* 서버 모드: /api/kling 이 서명·전송을 맡고, 완성 영상을 Supabase Storage에 저장해 키로 돌려준다(링크 만료·CORS 문제 없음) */
 async function startKlingServer(p) {
   const img = await uploadBlob(await bakePanel(p, 'image/jpeg', 0.9), 'kling-in.jpg');
   let tail;
@@ -1031,7 +1103,10 @@ function jobText(job) {
 /* =========================================================
    기록·비용
    ========================================================= */
-function logCall(e) { P.log.push({ t: Date.now(), ...e }); if (P.log.length > 800) P.log.shift(); updateCost(); save(); }
+function logCall(e) {
+  P.log.push({ t: Date.now(), ...e }); if (P.log.length > 800) P.log.shift(); updateCost(); save();
+  if (isServer() && PW) srvJSON('/api/usage', { project_id: P.cloudId || null, kind: e.kind, provider: e.provider, ok: !!e.ok, cost: e.cost || 0, ms: e.ms, msg: e.msg }).catch(() => {});
+}
 function updateCost() { $('#costBadge').textContent = '$' + P.log.reduce((a, e) => a + (e.ok ? +e.cost || 0 : 0), 0).toFixed(2); }
 function renderLog() {
   const by = {};
@@ -1053,15 +1128,36 @@ function renderLog() {
    대사 음성 (TTS) — 서버 모드는 관리자 페이지와 같은 /api/tts 를 쓴다
    ========================================================= */
 /* 문장·목소리 설정 서명: 음성을 만든 뒤 바뀌었는지(다시 만들어야 하는지) 알려 준다 */
-const voiceSig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.ttsModel, S.ttsInstr, S.ttsSpeed, S.elModel].join('|')).toString(36);
+const voiceSig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.gmVoice, S.gmTtsModel, S.ttsModel, S.ttsInstr, S.ttsSpeed, S.elModel].join('|')).toString(36);
 const voiceStale = o => !!(o.voice && o.voice.sig !== voiceSig(o));
 async function ttsBlob(text, force) {
   if (isServer()) {
-    const body = S.ttsEngine === 'eleven'
+    const body = S.ttsEngine === 'gemini'
+      ? { provider: 'gemini', text, voice: S.gmVoice, model: S.gmTtsModel, instructions: S.ttsInstr, force: !!force }
+      : S.ttsEngine === 'eleven'
       ? { text, voiceId: S.ttsVoice, model: S.elModel, speed: +S.ttsSpeed || 1, force: !!force }
       : { provider: 'openai', text, voice: S.ttsVoice, model: S.ttsModel, instructions: S.ttsInstr, speed: +S.ttsSpeed || 1, force: !!force };
     const r = await srvJSON('/api/tts', body);
     return { blob: await fetchKey(r.key), key: r.key };
+  }
+  if (S.ttsEngine === 'gemini') {
+    if (!S.gmKey) throw new Error('Gemini 키가 없습니다');
+    let g;
+    try {
+      g = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(S.gmTtsModel) + ':generateContent?key=' + encodeURIComponent(S.gmKey), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: S.ttsInstr.trim() ? S.ttsInstr.trim() + ': ' + text : text }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: S.gmVoice } } } } }),
+      });
+    } catch (e) { throw new Error('네트워크 오류: ' + e.message); }
+    const j = await g.json().catch(() => ({}));
+    if (!g.ok) throw new Error(j.error?.message || 'HTTP ' + g.status);
+    const part = j.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+    if (!part) throw new Error('음성이 반환되지 않았습니다');
+    const pcm = Uint8Array.from(atob(part.inlineData.data), c => c.charCodeAt(0));
+    const hd = new DataView(new ArrayBuffer(44)), w = (o, t) => [...t].forEach((c, i) => hd.setUint8(o + i, c.charCodeAt(0)));
+    w(0, 'RIFF'); hd.setUint32(4, 36 + pcm.length, true); w(8, 'WAVEfmt '); hd.setUint32(16, 16, true); hd.setUint16(20, 1, true); hd.setUint16(22, 1, true);
+    hd.setUint32(24, 24000, true); hd.setUint32(28, 48000, true); hd.setUint16(32, 2, true); hd.setUint16(34, 16, true); w(36, 'data'); hd.setUint32(40, pcm.length, true);
+    return { blob: new Blob([hd, pcm], { type: 'audio/wav' }) };
   }
   if (S.ttsEngine !== 'openai') throw new Error('일레븐랩스 음성은 서버 모드에서만 만들 수 있습니다');
   if (!S.oaKey) throw new Error('OpenAI 키가 없습니다');
@@ -1781,7 +1877,7 @@ function tabText(p) {
     <div class="colors"><label>글자 <input type="color" data-f="color"></label><label>${o.kind === 'caption' ? '외곽' : '배경'} <input type="color" data-f="${o.kind === 'caption' ? 'stroke' : 'fill'}"></label>${o.kind === 'caption' ? '' : '<label>테두리 <input type="color" data-f="stroke"></label>'}</div>
     ${o.kind === 'caption' ? '' : sl('배경 불투명', 'fillA', 0, 1, 0.01)}${sl(o.kind === 'caption' ? '외곽 두께' : '테두리 두께', 'strokeW', 0, 12, 0.5, 'px')}
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">
-      <span class="lbl">대사 음성 · ${S.ttsEngine === 'eleven' ? '일레븐랩스' : 'OpenAI'} ${esc(S.ttsVoice)}${isServer() ? ' · 서버' : ''}</span>
+      <span class="lbl">대사 음성 · ${S.ttsEngine === 'eleven' ? '일레븐랩스' : S.ttsEngine === 'gemini' ? 'Gemini' : 'OpenAI'} ${esc(S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)}${isServer() ? ' · 서버' : ''}</span>
       <div class="row">
         <button type="button" class="b ghost sm" id="vGen" ${o._vbusy ? 'disabled' : ''}>${o._vbusy ? '만드는 중…' : !o.voice ? '🔊 음성 만들기' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>
         ${o.voice ? '<button type="button" class="b ghost sm" id="vPlay">▶ 듣기</button><button type="button" class="b danger sm" id="vDel">음성 빼기</button>' : ''}
@@ -1992,6 +2088,8 @@ fileMenu.onclick = async e => {
   if (m === 'import') $('#importFile').click();
   if (m === 'bgm') $('#bgmFile').click();
   if (m === 'bgmOff') { const id = P.bgm; P.bgm = null; dropAssetIfUnused(id); save(); toast('배경음악을 뺐습니다'); }
+  if (m === 'cloudSave') cloudSave(true);
+  if (m === 'cloudOpen') cloudOpenList();
   if (m === 'png') savePNG();
 };
 $('#bgmFile').onchange = async e => {
