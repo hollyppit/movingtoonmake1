@@ -1253,6 +1253,34 @@ async function loadVoices() {
   try { KLV = (await srv('/api/kling?op=voices')).voices || []; } catch (e) { toast('목소리 목록을 못 불러왔습니다: ' + e.message, 6000); return null; }
   return KLV;
 }
+/* 내 목소리: 샘플 음성(5~30초, 한 사람, 잡음 없음)을 클링에 올려 voice_id 를 만든다.
+   샘플은 설정의 음성(TTS)으로 한국어 문장을 읽혀 만들거나, 직접 녹음한 파일을 올린다 */
+const VOICE_SAMPLE = '안녕하세요. 저는 이 이야기의 주인공입니다. 오늘은 조금 특별한 하루가 될 것 같아요. 천천히 숨을 고르고, 제가 하고 싶은 말을 차분하게 들려드릴게요.';
+async function makeKlingVoice(c, file) {
+  const text = (c.vText || VOICE_SAMPLE).trim();
+  if (!file && text.length < 40) return toast('샘플 문장이 너무 짧습니다 (40자 이상, 5초 넘게 읽히도록)');
+  if (!confirm(file ? '올린 음성으로 클링 목소리를 만듭니다. 클링 크레딧이 사용될 수 있습니다.' : `설정의 음성(${S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice})으로 샘플을 만들어 클링 목소리로 등록합니다. 음성과 클링 크레딧이 사용될 수 있습니다.`)) return;
+  c._kst = '목소리 만드는 중…'; c._kbusy = true; renderChars();
+  try {
+    let key, blob;
+    if (file) { blob = file; key = await uploadBlob(file, file.name || 'voice.mp3'); }
+    else { const r = await ttsBlob(text, true); blob = r.blob; key = r.key; }
+    const dur = (await actx().decodeAudioData(await blob.arrayBuffer())).duration;
+    if (dur < 5 || dur > 30) throw new Error(`음성 길이가 ${dur.toFixed(1)}초입니다. 5~30초여야 합니다`);
+    const { taskId } = await srvJSON('/api/kling', { op: 'voice', name: (klName(c) || '캐릭터').slice(0, 12) + ' 목소리', key });
+    let v = null;
+    for (let i = 0; i < 40 && !v; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const d = await srv('/api/kling?op=voice&id=' + encodeURIComponent(taskId));
+      if (d.status === 'succeed') v = d.voice;
+      else if (d.status === 'failed') throw new Error(d.error || '목소리 등록 실패');
+    }
+    if (!v) throw new Error('시간이 너무 오래 걸립니다. 잠시 후 목록을 다시 불러와 보세요');
+    c.voice = v; if (KLV) KLV = [v, ...KLV.filter(x => x.id !== v.id)];
+    c._kst = '목소리 완성 — 아래에서 미리 듣고, 마음에 들면 캐릭터 등록을 누르세요';
+  } catch (e) { c._kst = '실패: ' + e.message; }
+  c._kbusy = false; save(); renderChars();
+}
 /* 캐릭터(이미지+목소리)를 클링에 등록하고 element_id 를 저장한다 */
 async function registerKlingChar(c) {
   if (!c.voice?.id) return toast('먼저 목소리를 고르세요');
@@ -1971,6 +1999,9 @@ function renderChars() {
       ${isServer() ? `<div class="kv">
         <div class="row"><select class="vs" aria-label="캐릭터 목소리"></select><button type="button" class="b ghost sm vl">${KLV ? '다시 불러오기' : '목소리 목록'}</button></div>
         <audio class="vp" controls hidden style="width:100%;height:32px"></audio>
+        <span class="lbl">내 목소리 만들기 — 한국어 샘플 문장(5~30초 분량)을 설정의 음성으로 읽혀 클링 목소리로 만듭니다</span>
+        <textarea class="vt" rows="3"></textarea>
+        <div class="row"><button type="button" class="b ghost sm vm" ${c._kbusy ? 'disabled' : ''}>TTS로 목소리 만들기</button><label class="b ghost sm">녹음 파일 올리기<input type="file" class="vf" accept="audio/*" hidden></label></div>
         <div class="row"><button type="button" class="b ghost sm vr" ${c._kbusy ? 'disabled' : ''}>${c._kbusy ? '등록 중…' : c.kEl?.id && c.kEl.sig === klSig(c) ? '클링 캐릭터 다시 등록' : '클링 캐릭터 등록'}</button></div>
         <div class="st ${/^실패/.test(c._kst || '') ? 'err' : ''}">${esc(c._kst || (c.kEl?.id ? (c.kEl.sig === klSig(c) ? '등록됨 — 소리를 켠 컷에 자동으로 붙습니다' : '이미지·목소리·이름이 바뀌었습니다. 다시 등록하세요') : '목소리를 고르고 등록하면 영상에서 같은 목소리가 쓰입니다'))}</div>
       </div>` : ''}`;
@@ -1978,12 +2009,15 @@ function renderChars() {
     const vs = d.querySelector('.vs');
     if (vs) {
       const vp = d.querySelector('.vp');
-      const list = KLV || (c.voice ? [c.voice] : []);
+      const list = KLV ? (c.voice && !KLV.some(v => v.id === c.voice.id) ? [c.voice, ...KLV] : KLV) : (c.voice ? [c.voice] : []);
+      const vt = d.querySelector('.vt'); vt.value = c.vText ?? VOICE_SAMPLE; vt.oninput = () => { c.vText = vt.value; save(); };
+      d.querySelector('.vm').onclick = () => makeKlingVoice(c);
+      d.querySelector('.vf').onchange = e => { const f = e.target.files[0]; if (f) makeKlingVoice(c, f); };
       vs.innerHTML = '<option value="">(목소리 없음)</option>' + list.map(v => `<option value="${esc(v.id)}">${esc(v.name || v.id)}</option>`).join('');
       vs.value = c.voice?.id || '';
-      const show = () => { const v = (KLV || []).find(x => x.id === vs.value) || (c.voice?.id === vs.value ? c.voice : null); vp.hidden = !(v && v.trial); if (v && v.trial) vp.src = v.trial; };
+      const show = () => { const v = list.find(x => x.id === vs.value); vp.hidden = !(v && v.trial); if (v && v.trial) vp.src = v.trial; };
       show();
-      vs.onchange = () => { const v = (KLV || []).find(x => x.id === vs.value); c.voice = v ? { id: v.id, name: v.name, trial: v.trial } : null; save(); show(); renderChars(); };
+      vs.onchange = () => { const v = list.find(x => x.id === vs.value); c.voice = v ? { id: v.id, name: v.name, trial: v.trial, own: v.own } : null; save(); show(); renderChars(); };
       d.querySelector('.vl').onclick = async () => { KLV = null; if (await loadVoices()) renderChars(); };
       d.querySelector('.vr').onclick = () => registerKlingChar(c);
     }

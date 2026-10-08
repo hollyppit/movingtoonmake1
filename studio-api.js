@@ -214,11 +214,36 @@ async function klingNew(env, path, opt = {}) {
 }
 /* 캐릭터(Element) = 외형 이미지 + 목소리. 영상 요청에 element 로 붙이면 같은 얼굴·목소리로 나온다.
    GET ?op=voices → 클링 기본 목소리 목록 / POST {op:'element'} → 등록 시작(taskId) / GET ?op=element&id= → 등록 결과(elementId) */
+/* 비공개 저장소 파일을 클링이 내려받을 수 있게 1시간짜리 서명 주소를 만든다 */
+async function signedUrl(env, key) {
+  const c = sb(env);
+  const r = await fetch(c.url + '/storage/v1/object/sign/' + c.bucket + '/' + key.split('/').map(encodeURIComponent).join('/'), { method: 'POST', headers: { ...c.h, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 3600 }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.signedURL) throw new Error('서명 주소를 만들지 못했습니다: ' + (j.message || j.error || r.status));
+  return c.url + '/storage/v1' + j.signedURL;
+}
 async function handleKlingElement(req, env, who, op) {
   if (op === 'voices' && req.method === 'GET') {
-    const list = await klingNew(env, '/v1/general/presets-voices?pageNum=1&pageSize=500');
-    const voices = (Array.isArray(list) ? list : []).flatMap(t => t.task_result?.voices || []).map(v => ({ id: v.voice_id, name: v.voice_name, trial: v.trial_url }));
-    return json({ voices });
+    const pick = (list, own) => (Array.isArray(list) ? list : []).flatMap(t => t.task_result?.voices || []).map(v => ({ id: v.voice_id, name: v.voice_name + (own ? ' (내 목소리)' : ''), trial: v.trial_url, own }));
+    const mine = await klingNew(env, '/v1/general/custom-voices?pageNum=1&pageSize=500').catch(() => []);
+    const preset = await klingNew(env, '/v1/general/presets-voices?pageNum=1&pageSize=500');
+    return json({ voices: [...pick(mine, true), ...pick(preset, false)] });
+  }
+  if (op === 'voice' && req.method === 'POST') {
+    const b = await req.json();
+    const d = await klingNew(env, '/v1/general/custom-voices', { method: 'POST', body: JSON.stringify({ voice_name: String(b.name || '내 목소리').slice(0, 20), voice_url: await signedUrl(env, safeKey(b.key, who)) }) });
+    return json({ taskId: d.task_id });
+  }
+  if (op === 'voice' && req.method === 'GET') {
+    const id = new URL(req.url).searchParams.get('id');
+    if (!id) return json({ error: 'id 가 없습니다' }, 400);
+    const d = await klingNew(env, '/v1/general/custom-voices/' + encodeURIComponent(id));
+    if (d?.task_status === 'succeed') {
+      const v = d.task_result?.voices?.[0];
+      return v?.voice_id ? json({ status: 'succeed', voice: { id: v.voice_id, name: v.voice_name, trial: v.trial_url, own: true } }) : json({ status: 'failed', error: '결과에 voice_id 가 없습니다' });
+    }
+    if (d?.task_status === 'failed') return json({ status: 'failed', error: d.task_status_msg || '클링에서 목소리 등록에 실패했습니다' });
+    return json({ status: d?.task_status || 'processing' });
   }
   if (op === 'element' && req.method === 'GET') {
     const id = new URL(req.url).searchParams.get('id');
@@ -249,7 +274,7 @@ async function handleKlingElement(req, env, who, op) {
 }
 async function handleKlingNew(req, env, who) {
   const op = new URL(req.url).searchParams.get('op') || (req.method === 'POST' ? await req.clone().json().then(j => j.op, () => '') : '');
-  if (op === 'voices' || op === 'element') return handleKlingElement(req, env, who, op);
+  if (op === 'voices' || op === 'element' || op === 'voice') return handleKlingElement(req, env, who, op);
   if (req.method === 'POST') {
     const b = await req.json();
     const img = await r2Get(env, String(b.image || ''), who);
