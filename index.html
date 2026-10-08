@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&family=Gothic+A1:wght@400;500;700;900&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Myeongjo:wght@400;700;800&family=Gowun+Dodum&family=Gowun+Batang:wght@400;700&family=Do+Hyeon&family=Black+Han+Sans&family=Jua&family=Yeon+Sung&family=Sunflower:wght@500&family=Stylish&family=Gugi&family=Hi+Melody&family=Gaegu:wght@400&family=Gamja+Flower&family=Poor+Story&family=Single+Day&family=Cute+Font&family=East+Sea+Dokdo&family=Dokdo&family=Nanum+Pen+Script&family=Nanum+Brush+Script&family=Kirang+Haerang&family=Song+Myung&family=Black+And+White+Picture&family=Dongle:wght@400&family=Bagel+Fat+One&family=Hahmlet:wght@400;700&family=Orbit&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
 <style>
 /* 사주 무빙툰 사이트(index.html)와 같은 색·글꼴 체계 */
 :root {
@@ -200,6 +201,16 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   .stage-wrap { height: 64vh; flex: none; }
 }
 @media (max-width: 480px) { .g2 { grid-template-columns: 1fr; } .vers { grid-template-columns: repeat(3, 1fr); } }
+.who { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--ink-2); max-width: 150px; }
+.who img { width: 24px; height: 24px; border-radius: 50%; }
+.who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pmgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; max-height: 58vh; overflow: auto; }
+.pmcard { border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel); padding: 8px; display: grid; gap: 6px; align-content: start; }
+.pmcard.cur { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.pmth { aspect-ratio: 4 / 3; background: var(--panel-2); border-radius: 3px; display: grid; place-items: center; overflow: hidden; }
+.pmth img { width: 100%; height: 100%; object-fit: contain; }
+.pmti { font-weight: 500; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .pmti small { color: var(--gold); font-weight: 400; }
+.pmcard .row { gap: 4px; flex-wrap: wrap; }
 .views { display: flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px; }
 .views button { border: 0; background: none; padding: 4px 14px; border-radius: 999px; cursor: pointer; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
 .views button[aria-pressed=true] { background: var(--gold); color: #fff; }
@@ -221,6 +232,8 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   <input id="title" class="title-in" aria-label="프로젝트 제목" placeholder="프로젝트 제목">
   <select id="aspectSel" aria-label="화면 비율" title="화면 비율" style="width:auto;min-height:30px;padding:3px 8px;font-size:.8rem"><option value="9:16">세로 9:16 (쇼츠·릴스)</option><option value="16:9">가로 16:9 (유튜브)</option><option value="1:1">정사각 1:1</option></select>
   <div class="bar-r">
+    <span id="authBox" style="display:flex;align-items:center;gap:6px"></span>
+    <button type="button" class="b ghost sm" id="projBtn" title="프로젝트별 저장·불러오기">내 프로젝트</button>
     <span id="cloudSt" class="note" style="margin:0;white-space:nowrap"></span>
     <button type="button" id="costBadge" class="badge" title="성공한 호출 기준 추정 누적 비용 · 클릭하면 생성 기록">$0.00</button>
     <button type="button" class="b ghost sm" id="setBtn">설정</button>
@@ -230,8 +243,8 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
       <div class="menu-pop" id="fileMenu" hidden>
         <button type="button" data-m="new">새 프로젝트</button>
         <hr>
-        <button type="button" data-m="cloudSave">클라우드에 저장 (Supabase)</button>
-        <button type="button" data-m="cloudOpen">클라우드에서 불러오기…</button>
+        <button type="button" data-m="cloudSave">지금 프로젝트 클라우드에 저장</button>
+        <button type="button" data-m="cloudOpen">내 프로젝트 (불러오기·새로 만들기)…</button>
         <hr>
         <button type="button" data-m="backup">백업 파일로 저장</button>
         <button type="button" data-m="import">백업 파일 불러오기</button>
@@ -572,7 +585,7 @@ let PW = ''; try { PW = sessionStorage.getItem('mt_pw') || ''; } catch (e) { /* 
 function setPW(v) { PW = v || ''; try { if (PW) sessionStorage.setItem('mt_pw', PW); else sessionStorage.removeItem('mt_pw'); } catch (e) { /* 차단 */ } }
 const apiURL = p => (S.apiBase || '').replace(/\/+$/, '') + p;
 async function srv(path, opt = {}) {
-  opt.headers = Object.assign(PW ? { authorization: 'Bearer ' + PW } : {}, opt.headers || {}); // 비밀번호는 서버가 요구할 때만 쓴다
+  opt.headers = Object.assign(await authHeader(), opt.headers || {}); // 로그인 토큰이 있으면 그것을, 없으면(서버가 요구할 때만) 비밀번호를 쓴다
   let r;
   try { r = await fetch(apiURL(path), opt); } catch (e) { throw new GenError('server', 'network', '서버 연결 실패: ' + e.message); }
   const d = await r.json().catch(() => ({}));
@@ -589,7 +602,7 @@ async function ensureKey(cid, blob, name) {
   return key;
 }
 async function fetchKey(key) {
-  const r = await fetch(apiURL('/api/file?k=' + encodeURIComponent(key)), { headers: PW ? { authorization: 'Bearer ' + PW } : {} });
+  const r = await fetch(apiURL('/api/file?k=' + encodeURIComponent(key)), { headers: await authHeader() });
   if (!r.ok) throw new Error('저장소 파일을 받지 못했습니다 (' + r.status + ')');
   return r.blob();
 }
@@ -756,65 +769,143 @@ function save() {
 }
 
 /* =========================================================
-   Supabase 클라우드 저장 (서버 모드): 프로젝트 JSON → /api/projects, 파일 → /api/file(Storage)
-   파일은 한 번 올리면 P.keys에 키가 남아 다시 올리지 않는다. 브라우저 IndexedDB는 그대로 쓰는 로컬 캐시.
+   Google 로그인(Supabase Auth) + 프로젝트별 클라우드 저장·불러오기 (서버 모드)
+   프로젝트 JSON → /api/projects, 파일 → /api/file(Storage). 로그인한 사용자마다 목록·파일이 분리된다.
+   파일은 한 번 올리면 P.keys에 키가 남아 다시 올리지 않는다. 브라우저 IndexedDB는 로컬 캐시.
    ========================================================= */
-let cloudT = null, cloudBusy = false, cloudDirty = false;
+let sbClient = null, authInfo = null;
+const curUid = () => authInfo?.id || null;
+async function authHeader() {
+  if (sbClient) { try { const { data } = await sbClient.auth.getSession(); if (data.session?.access_token) return { authorization: 'Bearer ' + data.session.access_token }; } catch (e) { /* 아래 비밀번호 방식으로 */ } }
+  return PW ? { authorization: 'Bearer ' + PW } : {};
+}
+async function initAuth() {
+  if (!isServer()) { renderAuth(); return; }
+  try {
+    const c = await (await fetch(apiURL('/api/config'))).json();
+    if (c.google && window.supabase) {
+      sbClient = window.supabase.createClient(c.url, c.anon, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+      const { data } = await sbClient.auth.getSession(); authInfo = data.session?.user || null;
+      sbClient.auth.onAuthStateChange((ev, session) => { const was = curUid(); authInfo = session?.user || null; renderAuth(); if (curUid() !== was) onAuthChanged(); });
+    }
+  } catch (e) { /* 설정을 못 읽으면 로그인 없이 진행 */ }
+  renderAuth();
+}
+function renderAuth() {
+  const box = $('#authBox'); if (!box) return;
+  if (!sbClient) { box.innerHTML = ''; return; }
+  if (authInfo) {
+    const m = authInfo.user_metadata || {};
+    box.innerHTML = '<span class="who" title="' + esc(authInfo.email || '') + '">' + (m.avatar_url ? '<img src="' + esc(m.avatar_url) + '" alt="" referrerpolicy="no-referrer">' : '') + '<span>' + esc(m.full_name || authInfo.email || '') + '</span></span><button type="button" class="b ghost sm" id="logoutBtn">로그아웃</button>';
+    $('#logoutBtn').onclick = async () => { await sbClient.auth.signOut(); };
+  } else {
+    box.innerHTML = '<button type="button" class="b sm" id="loginBtn"><b>G</b> Google로 로그인</button>';
+    $('#loginBtn').onclick = () => sbClient.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+  }
+}
+function onAuthChanged() {
+  setCloudSt('');
+  if (curUid()) { toast('로그인했습니다 — ' + (authInfo.email || ''), 3000); openProjectManager(); }
+  else toast('로그아웃했습니다. 이 브라우저의 작업은 그대로 남아 있습니다.', 3500);
+}
+
+let cloudT = null, cloudBusy = false, cloudDirty = false, thumbSig = '';
 function cloudSaveSoon() {
   if (!isServer()) return;
   clearTimeout(cloudT); cloudT = setTimeout(cloudSave, 4000);
 }
-async function cloudSave(manual) {
-  if (!isServer()) { if (manual) toast('클라우드 저장은 서버 모드에서만 됩니다'); return; }
-  if (cloudBusy) { cloudDirty = true; return; }
-  cloudBusy = true; cloudDirty = false; setCloudSt('저장 중…');
+async function projThumb() { // 목록에 보일 작은 미리보기 (첫 그림 컷이 바뀌었을 때만 새로 만든다)
+  const p = P.panels.find(x => curAsset(x)); if (!p) return null;
   try {
+    const sig = cutSig(p); if (sig === thumbSig) return null;
+    const c = await renderCutCanvas(p, { text: true, maxSide: 220 }); thumbSig = sig; return c.toDataURL('image/jpeg', 0.7);
+  } catch (e) { return null; }
+}
+/* 저장하면 true, 못 하면 false */
+async function cloudSave(manual) {
+  if (!isServer()) { if (manual) toast('클라우드 저장은 서버 모드에서만 됩니다'); return false; }
+  if (cloudBusy) { cloudDirty = true; return false; }
+  cloudBusy = true; cloudDirty = false; setCloudSt('저장 중…');
+  let ok = false;
+  try {
+    if (P.cloudId && (P.cloudOwner || null) !== curUid()) P.cloudId = undefined; // 다른 사용자(또는 공용)의 프로젝트였다면 내 계정에 새로 저장
     for (const id of referencedIds()) {
       const a = assets.get(id); if (a && !P.keys[id]) await ensureKey(id, a.blob);
     }
     const data = JSON.parse(JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v)));
     data.log = []; // 사용량은 usage_log 테이블에 따로 쌓는다
-    const d = await srv('/api/projects', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: P.cloudId, title: P.title, data }) });
-    if (P.cloudId !== d.id) { P.cloudId = d.id; DB.put('kv', 'project', JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v))).catch(() => {}); }
+    const d = await srv('/api/projects', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: P.cloudId, title: P.title, data, thumb: await projThumb() }) });
+    if (P.cloudId !== d.id || P.cloudOwner !== curUid()) { P.cloudId = d.id; P.cloudOwner = curUid(); DB.put('kv', 'project', JSON.stringify(P, (k, v) => (k.startsWith('_') ? undefined : v))).catch(() => {}); }
     setCloudSt('☁ 저장됨 ' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }));
     if (manual) toast('클라우드에 저장했습니다');
+    ok = true;
   } catch (e) { setCloudSt('☁ 저장 실패'); if (manual) toast('클라우드 저장 실패: ' + e.message, 4000); }
   cloudBusy = false; if (cloudDirty) cloudSaveSoon();
+  return ok;
 }
 function setCloudSt(t) { const el = document.getElementById('cloudSt'); if (el) el.textContent = t; }
-async function cloudOpenList() {
+
+/* 내 프로젝트: 목록·열기·새로 만들기·이름 바꾸기·복제·삭제 */
+async function openProjectManager() {
+  if (!isServer()) return toast('프로젝트 저장·불러오기는 서버 모드에서 됩니다 (설정 → 모드)');
   let d; try { d = await srv('/api/projects'); } catch (e) { return toast('목록을 불러오지 못했습니다: ' + e.message, 4000); }
-  const dlg = document.createElement('dialog');
-  dlg.innerHTML = '<form method="dialog" style="padding:18px 20px;min-width:min(420px,86vw)"><h3>클라우드 프로젝트</h3><div id="cpl" style="display:grid;gap:6px;max-height:50vh;overflow:auto"></div><div style="margin-top:14px;text-align:right"><button class="b ghost sm" value="x">닫기</button></div></form>';
-  const box = dlg.querySelector('#cpl');
-  if (!d.projects.length) box.innerHTML = '<p class="note">저장된 프로젝트가 없습니다.</p>';
+  document.querySelectorAll('#dlgProj').forEach(x => x.remove());
+  const dlg = document.createElement('dialog'); dlg.id = 'dlgProj'; dlg.style.width = 'min(780px, 94vw)';
+  dlg.innerHTML = '<form method="dialog" style="padding:18px 20px"><div class="sec-h"><h3>내 프로젝트</h3><span class="note" style="margin:0">' + esc(authInfo?.email || (sbClient ? '로그인하지 않음 — 공용 영역' : '')) + '</span></div>' +
+    '<div class="row" style="margin:8px 0 12px"><button type="button" class="b sm" id="pmNew">+ 새 프로젝트</button><button type="button" class="b ghost sm" id="pmSave">지금 프로젝트 저장</button></div>' +
+    '<div class="pmgrid" id="pmGrid"></div><div style="margin-top:14px;text-align:right"><button class="b ghost sm" value="x">닫기</button></div></form>';
+  const grid = dlg.querySelector('#pmGrid'), reopen = () => { dlg.close(); openProjectManager(); };
+  if (!d.projects.length) grid.innerHTML = '<p class="note">저장된 프로젝트가 없습니다. “지금 프로젝트 저장”을 눌러 보세요.</p>';
   d.projects.forEach(pr => {
-    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px;align-items:center';
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'b ghost sm'; open.style.cssText = 'flex:1;justify-content:flex-start';
-    open.textContent = (pr.title || '(제목 없음)') + ' · ' + new Date(pr.updated_at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    open.onclick = () => { dlg.close(); cloudOpen(pr.id); };
-    const del = document.createElement('button'); del.type = 'button'; del.className = 'b danger sm'; del.textContent = '삭제';
-    del.onclick = async () => {
-      if (!confirm('클라우드에서 ‘' + pr.title + '’ 프로젝트를 삭제할까요? (되돌릴 수 없습니다)')) return;
-      try { await srv('/api/projects?id=' + encodeURIComponent(pr.id), { method: 'DELETE' }); row.remove(); } catch (e) { toast('삭제 실패: ' + e.message, 4000); }
+    const cur = pr.id === P.cloudId && (P.cloudOwner || null) === curUid(), card = document.createElement('div'); card.className = 'pmcard' + (cur ? ' cur' : '');
+    card.innerHTML = '<div class="pmth">' + (pr.thumb ? '<img src="' + esc(pr.thumb) + '" alt="">' : '<span class="note">미리보기 없음</span>') + '</div><div class="pmti">' + esc(pr.title || '(제목 없음)') + (cur ? ' <small>· 지금 작업 중</small>' : '') + '</div>' +
+      '<div class="note" style="margin:0">' + new Date(pr.updated_at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + '</div>' +
+      '<div class="row"><button type="button" class="b sm" data-a="open">' + (cur ? '다시 불러오기' : '열기') + '</button><button type="button" class="b ghost sm" data-a="rename">이름</button><button type="button" class="b ghost sm" data-a="dup">복제</button><button type="button" class="b danger sm" data-a="del">삭제</button></div>';
+    card.onclick = async e => {
+      const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+      try {
+        if (a === 'open') { dlg.close(); cloudOpen(pr.id); }
+        else if (a === 'rename') {
+          const t = prompt('프로젝트 이름', pr.title || ''); if (t === null || !t.trim()) return;
+          await srv('/api/projects?id=' + encodeURIComponent(pr.id), { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t.trim() }) });
+          if (cur) { P.title = t.trim(); $('#title').value = P.title; save(); }
+          reopen();
+        } else if (a === 'dup') {
+          const full = await srv('/api/projects?id=' + encodeURIComponent(pr.id));
+          await srv('/api/projects', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: (pr.title || '새 무빙툰') + ' (복사)', data: { ...full.data, cloudId: undefined }, thumb: full.thumb }) });
+          toast('복제했습니다'); reopen();
+        } else if (a === 'del') {
+          if (!confirm('‘' + pr.title + '’ 프로젝트를 삭제할까요? (되돌릴 수 없습니다)')) return;
+          await srv('/api/projects?id=' + encodeURIComponent(pr.id), { method: 'DELETE' });
+          if (cur) { P.cloudId = undefined; save(); }
+          card.remove();
+        }
+      } catch (err) { toast('실패: ' + err.message, 4000); }
     };
-    row.append(open, del); box.append(row);
+    grid.append(card);
   });
+  dlg.querySelector('#pmSave').onclick = async () => { P.cloudId = P.cloudId; const ok = await cloudSave(true); if (ok) reopen(); };
+  dlg.querySelector('#pmNew').onclick = async () => {
+    const t = prompt('새 프로젝트 이름', '새 무빙툰'); if (t === null) return;
+    if (!(await cloudSave(false)) && !confirm('지금 프로젝트를 클라우드에 저장하지 못했습니다. 그래도 새로 시작할까요? (이 브라우저의 작업은 사라집니다)')) return;
+    stop(); const old = referencedIds(); P = defaultProject(); P.title = t.trim() || '새 무빙툰'; old.forEach(dropAssetIfUnused); sel = P.panels[0].id; selOv = null; selLayer = null; thumbSig = '';
+    save(); renderAll(); await cloudSave(false); reopen();
+  };
   dlg.addEventListener('close', () => dlg.remove()); document.body.append(dlg); dlg.showModal();
 }
 async function cloudOpen(id) {
-  if (!confirm('지금 프로젝트를 클라우드 프로젝트로 바꿀까요? (현재 내용은 이 브라우저에만 남습니다)')) return;
   try {
-    toast('클라우드에서 불러오는 중…', 8000);
+    await cloudSave(false); // 지금 작업을 먼저 저장해 둔다
+    toast('불러오는 중…', 8000);
     const d = await srv('/api/projects?id=' + encodeURIComponent(id));
     stop();
-    const pr = migrate(Object.assign(d.data, { cloudId: d.id, title: d.title, log: [] }));
+    const pr = migrate(Object.assign(d.data, { cloudId: d.id, cloudOwner: curUid(), title: d.title, log: [] }));
     for (const aid of new Set(Object.keys(pr.keys))) {
       if (assets.has(aid) || aid.includes(':')) continue;
       try { const blob = await fetchKey(pr.keys[aid]); assets.set(aid, { blob, url: URL.createObjectURL(blob) }); await DB.put('assets', aid, blob).catch(() => {}); }
       catch (e) { /* 파일 하나가 없어도 나머지는 연다 */ }
     }
-    P = pr; sel = P.panels[0].id; selOv = null; save(); renderAll(); updateCost(); toast('불러왔습니다');
+    P = pr; sel = P.panels[0].id; selOv = null; selLayer = null; thumbSig = ''; save(); renderAll(); updateCost(); toast('‘' + P.title + '’ 프로젝트를 열었습니다');
     if (P.panels.some(p => p.job?.status === 'processing')) ensurePolling();
   } catch (e) { toast('불러오기 실패: ' + e.message, 4000); }
 }
@@ -3176,7 +3267,7 @@ fileMenu.onclick = async e => {
   if (m === 'bgm') $('#bgmFile').click();
   if (m === 'bgmOff') { const id = P.bgm; P.bgm = null; dropAssetIfUnused(id); save(); toast('배경음악을 뺐습니다'); }
   if (m === 'cloudSave') cloudSave(true);
-  if (m === 'cloudOpen') cloudOpenList();
+  if (m === 'cloudOpen') openProjectManager();
   if (m === 'cutImgs') openCutExport();
   if (m === 'png') savePNG();
 };
@@ -3223,7 +3314,7 @@ $$('[data-test]', setForm).forEach(b => (b.onclick = async () => {
   readSettings(); const t = b.dataset.test, st = $('#testSt'); st.className = 'st'; st.textContent = `${PROV[t]} 확인 중…`;
   try {
     if (t === 'server') {
-      const r = await fetch(apiURL('/api/admin'), { method: 'POST', headers: PW ? { authorization: 'Bearer ' + PW } : {} });
+      const r = await fetch(apiURL('/api/admin'), { method: 'POST', headers: await authHeader() });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || '로그인 실패 (' + r.status + ')');
     } else if (isServer() && t !== 'kling') {
       throw new Error('서버 모드에서는 키가 서버에 있어 여기서 확인할 수 없습니다. 컷 하나를 생성해 보세요.');
@@ -3300,6 +3391,7 @@ function applyAspect() {
   fitStage(); requestDraw();
 }
 new ResizeObserver(fitStage).observe($('#stageWrap')); window.addEventListener('resize', fitStage);
+$('#projBtn').onclick = () => openProjectManager();
 $('#aspectSel').onchange = e => {
   if (P.panels.some(p => curAsset(p)) && !confirm('화면 비율을 바꾸면 기존 이미지는 새 비율에 맞춰 잘려서 보입니다. 이미지는 새 비율로 다시 만드는 것을 권합니다. 바꿀까요?')) { e.target.value = P.aspect || '9:16'; return; }
   P.aspect = e.target.value; applyAspect(); save(); renderAll(); toast('화면 비율: ' + e.target.value);
@@ -3322,6 +3414,7 @@ function renderAll() { applyAspect(); if (typeof view !== 'undefined' && view ==
   sel = P.panels[0].id;
   scrubT = panelDur(P.panels[0]);
   renderAll();
+  initAuth();
   document.fonts.ready.then(requestDraw);
   if (P.panels.some(p => p.job?.status === 'processing')) ensurePolling();
   else if (!isServer() && !S.oaKey && !S.gmKey) setTimeout(() => toast('먼저 ‘설정’에서 OpenAI 또는 Gemini 키를 넣으세요 (또는 서버 모드)', 4200), 600);

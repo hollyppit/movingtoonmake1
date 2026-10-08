@@ -3,7 +3,9 @@
 
 create table if not exists public.projects (
   id         uuid primary key default gen_random_uuid(),
+  owner      uuid,                       -- 로그인한 사용자 id (Supabase Auth). 비어 있으면 공용
   title      text not null default '새 무빙툰',
+  thumb      text,                       -- 목록 미리보기용 작은 JPEG(data URL)
   data       jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -12,6 +14,7 @@ create index if not exists projects_updated_idx on public.projects (updated_at d
 create table if not exists public.usage_log (
   id         bigint generated always as identity primary key,
   created_at timestamptz not null default now(),
+  owner      uuid,
   project_id uuid,
   kind       text,
   provider   text,
