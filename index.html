@@ -287,7 +287,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
       <div id="charList" class="grp"></div>
     </section>
     <section class="sec">
-      <div class="sec-h"><h3>컷</h3><button type="button" class="b ghost sm" id="addPanel">+ 컷</button></div>
+      <div class="sec-h"><h3>컷</h3><span><label class="b ghost sm" title="이미지를 여러 장 고르면 파일 이름 순서대로 컷이 자동으로 만들어집니다">이미지로 컷 만들기<input type="file" accept="image/*" id="cutsUp" multiple hidden></label> <button type="button" class="b ghost sm" id="addPanel">+ 컷</button></span></div>
       <ol id="panelList" class="plist"></ol>
       <p class="note" id="totalNote"></p>
     </section>
@@ -466,16 +466,17 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   <div class="dlg-h"><h3>스케치 패드 — 구도·포즈·동작을 직접 그려 보세요</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
   <div class="dlg-b">
     <div class="padtools">
-      <button type="button" class="b ghost sm" id="padPen" aria-pressed="true">🖊️ 펜</button>
-      <button type="button" class="b ghost sm" id="padEraser" aria-pressed="false">🧹 지우개</button>
+      <button type="button" class="b ghost sm" id="padPen" aria-pressed="true" title="단축키 P">🖊️ 펜</button>
+      <button type="button" class="b ghost sm" id="padEraser" aria-pressed="false" title="단축키 E">🧹 지우개</button>
       <span id="padColors"></span>
-      <label class="note">굵기 <input type="range" id="padSize" min="1" max="40" value="6"></label>
-      <button type="button" class="b ghost sm" id="padUndo">↶ 되돌리기</button>
+      <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="padSize" min="1" max="40" value="6"> <b id="padSizeV">6</b></label>
+      <button type="button" class="b ghost sm" id="padUndo" title="Ctrl+Z">↶ 되돌리기</button>
+      <button type="button" class="b ghost sm" id="padRedo" title="Ctrl+Shift+Z">↷ 다시</button>
       <button type="button" class="b ghost sm" id="padClear">전체 지우기</button>
       <label class="note" id="padUnderLbl"><input type="checkbox" id="padUnderChk" checked> 현재 이미지 흐리게 깔기</label>
     </div>
     <div class="padwrap" id="padWrap"><img id="padUnder" alt=""><canvas id="padCv"></canvas></div>
-    <p class="note">선은 투명 배경으로 저장됩니다. 이미지 위에 고칠 부분을 그릴 땐 ‘현재 이미지 깔기’를 켜 두세요(깔린 이미지는 저장되지 않습니다). 거친 낙서보다 또렷한 선이 더 잘 전달됩니다.</p>
+    <p class="note">단축키 — 펜 P · 지우개 E · 굵기 [ 작게 / ] 크게 (Shift 누르면 5씩) · 되돌리기 Ctrl+Z · 다시 Ctrl+Shift+Z.<br>선은 투명 배경으로 저장됩니다. 이미지 위에 고칠 부분을 그릴 땐 ‘현재 이미지 깔기’를 켜 두세요(깔린 이미지는 저장되지 않습니다). 거친 낙서보다 또렷한 선이 더 잘 전달됩니다.</p>
   </div>
   <div class="dlg-f"><button type="button" class="b sm" id="padSave">저장</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
@@ -2279,7 +2280,7 @@ function tabImg(p) {
   <div class="row">
     <button type="button" class="b" id="genBtn" ${p._busy ? 'disabled' : ''}>${p._busy ? '생성 중…' : '이미지 생성'}</button>
     ${p.versions.length ? '<button type="button" class="b ghost" id="regenBtn" ' + (p._busy ? 'disabled' : '') + '>↻ 재생성</button>' : ''}
-    <label class="b ghost">이미지 올리기<input type="file" accept="image/*" id="upImg" hidden></label>
+    <label class="b ghost" title="여러 장을 고르면 파일 이름 순서대로 컷이 자동으로 만들어집니다">이미지 올리기<input type="file" accept="image/*" id="upImg" multiple hidden></label>
     <span class="note" id="refNote"></span>
   </div>
   ${p.versions.length ? '<label class="grp"><span class="lbl">재생성 방식</span><select data-f="regenLvl"><option value="keep">비슷하게 — 구도·포즈 유지, 새로 다듬기</option><option value="vary">다르게 — 구도·포즈 바꿔도 됨</option><option value="new">처음부터 — 현재 이미지 참고 안 함</option></select></label>' : ''}
@@ -2313,7 +2314,7 @@ function bindImg(p, el) {
   $('#genBtn', el).onclick = () => genPanel(p);
   const rg = $('#regenBtn', el); if (rg) rg.onclick = () => regenPanel(p);
   $('#extraEdit', el).onclick = () => aiEdit(p, p.extra || '');
-  $('#upImg', el).onchange = async e => { const f = e.target.files[0]; if (f) await addImageVersion(p, f); };
+  $('#upImg', el).onchange = async e => { const fs = e.target.files; if (fs.length) await addImagesAsCuts(fs); };
   $$('.ver', el).forEach(v => (v.onclick = e => {
     const di = e.target.closest('[data-vdel]')?.dataset.vdel;
     if (di !== undefined) {
@@ -2330,8 +2331,31 @@ async function addImageVersion(p, file) {
   p.versions.push({ assetId: await addAsset(file), src: 'upload', at: Date.now(), prompt: file.name || '업로드' });
   p.cur = p.versions.length - 1; resetFraming(p); save(); refreshPanel(p);
 }
+/* 이미지를 여러 장 올리면 파일 이름 순서(1, 2, 10 …)대로 컷을 자동으로 만든다.
+   지금 컷이 비어 있으면 첫 장은 그 컷에 넣고, 나머지는 그 뒤에 새 컷으로 이어 붙인다. 한 장이면 기존처럼 이 컷의 새 버전으로 넣는다 */
+async function addImagesAsCuts(fileList) {
+  const files = [...fileList].filter(f => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  if (!files.length) return toast('이미지 파일이 아닙니다');
+  const cur = selPanel();
+  if (files.length === 1) { await addImageVersion(cur, files[0]); return toast('이 컷의 새 버전으로 넣었습니다'); }
+  let at = P.panels.indexOf(cur), first = null, made = 0;
+  for (let i = 0; i < files.length; i++) {
+    let p;
+    if (i === 0 && !cur.versions.length) p = cur;
+    else {
+      p = newPanel(); p.chars = [...cur.chars]; p.trans = cur.trans; p.prov = cur.prov;
+      P.panels.splice(++at, 0, p); made++;
+    }
+    p.versions.push({ assetId: await addAsset(files[i]), src: 'upload', at: Date.now(), prompt: files[i].name || '업로드' });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    if (!first) first = p;
+    if (p === cur) at = P.panels.indexOf(cur);
+  }
+  save(); setTab('img'); selectPanel(first.id); renderPanels();
+  toast(`이미지 ${files.length}장 → 컷 ${made}개를 새로 만들었습니다 (파일 이름 순서)`, 5000);
+}
 /* ---- 스케치 패드: 투명 배경 PNG 한 장을 컷마다 저장한다. 획 목록을 들고 있어 되돌리기가 가볍다 ---- */
-const PAD = { p: null, tool: 'pen', color: '#111111', size: 6, strokes: [], base: null, W: 0, H: 0, cur: null };
+const PAD = { p: null, tool: 'pen', color: '#111111', size: 6, strokes: [], redo: [], base: null, W: 0, H: 0, cur: null };
 const PAD_COLORS = ['#111111', '#e03131', '#1c7ed6', '#2f9e44'];
 function padStroke(ctx, s, from) {
   ctx.save();
@@ -2352,7 +2376,7 @@ function padRedraw() {
 }
 async function openPad(p) {
   const [a, b] = (P.aspect || '9:16').split(':').map(Number), k = 1280 / Math.max(a, b);
-  PAD.p = p; PAD.W = Math.round(a * k); PAD.H = Math.round(b * k); PAD.strokes = []; PAD.cur = null; PAD.base = null;
+  PAD.p = p; PAD.W = Math.round(a * k); PAD.H = Math.round(b * k); PAD.strokes = []; PAD.redo = []; PAD.cur = null; PAD.base = null;
   const cv = $('#padCv'); cv.width = PAD.W; cv.height = PAD.H;
   const maxH = Math.min(innerHeight * 0.58, 720), maxW = Math.min(innerWidth - 80, 560), sc = Math.min(maxW / PAD.W, maxH / PAD.H);
   const wrap = $('#padWrap'); wrap.style.width = Math.round(PAD.W * sc) + 'px'; wrap.style.height = Math.round(PAD.H * sc) + 'px';
@@ -2369,7 +2393,7 @@ function initPad() {
   cv.addEventListener('pointerdown', e => {
     if (e.button > 0) return; cv.setPointerCapture(e.pointerId); e.preventDefault();
     PAD.cur = { tool: PAD.tool, color: PAD.color, size: PAD.size * unit() * (PAD.tool === 'eraser' ? 2 : 1), pen: e.pointerType === 'pen', pts: [pos(e)] };
-    PAD.strokes.push(PAD.cur); padStroke(ctx, PAD.cur);
+    PAD.strokes.push(PAD.cur); PAD.redo = []; padStroke(ctx, PAD.cur);
   });
   cv.addEventListener('pointermove', e => {
     const s = PAD.cur; if (!s) return;
@@ -2383,9 +2407,24 @@ function initPad() {
   $('#padPen').onclick = () => setTool('pen'); $('#padEraser').onclick = () => setTool('eraser');
   $('#padColors').innerHTML = PAD_COLORS.map(c => `<button type="button" class="sw" data-c="${c}" style="background:${c}" aria-pressed="${c === PAD.color}" aria-label="색 ${c}"></button>`).join('');
   $$('#padColors .sw').forEach(b => (b.onclick = () => { PAD.color = b.dataset.c; setTool('pen'); $$('#padColors .sw').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }));
-  $('#padSize').oninput = e => { PAD.size = +e.target.value; };
-  $('#padUndo').onclick = () => { PAD.strokes.pop(); padRedraw(); };
-  $('#padClear').onclick = () => { if ((PAD.strokes.length || PAD.base) && !confirm('그린 것을 모두 지울까요?')) return; PAD.strokes = []; PAD.base = null; padRedraw(); };
+  const setSize = v => { PAD.size = Math.min(40, Math.max(1, v)); $('#padSize').value = PAD.size; $('#padSizeV').textContent = PAD.size; };
+  const undo = () => { const s = PAD.strokes.pop(); if (s) { PAD.redo.push(s); padRedraw(); } };
+  const redo = () => { const s = PAD.redo.pop(); if (s) { PAD.strokes.push(s); padRedraw(); } };
+  $('#padSize').oninput = e => setSize(+e.target.value);
+  $('#padUndo').onclick = undo; $('#padRedo').onclick = redo;
+  $('#padClear').onclick = () => { if ((PAD.strokes.length || PAD.base) && !confirm('그린 것을 모두 지울까요?')) return; PAD.strokes = []; PAD.redo = []; PAD.base = null; padRedraw(); };
+  /* 단축키 (자판 배열과 무관하게 키 위치로 인식: 한글 입력 상태에서도 동작) — 패드가 열려 있을 때만 */
+  $('#dlgPad').addEventListener('keydown', e => {
+    if (e.altKey || e.target.tagName === 'TEXTAREA') return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
+    else if (mod) return;
+    else if (e.code === 'KeyP') { e.preventDefault(); setTool('pen'); }
+    else if (e.code === 'KeyE') { e.preventDefault(); setTool('eraser'); }
+    else if (e.code === 'BracketRight') { e.preventDefault(); setSize(PAD.size + (e.shiftKey ? 5 : 1)); }
+    else if (e.code === 'BracketLeft') { e.preventDefault(); setSize(PAD.size - (e.shiftKey ? 5 : 1)); }
+  });
   $('#padUnderChk').onchange = e => { $('#padUnder').style.visibility = e.target.checked ? 'visible' : 'hidden'; };
   $('#padSave').onclick = async () => {
     const p = PAD.p; if (!p) return;
@@ -3800,7 +3839,7 @@ wrapEl.addEventListener('dragleave', () => wrapEl.classList.remove('drop'));
 wrapEl.addEventListener('drop', async e => {
   e.preventDefault(); wrapEl.classList.remove('drop');
   const f = e.dataTransfer.files[0]; if (!f) return; const p = selPanel();
-  if (f.type.startsWith('image/')) { await addImageVersion(p, f); toast('이 컷의 새 버전으로 넣었습니다'); }
+  if (f.type.startsWith('image/')) await addImagesAsCuts(e.dataTransfer.files);
   else if (f.type.startsWith('video/')) { await addClip(p, f); toast('이 컷의 영상 클립으로 넣었습니다'); }
 });
 
@@ -3816,6 +3855,7 @@ $('#addPanel').onclick = () => {
   if (cur) { p.chars = [...cur.chars]; p.trans = cur.trans; p.prov = cur.prov; }
   P.panels.splice(P.panels.indexOf(cur) + 1, 0, p); save(); setTab('img'); selectPanel(p.id);
 };
+$('#cutsUp').onchange = async e => { const fs = e.target.files; if (fs.length) await addImagesAsCuts(fs); e.target.value = ''; };
 $('#playPanel').onclick = () => (player.playing && player.mode === 'panel' ? stop() : play('panel'));
 $('#playAll').onclick = () => (player.playing && player.mode === 'all' ? stop() : play('all'));
 $('#scrub').oninput = e => { stop(); scrubT = (+e.target.value / 1000) * panelDur(selPanel()); requestDraw(); };
