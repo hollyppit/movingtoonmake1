@@ -212,7 +212,44 @@ async function klingNew(env, path, opt = {}) {
   if (!r.ok || (j.code !== undefined && j.code !== 0)) throw new GenError(r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad', (j.message || 'HTTP ' + r.status) + ' (code ' + (j.code ?? r.status) + ')');
   return j.data;
 }
+/* 캐릭터(Element) = 외형 이미지 + 목소리. 영상 요청에 element 로 붙이면 같은 얼굴·목소리로 나온다.
+   GET ?op=voices → 클링 기본 목소리 목록 / POST {op:'element'} → 등록 시작(taskId) / GET ?op=element&id= → 등록 결과(elementId) */
+async function handleKlingElement(req, env, who, op) {
+  if (op === 'voices' && req.method === 'GET') {
+    const list = await klingNew(env, '/v1/general/presets-voices?pageNum=1&pageSize=500');
+    const voices = (Array.isArray(list) ? list : []).flatMap(t => t.task_result?.voices || []).map(v => ({ id: v.voice_id, name: v.voice_name, trial: v.trial_url }));
+    return json({ voices });
+  }
+  if (op === 'element' && req.method === 'GET') {
+    const id = new URL(req.url).searchParams.get('id');
+    if (!id) return json({ error: 'id 가 없습니다' }, 400);
+    const d = await klingNew(env, '/v1/general/advanced-custom-elements/' + encodeURIComponent(id));
+    if (d?.task_status === 'succeed') {
+      const el = d.task_result?.elements?.[0];
+      return el?.element_id ? json({ status: 'succeed', elementId: String(el.element_id) }) : json({ status: 'failed', error: '결과에 element_id 가 없습니다' });
+    }
+    if (d?.task_status === 'failed') return json({ status: 'failed', error: d.task_status_msg || '클링에서 캐릭터 등록에 실패했습니다' });
+    return json({ status: d?.task_status || 'processing' });
+  }
+  if (op === 'element' && req.method === 'POST') {
+    const b = await req.json();
+    const img = async k => b64((await r2Get(env, String(k || ''), who)).bytes);
+    const refers = (Array.isArray(b.refers) && b.refers.length ? b.refers : [b.frontal]).slice(0, 3);
+    const d = await klingNew(env, '/v1/general/advanced-custom-elements', { method: 'POST', body: JSON.stringify({
+      element_name: String(b.name || '').slice(0, 20),
+      element_description: String(b.desc || b.name || '').slice(0, 100),
+      reference_type: 'image_refer',
+      element_image_list: { frontal_image: await img(b.frontal), refer_images: await Promise.all(refers.map(async k => ({ image_url: await img(k) }))) },
+      element_voice_id: String(b.voiceId || ''),
+      tag_list: [{ tag_id: 'o_102' }],
+    }) });
+    return json({ taskId: d.task_id });
+  }
+  return json({ error: '지원하지 않는 요청입니다' }, 405);
+}
 async function handleKlingNew(req, env, who) {
+  const op = new URL(req.url).searchParams.get('op') || (req.method === 'POST' ? await req.clone().json().then(j => j.op, () => '') : '');
+  if (op === 'voices' || op === 'element') return handleKlingElement(req, env, who, op);
   if (req.method === 'POST') {
     const b = await req.json();
     const img = await r2Get(env, String(b.image || ''), who);
@@ -220,6 +257,7 @@ async function handleKlingNew(req, env, who) {
     const prompt = String(b.prompt || '') + (b.negative ? '\n\nAvoid: ' + b.negative : '');
     const contents = [{ type: 'prompt', text: prompt.slice(0, 2500) }, { type: 'first_frame', url: b64(img.bytes) }];
     if (b.tail) contents.push({ type: 'last_frame', url: b64((await r2Get(env, String(b.tail), who)).bytes) });
+    (Array.isArray(b.elements) ? b.elements : []).slice(0, 3).forEach((e, i) => contents.push({ type: 'element', element_id: String(e.id), id: 'element_' + (i + 1) }));
     const d = await klingNew(env, '/image-to-video/' + encodeURIComponent(model), { method: 'POST', body: JSON.stringify({
       contents,
       settings: { resolution: b.mode === 'pro' ? '1080p' : '720p', duration: Math.min(15, Math.max(3, +b.duration || 5)), audio: b.audio ? 'native' : 'off', multi_shot: false },
