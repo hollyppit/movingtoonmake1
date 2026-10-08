@@ -18,6 +18,7 @@ const ENV = {
   sbBucket: 'SUPABASE_BUCKET',             // 선택. 기본 studio (비공개 버킷)
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',   // 나레이션·대사 맞춤법 검사 / 다듬기 (Claude)
   klKey: 'KLING_API_KEY',    // 새 클링 API: 키 하나 (Authorization: Bearer 키). 있으면 이 방식을 쓴다
   klAK: 'KLING_ACCESS_KEY',  // 옛 클링 API: Access Key + Secret Key 로 JWT 서명 (KLING_API_KEY 가 없을 때)
   klSK: 'KLING_SECRET_KEY',
@@ -229,7 +230,7 @@ export async function handleKling(req, env) {
         image: b64(img.bytes),
         prompt: String(b.prompt || '').slice(0, 2500),
         negative_prompt: String(b.negative || '').slice(0, 2500),
-        cfg_scale: 0.5, mode: b.mode === 'pro' ? 'pro' : 'std', duration: b.duration === '10' ? '10' : '5',
+        cfg_scale: 0.5, mode: b.mode === 'pro' ? 'pro' : 'std', duration: +b.duration >= 8 ? '10' : '5', // 옛 API 는 5·10초만 (새 API 는 3~15초)
       };
       if (b.tail) body.image_tail = b64((await r2Get(env, String(b.tail))).bytes);
       const d = await kling(env, '/v1/videos/image2video', { method: 'POST', body: JSON.stringify(body) });
@@ -327,6 +328,34 @@ export async function handleUsage(req, env) {
   } catch (e) { return json({ error: e.message }, 502); }
 }
 
+/* ---------- 글 다듬기: 맞춤법만(spell) / 문장 다듬기(polish) — Claude ---------- */
+const POLISH_MODEL = 'claude-haiku-5-5';
+const KIND_HINT = { narration: '나레이션(차분하고 문어체에 가까운 서술)', speech: '말풍선 대사(자연스러운 구어체)', thought: '속마음 독백(짧고 담백하게)', shout: '외침(짧고 강렬하게)', caption: '자막(간결하게)' };
+export async function handlePolish(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const b = await req.json();
+    const text = String(b.text || '').slice(0, 2000);
+    if (!text.trim()) return json({ error: '텍스트가 비었습니다' }, 400);
+    const spell = b.mode !== 'polish';
+    const system = '당신은 한국어 웹툰·무빙툰 대본 편집자입니다. 사용자가 준 글만 고쳐서 결과 문장만 출력하세요. 설명, 따옴표, 머리말을 붙이지 마세요. 줄바꿈은 그대로 유지하세요. ' +
+      (spell
+        ? '맞춤법, 띄어쓰기, 문장부호 오류만 바로잡고 단어와 어투는 바꾸지 마세요. 고칠 곳이 없으면 원문 그대로 출력하세요.'
+        : '의미와 분량은 비슷하게 유지하면서 문장을 더 매끄럽고 생생하게 다듬고, 맞춤법도 바로잡으세요. 글의 종류: ' + (KIND_HINT[b.kind] || '대사') + '. 말투(존댓말/반말)는 원문을 따르세요.');
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: POLISH_MODEL, max_tokens: 1000, system, messages: [{ role: 'user', content: text }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const out = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    if (!out) return json({ error: '결과가 비었습니다' }, 502);
+    return json({ text: out, model: POLISH_MODEL });
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
 /* ---------- 로그인 확인 / 음성(OpenAI TTS) ---------- */
 export async function handleAdmin(req, env) {
   return authed(req, env) ? json({ ok: true }) : json({ error: '비밀번호가 맞지 않습니다' }, 401);
@@ -383,6 +412,7 @@ export default {
     if (p === '/api/usage') return handleUsage(req, env);
     if (p === '/api/tts') return handleTts(req, env);
     if (p === '/api/admin') return handleAdmin(req, env);
+    if (p === '/api/polish') return handlePolish(req, env);
     return json({ error: 'not found' }, 404);
   },
 };

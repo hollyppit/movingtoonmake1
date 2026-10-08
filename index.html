@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#F6F3EC">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&family=Gothic+A1:wght@400;500;700;900&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Myeongjo:wght@400;700;800&family=Gowun+Dodum&family=Gowun+Batang:wght@400;700&family=Do+Hyeon&family=Black+Han+Sans&family=Jua&family=Yeon+Sung&family=Sunflower:wght@500&family=Stylish&family=Gugi&family=Hi+Melody&family=Gaegu:wght@400&family=Gamja+Flower&family=Poor+Story&family=Single+Day&family=Cute+Font&family=East+Sea+Dokdo&family=Dokdo&family=Nanum+Pen+Script&family=Nanum+Brush+Script&family=Kirang+Haerang&family=Song+Myung&family=Black+And+White+Picture&family=Dongle:wght@400&family=Bagel+Fat+One&family=Hahmlet:wght@400;700&family=Orbit&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 /* 사주 무빙툰 사이트(index.html)와 같은 색·글꼴 체계 */
@@ -130,6 +131,19 @@ pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; backgroun
 .tabs button[aria-selected=true] { color: var(--gold-l); border-bottom-color: var(--gold); }
 #insp { padding: 16px; display: grid; gap: 16px; }
 .olist { display: grid; gap: 4px; }
+.otl { position: relative; border: 1px solid var(--line-2); border-radius: 3px; background: var(--panel-2); padding: 18px 0 4px; user-select: none; touch-action: none; }
+.otl .ruler { position: absolute; left: 0; right: 0; top: 0; height: 16px; font-size: .62rem; color: var(--ink-3); cursor: pointer; }
+.otl .ruler i { position: absolute; top: 2px; transform: translateX(-50%); font-style: normal; font-variant-numeric: tabular-nums; }
+.otl .row-t { position: relative; height: 24px; margin: 2px 0; }
+.otl .bar-t { position: absolute; top: 2px; height: 20px; min-width: 10px; border-radius: 3px; background: rgba(154, 122, 46, .28); border: 1px solid var(--gold); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .68rem; line-height: 18px; padding: 0 8px; cursor: grab; color: var(--ink); }
+.otl .bar-t.on { background: rgba(154, 122, 46, .55); }
+.otl .bar-t::before, .otl .bar-t::after { content: ''; position: absolute; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.otl .bar-t::before { left: 0; } .otl .bar-t::after { right: 0; }
+.otl .ph { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--cinnabar); pointer-events: none; }
+.bub { display: flex; flex-wrap: wrap; gap: 6px; }
+.bub button { width: 56px; height: 56px; padding: 2px; border: 1px solid var(--line-2); border-radius: 3px; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 12px 12px; cursor: pointer; }
+.bub button.on { border-color: var(--gold); outline: 1px solid var(--gold); }
+.bub img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .oi { display: grid; grid-template-columns: 64px 1fr auto; gap: 8px; align-items: center; text-align: left; background: var(--panel); border: 1px solid var(--line-2); border-radius: 3px; padding: 6px 8px; cursor: pointer; }
 .oi.on { border-color: var(--gold); }
 .oi b { font-weight: 500; font-size: .74rem; color: var(--gold); }
@@ -420,10 +434,50 @@ const ADJ0 = { b: 100, c: 100, s: 100, h: 0, warm: 0, blur: 0, vig: 0 };
 const PROV = { openai: 'OpenAI', gemini: 'Gemini', kling: 'Kling', tts: '음성', server: '서버', anthropic: 'Claude' };
 const SRC = { openai: 'OA', gemini: 'GM', upload: '업로드', bake: '보정' };
 const KINDS = { speech: '말풍선', thought: '생각', shout: '외침', narration: '나레이션', caption: '자막' };
+const DUR_MIN = 3, DUR_MAX = 15; // 컷 길이 범위(초)
+const OUTS = { fade: '페이드', pop: '작아지며', slideDown: '아래로 내려감', wipe: '와이프', none: '즉시' };
 const ANIMS = { pop: '팝', fade: '페이드', slideUp: '아래에서 올라옴', typewriter: '타자기', shake: '흔들림(충격)', wipe: '와이프', none: '없음' };
 const MOTIONS = { none: '고정', 'zoom-in': '줌인', 'zoom-out': '줌아웃', 'pan-left': '왼쪽으로 팬', 'pan-right': '오른쪽으로 팬', 'pan-up': '위로 팬', 'pan-down': '아래로 팬', shake: '충격 흔들림' };
 const ERRK = { refused: '거부', auth: '인증', rate: '한도', bad: '요청 오류', network: '네트워크', empty: '빈 응답', server: '서버' };
+/* 글꼴 목록: [키, 이름, CSS family, 굵기고정(true면 400만 있음), 묶음] — 모두 구글 폰트(무료). 카페24·배민·KCC 등 다른 무료 폰트는 ‘내 폰트 올리기’로 넣는다 */
+const FONT_LIST = [
+  ['sans', '고딕 (Noto Sans KR)', '"Noto Sans KR"', false, '기본'], ['serif', '명조 (Noto Serif KR)', '"Noto Serif KR"', false, '기본'],
+  ['nanumgothic', '나눔고딕', '"Nanum Gothic"', false, '기본'], ['gothica1', '고딕 A1', '"Gothic A1"', false, '기본'], ['plex', 'IBM Plex 산스', '"IBM Plex Sans KR"', false, '기본'],
+  ['nanummyeongjo', '나눔명조', '"Nanum Myeongjo"', false, '기본'], ['gowunbatang', '고운바탕', '"Gowun Batang"', false, '기본'], ['hahmlet', '함렛', '"Hahmlet"', false, '기본'], ['gowundodum', '고운돋움', '"Gowun Dodum"', true, '기본'],
+  ['blackhan', '블랙한산스 (굵은 제목)', '"Black Han Sans"', true, '굵은 제목체'], ['dohyeon', '도현체 느낌 (Do Hyeon)', '"Do Hyeon"', true, '굵은 제목체'], ['jua', '주아체 (Jua)', '"Jua"', true, '굵은 제목체'],
+  ['yeonsung', '연성체 (Yeon Sung)', '"Yeon Sung"', true, '굵은 제목체'], ['bagel', '베이글팻원', '"Bagel Fat One"', true, '굵은 제목체'], ['gugi', '구기', '"Gugi"', true, '굵은 제목체'],
+  ['sunflower', '해바라기', '"Sunflower"', true, '굵은 제목체'], ['stylish', '스타일리시', '"Stylish"', true, '굵은 제목체'], ['orbit', '오르빗', '"Orbit"', true, '굵은 제목체'],
+  ['penscript', '나눔손글씨 펜', '"Nanum Pen Script"', true, '손글씨·캐릭터'], ['brush', '나눔손글씨 붓', '"Nanum Brush Script"', true, '손글씨·캐릭터'], ['gaegu', '개구', '"Gaegu"', true, '손글씨·캐릭터'],
+  ['gamja', '감자꽃', '"Gamja Flower"', true, '손글씨·캐릭터'], ['himelody', '하이멜로디', '"Hi Melody"', true, '손글씨·캐릭터'], ['poorstory', '푸어스토리', '"Poor Story"', true, '손글씨·캐릭터'],
+  ['singleday', '싱글데이', '"Single Day"', true, '손글씨·캐릭터'], ['cutefont', '귀여운체 (Cute Font)', '"Cute Font"', true, '손글씨·캐릭터'], ['dongle', '동글', '"Dongle"', true, '손글씨·캐릭터'],
+  ['eastsea', '동해독도', '"East Sea Dokdo"', true, '손글씨·캐릭터'], ['dokdo', '독도', '"Dokdo"', true, '손글씨·캐릭터'], ['kirang', '기랑해랑체', '"Kirang Haerang"', true, '손글씨·캐릭터'],
+  ['songmyung', '송명', '"Song Myung"', true, '손글씨·캐릭터'], ['bwpic', '흑백사진', '"Black And White Picture"', true, '손글씨·캐릭터'],
+];
+const FONT_BY = Object.fromEntries(FONT_LIST.map(f => [f[0], f]));
 const FONTS = { sans: '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif', serif: '"Noto Serif KR", "Nanum Myeongjo", serif' };
+/* 글꼴 키 → CSS font-family. 키가 cf_<자산ID>면 올린 폰트 */
+function fontCss(key) {
+  if (key === 'sans' || key === 'serif' || !key) return FONTS[key] || FONTS.sans;
+  const f = FONT_BY[key]; if (f) return f[2] + ', ' + FONTS.sans;
+  if (String(key).startsWith('cf_')) return '"MF-' + key.slice(3) + '", ' + FONTS.sans;
+  return FONTS.sans;
+}
+const fontSingle = key => !!(FONT_BY[key] && FONT_BY[key][3]) || String(key).startsWith('cf_');
+const registeredFonts = new Set();
+async function registerProjectFonts() {
+  for (const f of (P.fonts || [])) {
+    if (registeredFonts.has(f.id) || !assets.has(f.id)) continue;
+    registeredFonts.add(f.id);
+    try { const ff = new FontFace('MF-' + f.id, await assets.get(f.id).blob.arrayBuffer()); await ff.load(); document.fonts.add(ff); }
+    catch (e) { registeredFonts.delete(f.id); }
+  }
+}
+function fontOptions(cur) {
+  const groups = {};
+  FONT_LIST.forEach(f => (groups[f[4]] = groups[f[4]] || []).push('<option value="' + f[0] + '"' + (f[0] === cur ? ' selected' : '') + '>' + f[1] + '</option>'));
+  const mine = (P.fonts || []).map(f => '<option value="cf_' + f.id + '"' + ('cf_' + f.id === cur ? ' selected' : '') + '>' + esc(f.name) + '</option>').join('');
+  return Object.entries(groups).map(([g, o]) => '<optgroup label="' + g + '">' + o.join('') + '</optgroup>').join('') + (mine ? '<optgroup label="내 폰트">' + mine + '</optgroup>' : '');
+}
 
 function toast(msg, ms = 2600) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
@@ -585,6 +639,9 @@ function referencedIds() {
     p.overlays.forEach(o => o.voice && ids.add(o.voice.assetId));
   });
   if (P.bgm) ids.add(P.bgm);
+  (P.bubbles || []).forEach(b => ids.add(b.id));
+  (P.fonts || []).forEach(f => ids.add(f.id));
+  P.panels.forEach(p => p.overlays.forEach(o => o.shapeImg && ids.add(o.shapeImg)));
   return ids;
 }
 function dropAssetIfUnused(id) {
@@ -608,7 +665,7 @@ function newPanel() {
 }
 function newOverlay(kind, p) {
   const n = p.overlays.length;
-  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 46, font: 'sans', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, tail: null };
+  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 46, font: 'sans', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
   if (kind === 'speech') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'thought') Object.assign(base, { text: '속마음…', anim: 'fade', y: 0.24, tail: { x: 0.4, y: 0.36 } });
   if (kind === 'shout') Object.assign(base, { text: '멈춰!', size: 64, w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
@@ -622,18 +679,18 @@ function defaultProject() {
   return {
     v: 1, title: '새 무빙툰',
     style: { prompt: 'Korean webtoon style, clean confident line art, cel shading with soft gradients, cinematic lighting, rich but controlled colors', refs: [] },
-    chars: [], panels: [p], bgm: null, bgmVol: 0.8, log: [], keys: {},
+    chars: [], panels: [p], bgm: null, bgmVol: 0.8, log: [], keys: {}, bubbles: [], fonts: [],
   };
 }
 function migrate(pr) {
   const d = defaultProject();
-  pr = Object.assign({ title: d.title, style: d.style, chars: [], panels: [], bgm: null, bgmVol: 0.8, log: [], keys: {} }, pr);
+  pr = Object.assign({ title: d.title, style: d.style, chars: [], panels: [], bgm: null, bgmVol: 0.8, log: [], keys: {}, bubbles: [], fonts: [] }, pr);
   pr.style = Object.assign({ prompt: '', refs: [] }, pr.style);
   pr.chars = pr.chars.map(c => Object.assign({ id: uid(), name: '', desc: '', refs: [] }, c));
   pr.panels = pr.panels.map(p => {
     const n = Object.assign(newPanel(), p);
     n.adj = Object.assign({ ...ADJ0 }, p.adj);
-    n.overlays = (p.overlays || []).map(o => Object.assign({ fillA: 1, strokeW: 4, dur: 0, start: 0 }, o));
+    n.overlays = (p.overlays || []).map(o => Object.assign({ fillA: 1, strokeW: 4, dur: 0, start: 0, out: 'fade', shapeImg: null, imgScale: 1 }, o));
     if (n.job && n.job.status === 'submitting') n.job = { status: 'failed', msg: '전송 중 페이지가 닫혔습니다' };
     return n;
   });
@@ -645,7 +702,7 @@ let P = defaultProject();
 let sel = P.panels[0].id, selOv = null, tab = 'img', scrubT = 4;
 const selPanel = () => P.panels.find(p => p.id === sel) || P.panels[0];
 const selOverlay = () => selPanel()?.overlays.find(o => o.id === selOv) || null;
-function panelDur(p) { return Math.max(0.5, +p.dur || 4); }
+function panelDur(p) { return clamp(+p.dur || 4, DUR_MIN, DUR_MAX); }
 const curAsset = p => p.versions[p.cur]?.assetId || null;
 const curClip = p => p.clips[p.clipCur] || null;
 const usesClip = p => !!(p.useVideo && curClip(p) && assets.has(curClip(p).assetId));
@@ -1323,7 +1380,7 @@ function drawPanel(ctx, p, lt, opt = {}) {
 /* ---- 말풍선·나레이션 ---- */
 function ovFont(o) {
   const w = o.kind === 'shout' ? 900 : o.kind === 'narration' ? 600 : o.kind === 'caption' ? 700 : 500;
-  return `${w} ${o.size}px ${FONTS[o.font] || FONTS.sans}`;
+  return `${fontSingle(o.font) ? 400 : w} ${o.size}px ${fontCss(o.font)}`;
 }
 function wrap(ctx, text, maxW) {
   const lines = [];
@@ -1352,6 +1409,7 @@ function layoutOv(ctx, o) {
     const k = o.kind === 'shout' ? 1.0 : 0.8;
     rx = (tw / 2 + pad * k) * 1.15; ry = (th / 2 + pad * k) * 1.2;
     if (o.kind === 'thought') { rx *= 1.06; ry *= 1.1; }
+    if (o.shapeImg && assets.has(o.shapeImg)) { const k = +o.imgScale || 1; rx *= 1.2 * k; ry *= 1.25 * k; } // 이미지 말풍선은 안쪽 여백이 있어 더 크게
   }
   return { lines, widths, lh, tw, th, rx, ry };
 }
@@ -1371,7 +1429,15 @@ function ovState(o, lt, forced) {
     case 'shake': s.scale = 0.6 + 0.4 * easeOutBack(p); s.alpha = clamp(p * 3, 0, 1); if (k < 0.6) { const a = (1 - k / 0.6) * 16; s.dx = Math.sin(k * 90) * a; s.dy = Math.cos(k * 70) * a * 0.6; } break;
     case 'wipe': s.wipe = easeOutCubic(p); s.alpha = clamp(p * 3, 0, 1); break;
   }
-  if (isFinite(en)) s.alpha *= clamp((en - lt) / 0.25, 0, 1);
+  if (isFinite(en)) {
+    const ex = clamp((en - lt) / 0.35, 0, 1); // 1 → 0 : 사라지는 중
+    switch (o.out || 'fade') {
+      case 'fade': s.alpha *= ex; break;
+      case 'pop': s.scale *= 0.45 + 0.55 * ex; s.alpha *= clamp(ex * 2, 0, 1); break;
+      case 'slideDown': s.dy += (1 - easeOutCubic(ex)) * 60; s.alpha *= ex; break;
+      case 'wipe': s.wipe = Math.min(s.wipe, ex); s.alpha *= clamp(ex * 3, 0, 1); break;
+    }
+  }
   return s;
 }
 function tailPath(L, tip, spread) {
@@ -1387,6 +1453,10 @@ function tailPath(L, tip, spread) {
 }
 function drawShape(ctx, o, L, tip) {
   if (o.kind === 'caption') return;
+  if (o.shapeImg && o.kind !== 'narration') {
+    const im = getImg(o.shapeImg);
+    if (im) { ctx.drawImage(im, -L.rx, -L.ry, L.rx * 2, L.ry * 2); return; }
+  }
   const fill = rgba(o.fill, o.fillA ?? 1), sw = +o.strokeW || 0;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.fillStyle = fill; ctx.strokeStyle = o.stroke || '#111';
   if (o.kind === 'narration') {
@@ -1446,7 +1516,7 @@ function drawText(ctx, o, L, chars) {
 }
 function drawOverlay(ctx, o, lt, opt = {}) {
   const L = layoutOv(ctx, o), cX = o.x * W, cY = o.y * H;
-  const hasTail = !!(o.tail && ['speech', 'thought', 'shout'].includes(o.kind));
+  const hasTail = !!(o.tail && ['speech', 'thought', 'shout'].includes(o.kind) && !(o.shapeImg && assets.has(o.shapeImg)));
   o._box = { x: cX - L.rx, y: cY - L.ry, w: L.rx * 2, h: L.ry * 2 };
   o._tip = hasTail ? { x: o.tail.x * W, y: o.tail.y * H } : null;
   const st = ovState(o, lt, opt.selected);
@@ -1478,6 +1548,19 @@ function drawGuides(ctx) {
   ctx.fillText('상단 UI', W / 2, H * 0.055); ctx.fillText('제목·설명·버튼 영역', W / 2, H * 0.89); ctx.restore();
 }
 
+/* 선택한 텍스트의 조절점: 모서리 4개 = 크기(글자+말풍선 함께), 좌우 가운데 = 줄 너비(줄바꿈 위치) */
+const HANDLE_M = 8;
+function handleList(o) {
+  const b = o._box; if (!b) return [];
+  const x0 = b.x - HANDLE_M, y0 = b.y - HANDLE_M, x1 = b.x + b.w + HANDLE_M, y1 = b.y + b.h + HANDLE_M, ym = b.y + b.h / 2;
+  return [
+    { k: 'nw', x: x0, y: y0, c: 'nwse-resize' }, { k: 'ne', x: x1, y: y0, c: 'nesw-resize' },
+    { k: 'sw', x: x0, y: y1, c: 'nesw-resize' }, { k: 'se', x: x1, y: y1, c: 'nwse-resize' },
+    { k: 'w', x: x0, y: ym, c: 'ew-resize' }, { k: 'e', x: x1, y: ym, c: 'ew-resize' },
+  ];
+}
+function hitHandle(o, pt) { return handleList(o).find(h => Math.hypot(pt.x - h.x, pt.y - h.y) < 40) || null; }
+
 /* ---- 편집 화면 그리기 ---- */
 let drawQueued = false;
 function requestDraw() { if (player.playing || drawQueued) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; drawEditing(); }); }
@@ -1493,6 +1576,7 @@ function drawEditing() {
   if (o && o._box) {
     cx.save(); cx.setLineDash([12, 8]); cx.strokeStyle = '#CDB27A'; cx.lineWidth = 3;
     cx.strokeRect(o._box.x - 8, o._box.y - 8, o._box.w + 16, o._box.h + 16); cx.setLineDash([]);
+    handleList(o).forEach(h => { cx.fillStyle = '#fff'; cx.strokeStyle = '#9A7A2E'; cx.lineWidth = 3; const m = h.k.length === 1 ? [14, 30] : [26, 26]; cx.fillRect(h.x - m[0] / 2, h.y - m[1] / 2, m[0], m[1]); cx.strokeRect(h.x - m[0] / 2, h.y - m[1] / 2, m[0], m[1]); });
     if (o._tip) { cx.fillStyle = '#CDB27A'; cx.beginPath(); cx.arc(o._tip.x, o._tip.y, 17, 0, Math.PI * 2); cx.fill(); cx.strokeStyle = '#14100A'; cx.lineWidth = 3; cx.stroke(); }
     cx.restore();
   }
@@ -1588,7 +1672,7 @@ async function exportVideo() {
   setExp('파일과 글꼴을 불러오는 중…', 0);
   try {
     await loadFontsNow();
-    for (const p of P.panels) { if (usesClip(p)) await waitVideo(curClip(p).assetId); else if (curAsset(p)) await waitImg(curAsset(p)); }
+    for (const p of P.panels) { if (usesClip(p)) await waitVideo(curClip(p).assetId); else if (curAsset(p)) await waitImg(curAsset(p)); for (const o of p.overlays) if (o.shapeImg && assets.has(o.shapeImg)) await waitImg(o.shapeImg); }
   } catch (e) { setExp('준비 실패: ' + e.message); $('#expClose').hidden = false; $('#expCancel').hidden = true; return; }
 
   const stream = cv.captureStream(30);
@@ -1622,7 +1706,8 @@ $('#dlgExport').addEventListener('cancel', e => { if (exporting) e.preventDefaul
 
 /* 한글 웹폰트는 글자 구간별로 나뉘어 받아지므로, 실제로 쓰는 글자를 미리 불러온다 */
 let fontT = null;
-function loadFontsNow() {
+async function loadFontsNow() {
+  await registerProjectFonts();
   const jobs = [];
   P.panels.forEach(p => p.overlays.forEach(o => o.text && jobs.push(document.fonts.load(ovFont(o), o.text))));
   jobs.push(document.fonts.load(`600 44px ${FONTS.serif}`, '컷 0123456789'), document.fonts.load(`400 30px ${FONTS.sans}`, '이미지를 생성하거나 올려 주세요'));
@@ -1737,10 +1822,12 @@ function bind(root, obj, onChange) {
     const v = get();
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
     show();
+    const lo = el.min !== '' ? +el.min : null, hi = el.max !== '' ? +el.max : null;
     const evt = el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'color' ? 'change' : 'input';
     el.addEventListener(evt, () => {
       let val = el.type === 'checkbox' ? el.checked : (el.type === 'range' || el.type === 'number' || 'num' in el.dataset) ? parseFloat(el.value) : el.value;
       if (typeof val === 'number' && Number.isNaN(val)) return;
+      if (typeof val === 'number' && el.type === 'number' && (lo !== null || hi !== null)) { val = clamp(val, lo ?? -Infinity, hi ?? Infinity); if (el !== document.activeElement) el.value = val; }
       set(val); show(); save(); requestDraw(); onChange && onChange(el.dataset.f, val);
     });
     if (el.type === 'color') el.addEventListener('input', () => { set(el.value); requestDraw(); });
@@ -1857,25 +1944,38 @@ function tabText(p) {
   const o = selOverlay();
   const tailable = o && ['speech', 'thought', 'shout'].includes(o.kind);
   return `
+  <div class="grp"><span class="lbl">대사 넣기 — 한 줄에 대사 하나, 말풍선 모양·위치·등장 시각은 자동</span>
+    <textarea id="bulkText" rows="3" placeholder="예)&#10;저기, 잠깐만요!&#10;(왜 이제야 온 거지…)&#10;멈춰!!&#10;나레이션: 그날 밤, 모든 것이 달라졌다."></textarea>
+    <div class="row"><select id="bulkKind" style="flex:1"><option value="auto">모양 자동 선택</option><option value="speech">동그란 말풍선</option><option value="shout">소리치는 말풍선</option><option value="thought">생각 말풍선</option><option value="narration">나레이션 박스</option><option value="caption">자막</option></select><button type="button" class="b sm" id="bulkAdd">+ 대사 추가</button></div>
+    <p class="note">자동 선택: 끝이 ‘!’면 소리치는 말풍선, ( ) 안은 생각, ‘나레이션:’ ‘자막:’으로 시작하면 해당 모양, 나머지는 동그란 말풍선. 넣은 뒤 아래에서 하나씩 바꿀 수 있습니다.</p></div>
   <div class="grp"><span class="lbl">추가</span><div class="row">${Object.entries(KINDS).map(([k, v]) => `<button type="button" class="b ghost sm" data-add="${k}">+ ${v}</button>`).join('')}</div></div>
+  <div class="grp"><span class="lbl">타임라인 — 막대를 끌어 옮기고, 양 끝을 끌어 등장·사라지는 시각을 맞춥니다</span><div class="otl" id="otl"></div></div>
   <div class="grp"><span class="lbl">이 컷의 텍스트 ${p.overlays.length}개 · 등장 순서</span>
     ${list.length ? `<div class="olist">${list.map(x => `<button type="button" class="oi ${x.id === selOv ? 'on' : ''}" data-ov="${x.id}"><b>${KINDS[x.kind]}${x.voice ? (voiceStale(x) ? ' ⚠' : ' 🔊') : ''}</b><span>${esc(x.text || '(빈 텍스트)')}</span><small>${(+x.start).toFixed(1)}s</small></button>`).join('')}</div>` : '<span class="note">아직 없습니다.</span>'}</div>
   ${o ? `
   <div class="box grp">
     <textarea data-f="text" rows="3" id="ovText" placeholder="텍스트 (줄바꿈 가능)"></textarea>
+    <div class="row"><button type="button" class="b ghost sm" id="spellBtn">✓ 맞춤법 검사</button><button type="button" class="b ghost sm" id="polishBtn">✍ 문장 다듬기</button></div>
+    <div id="polishOut" hidden class="box"><div class="lbl">제안</div><div id="polishTxt" style="white-space:pre-wrap;margin:4px 0 8px"></div><div class="row"><button type="button" class="b sm" id="polishOk">적용</button><button type="button" class="b ghost sm" id="polishNo">취소</button></div></div>
+    <div class="st" id="polishSt"></div>
     <div class="g2">
       <label><span class="lbl">종류</span><select data-f="kind">${opts(KINDS, o.kind)}</select></label>
       <label><span class="lbl">등장 효과</span><select data-f="anim">${opts(ANIMS, o.anim)}</select></label>
-      <label><span class="lbl">등장 시각(초)</span><input type="number" data-f="start" step="0.1" min="0"></label>
-      <label><span class="lbl">유지(초, 0 = 컷 끝까지)</span><input type="number" data-f="dur" step="0.1" min="0"></label>
+      <label><span class="lbl">등장 시각(초)</span><input type="number" data-f="start" step="0.1" min="0" max="${panelDur(p) - 0.1}"></label>
+      <label><span class="lbl">사라지는 시각(초, 0 = 컷 끝까지)</span><input type="number" id="ovEnd" step="0.1" min="0" max="${panelDur(p)}"></label>
+      <label><span class="lbl">사라지는 효과</span><select data-f="out">${opts(OUTS, o.out || 'fade')}</select></label>
     </div>
+    <div class="note" id="fontPrev" style="font-size:1.25rem;color:var(--ink);padding:6px 10px;border:1px dashed var(--line);border-radius:3px;font-family:${fontCss(o.font)}">가나다라 동해물과 ABC 123!?</div>
+    <div class="row"><label class="b ghost sm">내 폰트 올리기<input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" hidden></label><button type="button" class="b ghost sm" id="fontAll">이 글꼴을 모든 대사에</button></div>
+    <p class="note">목록은 구글 폰트(무료)입니다. 카페24·배민·KCC·눈누 등 다른 무료 폰트는 내려받은 .ttf/.otf/.woff 파일을 ‘내 폰트 올리기’로 넣으면 이 프로젝트에 저장되고 영상에도 들어갑니다. 상업 이용 가능 여부는 각 폰트 라이선스를 확인하세요.</p>
     ${sl('글자 크기', 'size', 20, 120, 1, 'px')}${sl('줄 너비', 'w', 0.2, 0.95, 0.01)}
     <div class="g2">
-      <label><span class="lbl">글꼴</span><select data-f="font"><option value="sans">고딕 (Noto Sans KR)</option><option value="serif">명조 (Noto Serif KR)</option></select></label>
+      <label><span class="lbl">글꼴</span><select data-f="font">${fontOptions(o.font)}</select></label>
       ${tailable ? `<label class="chk" style="align-self:end"><input type="checkbox" id="tailChk" ${o.tail ? 'checked' : ''}> 꼬리 표시</label>` : '<span></span>'}
     </div>
     <div class="colors"><label>글자 <input type="color" data-f="color"></label><label>${o.kind === 'caption' ? '외곽' : '배경'} <input type="color" data-f="${o.kind === 'caption' ? 'stroke' : 'fill'}"></label>${o.kind === 'caption' ? '' : '<label>테두리 <input type="color" data-f="stroke"></label>'}</div>
     ${o.kind === 'caption' ? '' : sl('배경 불투명', 'fillA', 0, 1, 0.01)}${sl(o.kind === 'caption' ? '외곽 두께' : '테두리 두께', 'strokeW', 0, 12, 0.5, 'px')}
+    ${bubbleUI(o)}
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">
       <span class="lbl">대사 음성 · ${S.ttsEngine === 'eleven' ? '일레븐랩스' : S.ttsEngine === 'gemini' ? 'Gemini' : 'OpenAI'} ${esc(S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)}${isServer() ? ' · 서버' : ''}</span>
       <div class="row">
@@ -1886,29 +1986,219 @@ function tabText(p) {
       <div class="st ${stCls(o._vst)}" id="vSt">${esc(o._vst || (o.voice ? `음성 ${o.voice.dur.toFixed(1)}초${voiceStale(o) ? ' · 문장이나 목소리 설정이 바뀌어 지금 음성과 다릅니다' : ''}` : ''))}</div>
     </div>
     <div class="row"><button type="button" class="b ghost sm" id="ovNow">지금 시각에 등장</button><button type="button" class="b ghost sm" id="ovDup">복제</button><button type="button" class="b danger sm" id="ovDel">삭제</button></div>
-    <p class="note">캔버스에서 끌어 위치를 옮기고, 금색 점을 끌어 꼬리 방향을 바꿉니다.</p>
+    <p class="note">미리보기에서: 끌어서 위치 이동 · 모서리 네모를 끌어 크기 조절 · 좌우 가운데 네모로 줄 너비(줄바꿈 위치) 조절 · 금색 점으로 꼬리 방향 · 더블클릭하면 그 자리에서 글 수정(Enter = 줄바꿈).</p>
   </div>` : '<p class="note">텍스트를 고르거나 캔버스에서 말풍선을 누르면 편집할 수 있습니다.</p>'}`;
 }
+/* ---- 컷 안 타임라인: 대사마다 한 줄, 끌어서 등장·사라지는 시각을 맞춘다 ---- */
+function ovEnd(p, o) { return +o.dur > 0 ? Math.min(panelDur(p), (+o.start || 0) + (+o.dur)) : panelDur(p); }
+function drawTimeline(p) {
+  const box = $('#otl'); if (!box) return;
+  const D = panelDur(p), pct = t => (t / D * 100).toFixed(2) + '%';
+  const step = D > 8 ? 2 : 1, ticks = [];
+  for (let t = 0; t <= D + 0.001; t += step) ticks.push(t);
+  const list = [...p.overlays].sort((a, b) => a.start - b.start);
+  box.innerHTML = '<div class="ruler">' + ticks.map(t => '<i style="left:' + pct(t) + '">' + t + 's</i>').join('') + '</div>' +
+    list.map(o => '<div class="row-t"><div class="bar-t ' + (o.id === selOv ? 'on' : '') + '" data-id="' + o.id + '" style="left:' + pct(o.start || 0) + ';width:' + ((ovEnd(p, o) - (o.start || 0)) / D * 100).toFixed(2) + '%" title="' + esc(o.text || '') + '">' + esc(KINDS[o.kind] + ' ' + (o.text || '')) + '</div></div>').join('') +
+    '<div class="ph" style="left:' + pct(clamp(scrubT, 0, D)) + '"></div>';
+}
+function bindTimeline(p, el) {
+  drawTimeline(p);
+  const box = $('#otl', el); if (!box) return;
+  const D = () => panelDur(p), snap = v => Math.round(v * 10) / 10;
+  box.addEventListener('pointerdown', ev => {
+    const rect = box.getBoundingClientRect();
+    const bar = ev.target.closest('.bar-t');
+    if (!bar) { // 눈금자·빈 곳: 그 시각으로 이동
+      scrubT = clamp((ev.clientX - rect.left) / rect.width * D(), 0, D() - 0.001); requestDraw(); drawTimeline(p); return;
+    }
+    const o = p.overlays.find(x => x.id === bar.dataset.id); if (!o) return;
+    const br = bar.getBoundingClientRect(), edge = Math.min(8, br.width / 3);
+    const mode = ev.clientX - br.left < edge ? 'l' : br.right - ev.clientX < edge ? 'r' : 'm';
+    const s0 = +o.start || 0, e0 = ovEnd(p, o), x0 = ev.clientX; let moved = false;
+    const wasSel = selOv === o.id; selOv = o.id;
+    try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
+    const move = e => {
+      const dt = (e.clientX - x0) / rect.width * D();
+      if (Math.abs(e.clientX - x0) > 2) moved = true;
+      let s = s0, en = e0;
+      if (mode === 'm') { const len = e0 - s0; s = clamp(snap(s0 + dt), 0, D() - len); en = s + len; }
+      else if (mode === 'l') { s = clamp(snap(s0 + dt), 0, e0 - 0.2); }
+      else en = clamp(snap(e0 + dt), s0 + 0.2, D());
+      o.start = +s.toFixed(1);
+      o.dur = en >= D() - 0.001 && mode !== 'r' && !(+o.dur > 0) ? 0 : +(en - s).toFixed(1);
+      if (mode === 'r' && en >= D() - 0.001) o.dur = 0; // 컷 끝까지
+      scrubT = clamp(mode === 'r' ? en - 0.05 : s + 0.3, 0, D() - 0.001);
+      drawTimeline(p); requestDraw();
+    };
+    const up = () => {
+      bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up);
+      save(); if (moved || !wasSel) { renderInspector(); renderPanels(); } requestDraw();
+    };
+    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
+  });
+}
+
+/* ---- AI 말풍선: 흰 배경에 그리게 한 뒤 바깥 흰색을 투명으로 바꾸고 여백을 잘라 낸다 ---- */
+async function bubbleCutout(blob) {
+  const bmp = await createImageBitmap(blob);
+  const sc = Math.min(1, 768 / Math.max(bmp.width, bmp.height)), w = Math.round(bmp.width * sc), h = Math.round(bmp.height * sc);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(bmp, 0, 0, w, h);
+  const img = g.getImageData(0, 0, w, h), d = img.data, bg = new Uint8Array(w * h), st = [];
+  const white = i => d[i * 4] > 236 && d[i * 4 + 1] > 236 && d[i * 4 + 2] > 236;
+  const push = i => { if (!bg[i] && white(i)) { bg[i] = 1; st.push(i); } };
+  for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+  while (st.length) { const i = st.pop(), x = i % w, y = (i / w) | 0; if (x > 0) push(i - 1); if (x < w - 1) push(i + 1); if (y > 0) push(i - w); if (y < h - 1) push(i + w); }
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (bg[i]) { d[i * 4 + 3] = 0; continue; }
+    const x = i % w, y = (i / w) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 <= x0 || y1 <= y0) throw new Error('말풍선 모양을 찾지 못했습니다. 설명을 바꿔 다시 만들어 보세요.');
+  g.putImageData(img, 0, 0);
+  const pad = 4, cw = x1 - x0 + 1 + pad * 2, ch = y1 - y0 + 1 + pad * 2;
+  const o = document.createElement('canvas'); o.width = cw; o.height = ch;
+  o.getContext('2d').drawImage(c, x0 - pad, y0 - pad, cw, ch, 0, 0, cw, ch);
+  return canvasBlob(o);
+}
+function bubbleUI(o) {
+  if (o.kind === 'narration' || o.kind === 'caption') return '';
+  const lib = (P.bubbles || []).map(b => '<button type="button" data-bub="' + b.id + '" class="' + (o.shapeImg === b.id ? 'on' : '') + '" title="' + esc(b.prompt || '') + '"><img src="' + assetURL(b.id) + '" alt="말풍선"></button>').join('');
+  return '<div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">' +
+    '<span class="lbl">AI 말풍선 — 모양을 설명하면 이미지로 만들어 이 말풍선에 씁니다</span>' +
+    '<input type="text" id="bubPrompt" placeholder="예: 분홍색 구름 모양, 귀여운 느낌 / 날카로운 가시 외침 풍선" value="' + esc(o._bubPrompt || '') + '">' +
+    '<div class="row"><button type="button" class="b ghost sm" id="bubGen" ' + (o._bubBusy ? 'disabled' : '') + '>' + (o._bubBusy ? '만드는 중…' : '🫧 말풍선 만들기') + '</button>' + (o.shapeImg ? '<button type="button" class="b ghost sm" id="bubOff">기본 말풍선으로</button>' : '') + '</div>' +
+    '<div class="st ' + stCls(o._bubSt) + '" id="bubSt">' + esc(o._bubSt || '') + '</div>' +
+    (lib ? '<div class="bub">' + lib + '</div>' : '') +
+    (o.shapeImg ? sl('말풍선 이미지 크기', 'imgScale', 0.6, 2, 0.05, '×') : '') +
+    '</div>';
+}
+async function genBubble(p, o) {
+  const desc = (o._bubPrompt || '').trim() || '클래식한 흰색 말풍선';
+  o._bubBusy = true; o._bubSt = 'AI로 말풍선 그리는 중…'; refreshPanel(p);
+  try {
+    const prompt = 'A single empty comic book speech balloon shape, ' + desc + '. Flat 2D graphic with clean outline, centered, fully visible with generous margin, drawn on a pure solid white (#FFFFFF) background. ' +
+      'The inside of the balloon should be clean and empty with room for text. Strictly no text, no letters, no characters, no drop shadow, no background scenery.';
+    const res = await generateImage({ prompt, purpose: '말풍선', size: '1024x1024', aspect: '1:1' });
+    const id = await addAsset(await bubbleCutout(res.blob));
+    P.bubbles = P.bubbles || []; P.bubbles.push({ id, prompt: desc }); if (P.bubbles.length > 24) { const old = P.bubbles.shift(); dropAssetIfUnused(old.id); }
+    o.shapeImg = id; await waitImg(id);
+    o._bubSt = '✓ 적용했습니다 — 아래 목록에서 다른 말풍선에도 쓸 수 있습니다';
+  } catch (e) { o._bubSt = '실패: ' + e.message; }
+  o._bubBusy = false; save(); refreshPanel(p); requestDraw();
+}
+
+/* 한 줄 → 대사 하나. 모양 자동 판별 + 위치·시각 자동 배치 */
+function parseLine(raw, forced) {
+  let t = raw.trim(), kind = 'speech';
+  let m;
+  if ((m = t.match(/^(나레이션|내레이션|N)\s*[:：]\s*/i))) { kind = 'narration'; t = t.slice(m[0].length); }
+  else if ((m = t.match(/^자막\s*[:：]\s*/))) { kind = 'caption'; t = t.slice(m[0].length); }
+  else if ((m = t.match(/^(생각|속마음)\s*[:：]\s*/))) { kind = 'thought'; t = t.slice(m[0].length); }
+  else if ((m = t.match(/^(외침|소리)\s*[:：]\s*/))) { kind = 'shout'; t = t.slice(m[0].length); }
+  else if (/^[（(].*[)）]$/.test(t)) { kind = 'thought'; t = t.replace(/^[（(]\s*|\s*[)）]$/g, ''); }
+  else if (/[!！]\s*$/.test(t) && [...t].length <= 16) kind = 'shout';
+  return { kind: forced && forced !== 'auto' ? forced : kind, text: t };
+}
+function addDialogues(p, lines, forced) {
+  const items = lines.map(l => parseLine(l, forced)).filter(x => x.text);
+  if (!items.length) return 0;
+  let lastStart = p.overlays.reduce((a, o) => Math.max(a, +o.start || 0), -0.8);
+  let side = p.overlays.filter(o => ['speech', 'thought', 'shout'].includes(o.kind)).length;
+  items.forEach(it => {
+    const o = newOverlay(it.kind, p); o.text = it.text;
+    if (['speech', 'thought', 'shout'].includes(it.kind)) {
+      const right = side % 2 === 1, row = Math.floor(side / 2);
+      o.x = right ? 0.64 : 0.36; o.y = clamp(0.2 + row * 0.15 + (right ? 0.07 : 0), 0.12, 0.66); side++;
+      o.tail = { x: o.x + (right ? 0.05 : -0.05), y: o.y + 0.13 };
+    } else if (it.kind === 'narration') { o.y = 0.12; } else { o.y = 0.8; }
+    const readLen = Math.max(1, [...it.text].length * 0.12);
+    lastStart = +(lastStart + Math.min(2.2, Math.max(0.9, readLen))).toFixed(1);
+    o.start = +Math.min(DUR_MAX - 1, lastStart).toFixed(1);
+    p.overlays.push(o); selOv = o.id;
+  });
+  const need = Math.max(...p.overlays.map(o => (+o.start || 0) + 1.5));
+  if (need > panelDur(p)) p.dur = +Math.min(DUR_MAX, need).toFixed(1);
+  return items.length;
+}
+
 function bindText(p, el) {
+  $('#bulkAdd', el).onclick = () => {
+    const ta = $('#bulkText', el), n = addDialogues(p, ta.value.split(/\r?\n/), $('#bulkKind', el).value);
+    if (!n) return toast('넣을 대사를 한 줄에 하나씩 입력하세요');
+    ta.value = ''; prepareFonts(); scrubT = Math.min(panelDur(p) - 0.01, (selOverlay()?.start || 0) + 0.8); save(); renderInspector(); renderPanels(); requestDraw();
+    toast(n + '개 대사를 넣었습니다');
+  };
   $$('[data-add]', el).forEach(b => (b.onclick = () => {
     const o = newOverlay(b.dataset.add, p); p.overlays.push(o); selOv = o.id;
     scrubT = Math.min(panelDur(p), o.start + 0.8); save(); prepareFonts(); renderInspector(); renderPanels(); requestDraw();
     setTimeout(() => { const t = $('#ovText'); if (t) { t.focus(); t.select(); } }, 0);
   }));
   $$('[data-ov]', el).forEach(b => (b.onclick = () => { selOv = b.dataset.ov; const o = selOverlay(); scrubT = Math.min(panelDur(p), (+o.start || 0) + 0.8); renderInspector(); requestDraw(); }));
+  bindTimeline(p, el);
   const o = selOverlay(); if (!o) return;
+  const endIn = $('#ovEnd', el);
+  let endAbs = +o.dur > 0 ? (+o.start || 0) + (+o.dur) : 0;
+  endIn.value = endAbs ? +endAbs.toFixed(2) : 0;
+  endIn.addEventListener('input', () => {
+    const v = parseFloat(endIn.value); if (Number.isNaN(v)) return;
+    endAbs = v <= 0 ? 0 : Math.min(panelDur(p), v);
+    o.dur = endAbs ? +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2) : 0;
+    save(); requestDraw(); drawTimeline(p);
+  });
   bind(el, o, (f, v) => {
+    if (f === 'start') { // 등장 시각을 옮겨도 사라지는 시각은 그대로 둔다
+      if (endAbs) { o.dur = +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2); if (o.start + o.dur > endAbs + 0.001) endAbs = o.start + o.dur; endIn.value = +endAbs.toFixed(2); }
+      drawTimeline(p);
+    }
     if (f === 'text') {
       prepareFonts(); const b = $(`[data-ov="${o.id}"] span`, el); if (b) b.textContent = v || '(빈 텍스트)';
       if (o.voice && !o._vbusy) { $('#vGen', el).textContent = voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'; $('#vSt', el).textContent = voiceStale(o) ? '문장이 바뀌어 지금 음성과 다릅니다' : `음성 ${o.voice.dur.toFixed(1)}초`; }
     }
     if (f === 'kind' || f === 'font' || f === 'size') prepareFonts();
+    if (f === 'font') { const fp = $('#fontPrev', el); if (fp) fp.style.fontFamily = fontCss(o.font); }
     if (f === 'kind') {
       const d = newOverlay(v, p); Object.assign(o, { fill: d.fill, fillA: d.fillA, stroke: d.stroke, strokeW: d.strokeW, color: d.color, font: d.font, anim: d.anim });
       if (!['speech', 'thought', 'shout'].includes(v)) o.tail = null; else if (!o.tail) o.tail = { x: o.x - 0.08, y: o.y + 0.1 };
       save(); renderInspector(); requestDraw();
     }
   });
+  const runPolish = async mode => {
+    const ta = $('#ovText', el), st = $('#polishSt', el), out = $('#polishOut', el);
+    const text = ta.value; if (!text.trim()) return toast('텍스트가 비어 있습니다');
+    if (!isServer()) return toast('글 다듬기는 서버 모드에서만 됩니다 (ANTHROPIC_API_KEY)');
+    st.className = 'st'; st.textContent = mode === 'spell' ? '맞춤법 검사 중…' : '다듬는 중…'; out.hidden = true;
+    try {
+      const d = await srvJSON('/api/polish', { text, kind: o.kind, mode });
+      if (d.text === text.trim()) { st.className = 'st ok'; st.textContent = '✓ 고칠 곳이 없습니다'; return; }
+      st.textContent = ''; $('#polishTxt', el).textContent = d.text; out.hidden = false;
+      $('#polishOk', el).onclick = () => { ta.value = d.text; ta.dispatchEvent(new Event('input', { bubbles: true })); out.hidden = true; st.className = 'st ok'; st.textContent = '적용했습니다'; };
+      $('#polishNo', el).onclick = () => { out.hidden = true; };
+      logCall({ kind: mode === 'spell' ? '맞춤법' : '다듬기', provider: 'anthropic', ok: true, cost: 0.001 });
+    } catch (e) { st.className = 'st err'; st.textContent = '실패: ' + e.message; }
+  };
+  $('#spellBtn', el).onclick = () => runPolish('spell');
+  $('#polishBtn', el).onclick = () => runPolish('polish');
+  $('#fontFile', el).onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    if (f.size > 15 * 1024 * 1024) return toast('폰트 파일이 너무 큽니다 (15MB 이하)');
+    try {
+      const id = await addAsset(f);
+      P.fonts = P.fonts || []; P.fonts.push({ id, name: f.name.replace(/\.[^.]+$/, '') });
+      await registerProjectFonts();
+      if (!registeredFonts.has(id)) throw new Error('폰트를 읽지 못했습니다');
+      o.font = 'cf_' + id; save(); prepareFonts(); renderInspector(); requestDraw(); toast('폰트 ‘' + P.fonts[P.fonts.length - 1].name + '’을 넣었습니다');
+    } catch (err) { toast('폰트 올리기 실패: ' + err.message, 4000); }
+  };
+  $('#fontAll', el).onclick = () => { P.panels.forEach(x => x.overlays.forEach(t => { t.font = o.font; })); save(); prepareFonts(); requestDraw(); renderPanels(); toast('모든 대사에 이 글꼴을 적용했습니다'); };
+  const bp = $('#bubPrompt', el);
+  if (bp) {
+    bp.addEventListener('input', () => { o._bubPrompt = bp.value; });
+    $('#bubGen', el).onclick = () => genBubble(p, o);
+    const off = $('#bubOff', el); if (off) off.onclick = () => { o.shapeImg = null; save(); renderInspector(); requestDraw(); };
+    $$('[data-bub]', el).forEach(b => (b.onclick = () => { o.shapeImg = b.dataset.bub; getImg(o.shapeImg); save(); renderInspector(); requestDraw(); }));
+  }
   $('#vGen', el).onclick = () => genVoice(p, o, !!o.voice && !voiceStale(o));
   const vp = $('#vPlay', el); if (vp) vp.onclick = async () => {
     const b = await audioBuf(o.voice.assetId); if (!b) return toast('음성을 읽지 못했습니다');
@@ -1933,7 +2223,7 @@ function tabVideo(p) {
   <details><summary class="note">네거티브 프롬프트</summary><textarea data-f="klingNeg" rows="2" placeholder="${esc(DEFAULT_NEG)}"></textarea></details>
   <div class="g2">
     <label><span class="lbl">모드</span><select data-f="klingMode"><option value="std">Standard</option><option value="pro">Pro (고화질·비쌈)</option></select></label>
-    <label><span class="lbl">길이</span><select data-f="klingLen" data-num><option value="5">5초</option><option value="10">10초</option></select></label>
+    <label><span class="lbl">길이</span><select data-f="klingLen" data-num><option value="3">3초</option><option value="4">4초</option><option value="5">5초</option><option value="6">6초</option><option value="7">7초</option><option value="8">8초</option><option value="9">9초</option><option value="10">10초</option><option value="11">11초</option><option value="12">12초</option><option value="13">13초</option><option value="14">14초</option><option value="15">15초</option></select></label>
   </div>
   <label class="chk"><input type="checkbox" data-f="klingTail"> 다음 컷 이미지를 끝 프레임으로 (모델·모드에 따라 미지원)</label>
   <div class="row"><button type="button" class="b" id="klBtn" ${busy || !curAsset(p) ? 'disabled' : ''}>${busy ? '영상화 진행 중…' : '클링으로 영상 만들기'}</button><span class="note" id="klEst">추정 $${est} · 모델 ${esc(S.klModel)}</span></div>
@@ -1976,7 +2266,7 @@ async function addClip(p, file) {
 function tabCut(p) {
   return `
   <div class="g2">
-    <label><span class="lbl">컷 길이(초)</span><input type="number" data-f="dur" min="0.5" step="0.1"></label>
+    <label><span class="lbl">컷 길이(초, 3~15)</span><input type="number" data-f="dur" min="3" max="15" step="0.1"></label>
     <label><span class="lbl">이 컷으로 들어올 때 전환</span><select data-f="trans"><option value="cut">컷(즉시)</option><option value="fade">페이드</option><option value="slide">슬라이드</option><option value="flash">플래시</option></select></label>
   </div>
   <div class="grp"><span class="lbl">카메라 모션 — 영상 클립이 없을 때 정지 이미지에 적용</span>
@@ -2019,29 +2309,68 @@ function hitOv(p, x, y) {
 cv.addEventListener('pointerdown', e => {
   if (player.playing) return;
   const p = selPanel(), pt = toCanvas(e), o = selOverlay();
+  const hh = o && !o._editing ? hitHandle(o, pt) : null;
   if (o && o._tip && Math.hypot(pt.x - o._tip.x, pt.y - o._tip.y) < 46) drag = { o, mode: 'tail' };
-  else {
+  else if (hh) {
+    const cX = o.x * W, cY = o.y * H;
+    drag = hh.k.length === 2
+      ? { o, mode: 'resize', d0: Math.max(30, Math.hypot(pt.x - cX, pt.y - cY)), size0: +o.size || 46, w0: +o.w || 0.62, cX, cY }
+      : { o, mode: 'width', d0: Math.max(30, Math.abs(pt.x - cX)), w0: +o.w || 0.62, cX };
+  } else {
     const h = hitOv(p, pt.x, pt.y);
     if (!h) { if (selOv) { selOv = null; if (tab === 'text') renderInspector(); requestDraw(); } return; }
     const changed = selOv !== h.id; selOv = h.id;
     drag = { o: h, mode: 'move', dx: pt.x - h.x * W, dy: pt.y - h.y * H, tdx: h.tail ? (h.tail.x - h.x) : 0, tdy: h.tail ? (h.tail.y - h.y) : 0 };
     if (tab !== 'text') setTab('text'); else if (changed) renderInspector();
   }
-  cv.setPointerCapture(e.pointerId); e.preventDefault(); requestDraw();
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 포인터 캡처 불가여도 계속 */ } e.preventDefault(); requestDraw();
 });
 cv.addEventListener('pointermove', e => {
   if (!drag) return;
   const pt = toCanvas(e), o = drag.o;
-  if (drag.mode === 'tail') o.tail = { x: clamp(pt.x / W, -0.1, 1.1), y: clamp(pt.y / H, -0.1, 1.1) };
+  if (drag.mode === 'resize') {
+    const k = clamp(Math.hypot(pt.x - drag.cX, pt.y - drag.cY) / drag.d0, 0.3, 4);
+    o.size = Math.round(clamp(drag.size0 * k, 20, 120)); o.w = +clamp(drag.w0 * k, 0.2, 0.95).toFixed(3);
+  } else if (drag.mode === 'width') o.w = +clamp(drag.w0 * Math.abs(pt.x - drag.cX) / drag.d0, 0.2, 0.95).toFixed(3);
+  else if (drag.mode === 'tail') o.tail = { x: clamp(pt.x / W, -0.1, 1.1), y: clamp(pt.y / H, -0.1, 1.1) };
   else {
     o.x = clamp((pt.x - drag.dx) / W, 0, 1); o.y = clamp((pt.y - drag.dy) / H, 0, 1);
     if (o.tail) o.tail = { x: o.x + drag.tdx, y: o.y + drag.tdy };
   }
   requestDraw();
 });
-const endDrag = () => { if (drag) { drag = null; save(); } };
+const endDrag = () => { if (drag) { const m = drag.mode; drag = null; save(); if ((m === 'resize' || m === 'width') && tab === 'text') renderInspector(); } };
+cv.addEventListener('pointermove', e => { // 조절점 위에서는 커서 모양을 바꾼다
+  if (drag || player.playing) return;
+  const o = selOverlay(), h = o && !o._editing ? hitHandle(o, toCanvas(e)) : null;
+  cv.style.cursor = h ? h.c : hitOv(selPanel(), toCanvas(e).x, toCanvas(e).y) ? 'move' : '';
+});
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
-cv.addEventListener('dblclick', () => { const t = $('#ovText'); if (t) t.focus(); });
+function closeInlineEdit() { const t = $('#inlineEdit'); if (t) t.blur(); }
+function openInlineEdit(o) {
+  closeInlineEdit();
+  const rc = cv.getBoundingClientRect(), wr = wrapEl.getBoundingClientRect(), k = rc.width / W, b = o._box; if (!b) return;
+  o._editing = true;
+  const ta = document.createElement('textarea'); ta.id = 'inlineEdit'; ta.value = o.text || '';
+  ta.title = 'Enter = 줄바꿈 · Esc 또는 바깥 클릭 = 완료';
+  const place = () => {
+    const bb = o._box, w = Math.max(bb.w * k, 150), h = Math.max(bb.h * k, 64);
+    ta.style.left = (rc.left - wr.left + (bb.x + bb.w / 2) * k - w / 2) + 'px'; ta.style.top = (rc.top - wr.top + (bb.y + bb.h / 2) * k - h / 2) + 'px';
+    ta.style.width = w + 'px'; ta.style.height = h + 'px';
+  };
+  ta.style.cssText = 'position:absolute;z-index:20;box-sizing:border-box;resize:none;text-align:center;background:#fff;color:#111;border:2px dashed #9A7A2E;border-radius:6px;padding:6px;overflow:hidden;line-height:1.38;' +
+    'font-family:' + fontCss(o.font) + ';font-size:' + Math.max(12, o.size * k) + 'px;';
+  wrapEl.append(ta); place(); ta.focus(); ta.select();
+  ta.addEventListener('input', () => { o.text = ta.value; prepareFonts(); save(); requestDraw(); setTimeout(place, 40); });
+  ta.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') ta.blur(); });
+  ta.addEventListener('blur', () => { o._editing = false; ta.remove(); save(); if (tab === 'text') renderInspector(); requestDraw(); });
+}
+cv.addEventListener('dblclick', e => {
+  if (player.playing) return;
+  const p = selPanel(), h = hitOv(p, toCanvas(e).x, toCanvas(e).y); if (!h) return;
+  selOv = h.id; if (tab !== 'text') setTab('text'); else renderInspector();
+  requestDraw(); setTimeout(() => openInlineEdit(h), 0);
+});
 const wrapEl = $('#stageWrap');
 wrapEl.addEventListener('dragover', e => { e.preventDefault(); wrapEl.classList.add('drop'); });
 wrapEl.addEventListener('dragleave', () => wrapEl.classList.remove('drop'));
