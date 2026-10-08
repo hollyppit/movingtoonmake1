@@ -358,6 +358,36 @@ export async function handlePolish(req, env) {
   } catch (e) { return json({ error: e.message }, 502); }
 }
 
+/* ---------- 출판만화 배치: 컷 순서는 그대로 두고 페이지·줄·칸 크기를 Claude 가 정한다 ---------- */
+const LAYOUT_MODEL = 'claude-sonnet-5-5';
+export async function handleLayout(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  if (!authed(req, env)) return json({ error: '관리자 인증 실패' }, 401);
+  try {
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const b = await req.json();
+    const cuts = (Array.isArray(b.cuts) ? b.cuts : []).slice(0, 120).map(c => ({ i: +c.i, ratio: +(+c.ratio).toFixed(3), big: !!c.big, desc: String(c.desc || '').slice(0, 160), texts: (c.texts || []).slice(0, 4), dur: +c.dur || 0 }));
+    if (!cuts.length) return json({ error: '컷이 없습니다' }, 400);
+    const system = 'You are an editor who lays out comic (webtoon / manga) pages for print. You receive cuts in reading order. Decide how to group them into pages and rows. ' +
+      'Rules: (1) Keep the original order: every cut index 0..N-1 must appear exactly once, in order when reading pages -> rows -> cells left to right. (2) Each page holds 2-5 cuts in 1-4 rows. ' +
+      '(3) Row "h" is a relative height weight and cell "w" a relative width weight (any positive numbers). Choose cell widths roughly proportional to (cut ratio x row height) so images are not heavily cropped; you may deviate for emphasis. ' +
+      '(4) Emphasis: opening/establishing shots, climactic, shouting or impact cuts (big=true) get their own bigger row; quiet or transition cuts stay small; cuts with a lot of text need enough room. ' +
+      '(5) When possible end a page on a suspenseful beat. (6) Reply with ONLY JSON, no markdown: {"pages":[{"rows":[{"h":number,"cells":[{"cut":number,"w":number}]}]}],"reason":"2-3 sentences in Korean explaining the layout"}.';
+    const user = JSON.stringify({ page_mm: { w: +b.page?.w || 182, h: +b.page?.h || 257 }, margin_mm: +b.margin || 10, gutter_mm: +b.gutter || 4, reading_direction: b.dir === 'rtl' ? 'right-to-left' : 'left-to-right', cuts });
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: LAYOUT_MODEL, max_tokens: 4000, system, messages: [{ role: 'user', content: user }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 배치를 읽지 못했습니다' }, 502);
+    let out; try { out = JSON.parse(m[0]); } catch (e) { return json({ error: 'AI 응답 형식 오류' }, 502); }
+    if (!Array.isArray(out.pages)) return json({ error: 'AI 응답에 pages 가 없습니다' }, 502);
+    return json({ pages: out.pages, reason: String(out.reason || '').slice(0, 400), model: LAYOUT_MODEL });
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
 /* ---------- 로그인 확인 / 음성(OpenAI TTS) ---------- */
 export async function handleAdmin(req, env) {
   return authed(req, env) ? json({ ok: true }) : json({ error: '비밀번호가 맞지 않습니다' }, 401);
@@ -415,6 +445,7 @@ export default {
     if (p === '/api/tts') return handleTts(req, env);
     if (p === '/api/admin') return handleAdmin(req, env);
     if (p === '/api/polish') return handlePolish(req, env);
+    if (p === '/api/layout') return handleLayout(req, env);
     return json({ error: 'not found' }, 404);
   },
 };

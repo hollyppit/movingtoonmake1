@@ -200,11 +200,24 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   .stage-wrap { height: 64vh; flex: none; }
 }
 @media (max-width: 480px) { .g2 { grid-template-columns: 1fr; } .vers { grid-template-columns: repeat(3, 1fr); } }
+.views { display: flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px; }
+.views button { border: 0; background: none; padding: 4px 14px; border-radius: 999px; cursor: pointer; font-size: .82rem; color: var(--ink-2); white-space: nowrap; }
+.views button[aria-pressed=true] { background: var(--gold); color: #fff; }
+.printapp { display: grid; grid-template-columns: 290px minmax(0, 1fr) 340px; height: calc(100vh - 56px); }
+.printapp[hidden] { display: none; }
+#prCanvas { border: 1px solid var(--line); background: #fff; box-shadow: 0 6px 24px rgba(60, 45, 10, .18); touch-action: none; }
+.pgl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pgt { border: 2px solid transparent; background: var(--panel); padding: 3px; border-radius: 3px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.pgt.on { border-color: var(--gold); }
+.pgt canvas { width: 100%; height: auto; display: block; border: 1px solid var(--line-2); }
+.pgt span { font-size: .7rem; color: var(--ink-3); }
+@media (max-width: 1100px) { .printapp { grid-template-columns: 1fr; height: auto; } }
 </style>
 </head>
 <body>
 <header class="bar">
   <div class="brand">MANTRA<b>무빙툰 스튜디오</b></div>
+  <nav class="views" aria-label="작업 화면"><button type="button" data-view="make" aria-pressed="true">제작</button><button type="button" data-view="print" aria-pressed="false">인쇄 배치</button></nav>
   <input id="title" class="title-in" aria-label="프로젝트 제목" placeholder="프로젝트 제목">
   <select id="aspectSel" aria-label="화면 비율" title="화면 비율" style="width:auto;min-height:30px;padding:3px 8px;font-size:.8rem"><option value="9:16">세로 9:16 (쇼츠·릴스)</option><option value="16:9">가로 16:9 (유튜브)</option><option value="1:1">정사각 1:1</option></select>
   <div class="bar-r">
@@ -226,6 +239,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
         <button type="button" data-m="bgm">배경음악 선택…</button>
         <button type="button" data-m="bgmOff">배경음악 제거</button>
         <hr>
+        <button type="button" data-m="cutImgs">컷 이미지 내보내기 (여러 컷 ZIP·한 장씩)…</button>
         <button type="button" data-m="png">현재 프레임 PNG 저장</button>
       </div>
     </div>
@@ -401,6 +415,15 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 </dialog>
 
 <!-- 내보내기 -->
+<div class="printapp" id="printApp" hidden>
+  <aside class="col left" id="prLeft" aria-label="페이지"></aside>
+  <main class="col center">
+    <div class="stage-wrap" id="prWrap"><canvas id="prCanvas" width="546" height="771" aria-label="인쇄용 페이지"></canvas></div>
+    <div class="transport"><button type="button" class="b ghost sm" id="prPrev">◀ 이전 쪽</button><span class="tc" id="prPgLabel">1 / 1쪽</span><button type="button" class="b ghost sm" id="prNext">다음 쪽 ▶</button></div>
+  </main>
+  <aside class="col right" id="prRight" aria-label="인쇄 설정"></aside>
+</div>
+
 <dialog id="dlgExport">
   <div class="dlg-h"><h3>영상 내보내기</h3></div>
   <div class="dlg-b">
@@ -1440,7 +1463,7 @@ function drawPanel(ctx, p, lt, opt = {}) {
   }
   ctx.restore();
   (p.layers || []).forEach(l => drawLayer(ctx, l, lt, { still: opt.still, selected: opt.editing && l.id === selLayer && !selOverlay() }));
-  if (opt.overlays !== false) p.overlays.forEach(o => drawOverlay(ctx, o, lt, { editing: opt.editing, selected: o.id === selOv && opt.editing }));
+  if (opt.overlays !== false) p.overlays.forEach(o => drawOverlay(ctx, o, lt, { editing: opt.editing, selected: opt.all || (o.id === selOv && opt.editing) }));
 }
 
 /* ---- 말풍선·나레이션 ---- */
@@ -2380,6 +2403,419 @@ async function genLayerImage(p) {
   p._lyBusy = false; refreshPanel(p); renderPanels();
 }
 
+/* =========================================================
+   컷 이미지 내보내기 (한 장씩 / 여러 컷 한꺼번에 ZIP) + 인쇄용 배치(출판만화)
+   ========================================================= */
+let crcTable = null;
+function crc32(u8) {
+  if (!crcTable) { crcTable = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; crcTable[n] = c >>> 0; } }
+  let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcTable[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+/* 압축 없는 ZIP (이미 압축된 PNG/JPG라 충분) */
+async function makeZip(files) {
+  const enc = new TextEncoder(), chunks = [], central = []; let offset = 0;
+  const now = new Date(), dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1), dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  for (const f of files) {
+    const data = new Uint8Array(await f.blob.arrayBuffer()), name = enc.encode(f.name), crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    chunks.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  }
+  let csize = 0; central.forEach(c => (csize += c.length));
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, csize, true); end.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+}
+/* JPEG 페이지를 이어 붙인 PDF. pages: [{ w, h (pt), pw, ph (px), jpeg: Blob }] */
+async function makePdf(pages) {
+  const enc = new TextEncoder(), parts = [], offsets = []; let pos = 0;
+  const push = x => { const u = typeof x === 'string' ? enc.encode(x) : x; parts.push(u); pos += u.length; };
+  const obj = (n, body) => { offsets[n] = pos; push(n + ' 0 obj\n' + body + '\nendobj\n'); };
+  const n = pages.length;
+  push('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [' + pages.map((_, i) => (3 + 3 * i) + ' 0 R').join(' ') + '] /Count ' + n + ' >>');
+  for (let i = 0; i < n; i++) {
+    const pg = pages[i], jp = new Uint8Array(await pg.jpeg.arrayBuffer()), w = pg.w.toFixed(2), h = pg.h.toFixed(2);
+    obj(3 + 3 * i, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + w + ' ' + h + '] /Resources << /XObject << /Im0 ' + (5 + 3 * i) + ' 0 R >> >> /Contents ' + (4 + 3 * i) + ' 0 R >>');
+    const content = 'q ' + w + ' 0 0 ' + h + ' 0 0 cm /Im0 Do Q';
+    obj(4 + 3 * i, '<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream');
+    offsets[5 + 3 * i] = pos;
+    push((5 + 3 * i) + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + pg.pw + ' /Height ' + pg.ph + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jp.length + ' >>\nstream\n');
+    push(jp); push('\nendstream\nendobj\n');
+  }
+  const xref = pos, total = 3 * n + 3;
+  push('xref\n0 ' + total + '\n0000000000 65535 f \n');
+  for (let k = 1; k < total; k++) push(String(offsets[k]).padStart(10, '0') + ' 00000 n \n');
+  push('trailer\n<< /Size ' + total + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF');
+  return new Blob(parts, { type: 'application/pdf' });
+}
+
+/* 컷 하나를 완성 그림으로 그린다 (text=true: 말풍선·글자·레이어 전부 보이는 상태) */
+async function renderCutCanvas(p, { text = true, maxSide = 0 } = {}) {
+  await loadFontsNow();
+  const id = curAsset(p); if (id && assets.has(id)) await waitImg(id).catch(() => {});
+  for (const l of p.layers || []) if (assets.has(l.assetId)) await waitImg(l.assetId).catch(() => {});
+  for (const o of p.overlays) if (o.shapeImg && assets.has(o.shapeImg)) await waitImg(o.shapeImg).catch(() => {});
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  drawPanel(c.getContext('2d'), p, 0, { still: true, all: text, overlays: text });
+  if (maxSide && Math.max(W, H) > maxSide) {
+    const k = maxSide / Math.max(W, H), s = document.createElement('canvas'); s.width = Math.round(W * k); s.height = Math.round(H * k);
+    const g = s.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(c, 0, 0, s.width, s.height); return s;
+  }
+  return c;
+}
+const cutFileName = (p, ext) => safeName(P.title) + '_컷' + String(P.panels.indexOf(p) + 1).padStart(2, '0') + '.' + ext;
+
+/* 대화상자: 내보낼 컷을 고르고 한꺼번에 ZIP / 한 장씩 저장 */
+function openCutExport(onlyPanel) {
+  const dlg = document.createElement('dialog');
+  const items = P.panels.map((p, i) => '<label class="chk" style="padding:3px 0"><input type="checkbox" class="ce-i" value="' + p.id + '" ' + (!onlyPanel || onlyPanel.id === p.id ? 'checked' : '') + '> 컷 ' + (i + 1) + ' <span class="note" style="margin:0">' + esc((p.prompt || '').slice(0, 28)) + (curAsset(p) ? '' : ' · 이미지 없음') + '</span></label>').join('');
+  dlg.innerHTML = '<form method="dialog" style="padding:18px 20px;min-width:min(440px,88vw)"><h3>컷 이미지 내보내기</h3>' +
+    '<div class="row" style="margin-bottom:6px"><button type="button" class="b ghost sm" id="ceAll">전체 선택</button><button type="button" class="b ghost sm" id="ceNone">선택 해제</button></div>' +
+    '<div style="max-height:36vh;overflow:auto;border:1px solid var(--line-2);border-radius:3px;padding:6px 10px">' + items + '</div>' +
+    '<div class="g2" style="margin-top:10px">' +
+    '<label><span class="lbl">내용</span><select id="ceText"><option value="1">완성 컷 (말풍선·글자·레이어 포함)</option><option value="0">그림만 (말풍선·글자 제외)</option></select></label>' +
+    '<label><span class="lbl">형식</span><select id="ceFmt"><option value="png">PNG (무손실)</option><option value="jpg">JPG (용량 작음)</option></select></label>' +
+    '<label><span class="lbl">크기</span><select id="ceSize"><option value="1">원본 크기</option><option value="0.5">절반</option></select></label></div>' +
+    '<p class="note" id="ceSt" style="margin-top:8px">대사가 나중에 사라지게 설정했어도, 내보내는 그림에는 모든 말풍선·글자가 보이는 상태로 들어갑니다.</p>' +
+    '<div class="row" style="margin-top:10px;justify-content:flex-end"><button type="button" class="b ghost sm" id="ceEach">한 장씩 저장</button><button type="button" class="b sm" id="ceZip">ZIP으로 한꺼번에 저장</button><button class="b ghost sm" value="x">닫기</button></div></form>';
+  document.body.append(dlg);
+  const q = s => dlg.querySelector(s), boxes = () => [...dlg.querySelectorAll('.ce-i')];
+  q('#ceAll').onclick = () => boxes().forEach(b => (b.checked = true)); q('#ceNone').onclick = () => boxes().forEach(b => (b.checked = false));
+  const run = async zip => {
+    const list = boxes().filter(b => b.checked).map(b => P.panels.find(p => p.id === b.value)).filter(Boolean);
+    if (!list.length) return toast('내보낼 컷을 고르세요');
+    const text = q('#ceText').value === '1', fmt = q('#ceFmt').value, half = q('#ceSize').value === '0.5', st = q('#ceSt');
+    q('#ceZip').disabled = q('#ceEach').disabled = true;
+    const out = [];
+    try {
+      for (let i = 0; i < list.length; i++) {
+        st.textContent = (i + 1) + ' / ' + list.length + ' 컷 그리는 중…';
+        const c = await renderCutCanvas(list[i], { text, maxSide: half ? Math.max(W, H) / 2 : 0 });
+        const blob = await canvasBlob(c, fmt === 'jpg' ? 'image/jpeg' : 'image/png', 0.93), name = cutFileName(list[i], fmt);
+        if (zip) out.push({ name, blob }); else { download(blob, name); await new Promise(r => setTimeout(r, 250)); }
+      }
+      if (zip) { st.textContent = 'ZIP 만드는 중…'; download(await makeZip(out), safeName(P.title) + '_컷이미지.zip'); }
+      st.textContent = '✓ ' + list.length + '장을 저장했습니다';
+    } catch (e) { st.textContent = '실패: ' + e.message; }
+    q('#ceZip').disabled = q('#ceEach').disabled = false;
+  };
+  q('#ceZip').onclick = () => run(true); q('#ceEach').onclick = () => run(false);
+  dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
+}
+async function saveCutImage(p) { // 컷 하나를 완성 상태 PNG 로 바로 저장
+  try { download(await canvasBlob(await renderCutCanvas(p, { text: true })), cutFileName(p, 'png')); } catch (e) { toast('저장 실패: ' + e.message, 4000); }
+}
+
+/* =========================================================
+   인쇄용 배치 (출판만화): 컷을 용지 위에 칸으로 배치
+   ========================================================= */
+const PAPERS = { A4: [210, 297, 'A4 (210×297mm)'], B5: [182, 257, 'B5 (182×257mm)'], B4: [257, 364, 'B4 (257×364mm)'], SINGUK: [152, 225, '신국판 (152×225mm)'], A5: [148, 210, 'A5 (148×210mm)'] };
+const printDefault = () => ({ paper: 'B5', orient: 'portrait', margin: 10, gutter: 4, border: 0.5, bg: '#ffffff', dir: 'ltr', pageNums: true, pages: [], note: '' });
+const PR = () => (P.print = P.print || printDefault());
+let view = 'make', prPage = 0, prSel = null, prDrag = null;
+const prCache = new Map(); // 컷 id → { sig, canvas }
+const PX_MM = 3; // 편집 화면 해상도 (mm 당 px)
+const prPageMM = () => { const [w, h] = PAPERS[PR().paper] || PAPERS.B5; return PR().orient === 'landscape' ? [h, w] : [w, h]; };
+const prPageOf = id => PR().pages.findIndex(pg => pg.panels.some(x => x.id === id));
+const prCutName = (cutId) => { const i = P.panels.findIndex(p => p.id === cutId); return i < 0 ? '?' : '컷 ' + (i + 1); };
+
+function setView(v) {
+  view = v; document.querySelector('.app').hidden = v !== 'make'; $('#printApp').hidden = v !== 'print';
+  document.querySelectorAll('.views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));
+  if (v === 'print') { stop(); renderPrint(); } else { fitStage(); requestDraw(); }
+}
+document.querySelectorAll('.views button').forEach(b => (b.onclick = () => setView(b.dataset.view)));
+
+/* ---- 줄(row) 배치 → 칸 좌표(페이지 비율) ---- */
+function rowsToPage(rows, fill) {
+  const cfg = PR(), [pw, ph] = prPageMM(), mx = cfg.margin / pw, my = cfg.margin / ph, gx = cfg.gutter / pw, gy = cfg.gutter / ph;
+  const innerW = 1 - 2 * mx, innerH = 1 - 2 * my, availH = innerH - gy * (rows.length - 1), sumH = rows.reduce((a, r) => a + (+r.h || 1), 0);
+  const rtl = cfg.dir === 'rtl'; let y = my; const panels = [];
+  rows.forEach(r => {
+    const rh = fill ? (+r.h || 1) * availH / sumH : (+r.h || 1) / ph; // fill: 줄 높이를 비율(가중치)로 보고 페이지를 꽉 채움, 아니면 mm 그대로
+    const n = r.cells.length, availW = innerW - gx * (n - 1), sumW = r.cells.reduce((a, c) => a + (+c.w || 1), 0);
+    let x = mx;
+    r.cells.forEach(c => { const w = availW * (+c.w || 1) / sumW; panels.push({ id: uid(), cut: c.cut, x: rtl ? 1 - x - w : x, y, w, h: rh, fit: 'cover', fx: 0.5, fy: 0.5 }); x += w + gx; });
+    y += rh + gy;
+  });
+  return { id: uid(), panels };
+}
+/* 기본 알고리즘: 컷의 가로세로 비율에 맞춰 한 줄에 1~3컷, 줄 높이를 목표값에 가깝게, 중요한 컷은 혼자 크게 */
+function localRows(items) {
+  const cfg = PR(), [pw, ph] = prPageMM(), iw = pw - 2 * cfg.margin, ih = ph - 2 * cfg.margin, g = cfg.gutter, tgt = ih / 3, pages = [];
+  let rows = [], used = 0, i = 0;
+  while (i < items.length) {
+    let bestK = 1, bestD = Infinity; const maxK = Math.min(3, items.length - i);
+    for (let k = 1; k <= maxK; k++) {
+      const grp = items.slice(i, i + k); if (k > 1 && grp.some(x => x.big)) break;
+      const sr = grp.reduce((a, x) => a + x.ratio, 0), h = (iw - g * (k - 1)) / sr, d = Math.abs(h - tgt) * (k > 1 ? 1 : 1.05);
+      if (d < bestD) { bestD = d; bestK = k; }
+    }
+    const cells = items.slice(i, i + bestK), sr = cells.reduce((a, x) => a + x.ratio, 0);
+    let h = (iw - g * (bestK - 1)) / sr; if (cells[0].big && bestK === 1) h = Math.min(h, ih * 0.62); h = Math.min(h, ih);
+    if (rows.length && used + g + h > ih + 0.01) {
+      const remain = ih - used - g; // 남은 자리가 충분하면 이 줄을 줄여서 같은 페이지에 넣는다(그림은 약간 잘림)
+      if (remain >= ih * 0.3 && remain >= h * 0.62) h = remain; else { pages.push(rows); rows = []; used = 0; }
+    }
+    rows.push({ h, cells: cells.map(x => ({ cut: x.i, w: x.ratio * h })) }); used += (rows.length > 1 ? g : 0) + h; i += bestK;
+  }
+  if (rows.length) pages.push(rows);
+  return pages;
+}
+const prItems = () => P.panels.map((p, i) => ({
+  i, ratio: W / H, big: p.overlays.some(o => o.kind === 'shout') || /climax|절정|클라이맥스/i.test(p.prompt || ''),
+  desc: (p.prompt || '').slice(0, 160), texts: p.overlays.slice(0, 4).map(o => ({ k: o.kind, t: (o.text || '').slice(0, 40) })), dur: panelDur(p),
+}));
+function applyPages(pagesRows, fillAll) {
+  const cuts = P.panels.map(p => p.id), cfg = PR(), [pw, ph] = prPageMM(), ih = ph - 2 * cfg.margin;
+  PR().pages = pagesRows.map(rows => {
+    // 기본 알고리즘(mm 높이): 줄이 적어 1.35배 넘게 늘려야 하면 늘리지 않고 위쪽에 붙여 둔다. AI(가중치): 항상 꽉 채움
+    const natural = rows.reduce((a, r) => a + r.h, 0) + cfg.gutter * (rows.length - 1);
+    const fill = fillAll || ih / natural <= 1.35;
+    return rowsToPage(rows.map(r => ({ h: r.h, cells: r.cells.map(c => ({ cut: cuts[c.cut], w: c.w })) })), fill);
+  });
+  prPage = 0; prSel = null;
+}
+function autoLocal() { applyPages(localRows(prItems()), false); PR().note = '기본 알고리즘으로 배치했습니다 (컷 비율·중요도 기준).'; }
+async function autoAI() {
+  const st = $('#prAiSt'); const setSt = t => { if (st) st.textContent = t; };
+  if (!P.panels.length) return toast('컷이 없습니다');
+  if (!isServer()) { autoLocal(); setSt('AI 배치는 서버 모드에서만 됩니다. 기본 알고리즘으로 배치했습니다.'); renderPrint(); return; }
+  setSt('AI가 컷을 검토하며 배치하는 중…'); const btn = $('#prAi'); if (btn) btn.disabled = true;
+  try {
+    const [pw, ph] = prPageMM(), cfg = PR();
+    const d = await srvJSON('/api/layout', { cuts: prItems(), page: { w: pw, h: ph }, dir: cfg.dir, margin: cfg.margin, gutter: cfg.gutter });
+    const flat = []; (d.pages || []).forEach(pg => (pg.rows || []).forEach(r => (r.cells || []).forEach(c => flat.push(+c.cut))));
+    const n = P.panels.length;
+    if (flat.length !== n || flat.some((v, i) => v !== i)) throw new Error('AI 배치가 컷 순서와 맞지 않았습니다');
+    applyPages(d.pages.map(pg => pg.rows.map(r => ({ h: +r.h || 1, cells: r.cells.map(c => ({ cut: +c.cut, w: +c.w || 1 })) }))), true);
+    PR().note = d.reason || 'AI가 배치했습니다.';
+    logCall({ kind: '인쇄 배치', provider: 'anthropic', ok: true, cost: 0.01 });
+  } catch (e) { autoLocal(); PR().note = 'AI 배치 실패(' + e.message + ') → 기본 알고리즘으로 배치했습니다.'; }
+  renderPrint();
+}
+
+/* ---- 컷 이미지 캐시 ---- */
+const cutSig = p => hash(JSON.stringify(p, (k, v) => (k.startsWith('_') ? undefined : v)) + '|' + (P.aspect || '') + '|' + W + 'x' + H).toString(36);
+async function prLoadCuts() {
+  const jobs = P.panels.filter(p => { const c = prCache.get(p.id); return !c || c.sig !== cutSig(p); }).map(async p => {
+    try { prCache.set(p.id, { sig: cutSig(p), canvas: await renderCutCanvas(p, { text: true, maxSide: 900 }) }); } catch (e) { /* 이미지 없는 컷은 회색 칸 */ }
+  });
+  if (jobs.length) { await Promise.all(jobs); drawPrintPage(); drawPageThumbs(); }
+}
+
+/* ---- 페이지 그리기 (편집 화면·내보내기 공용) ---- */
+function drawPage(ctx, page, k, getCut, opt = {}) {
+  const cfg = PR(), [pw, ph] = prPageMM(), Wp = pw * k, Hp = ph * k;
+  ctx.save(); ctx.fillStyle = cfg.bg; ctx.fillRect(0, 0, Wp, Hp);
+  page.panels.forEach(pn => {
+    const rx = pn.x * Wp, ry = pn.y * Hp, rw = pn.w * Wp, rh = pn.h * Hp, src = getCut(pn.cut);
+    ctx.save(); ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
+    if (src) {
+      const iw = src.width, ih = src.height, s = pn.fit === 'contain' ? Math.min(rw / iw, rh / ih) : Math.max(rw / iw, rh / ih), dw = iw * s, dh = ih * s;
+      ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, rx + (rw - dw) * (pn.fx ?? 0.5), ry + (rh - dh) * (pn.fy ?? 0.5), dw, dh);
+    } else { ctx.fillStyle = '#d8d4c8'; ctx.fillRect(rx, ry, rw, rh); ctx.fillStyle = '#8A8575'; ctx.font = (4 * k) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(prCutName(pn.cut), rx + rw / 2, ry + rh / 2); }
+    ctx.restore();
+    if (cfg.border > 0) { ctx.strokeStyle = '#000'; ctx.lineWidth = cfg.border * k; ctx.strokeRect(rx, ry, rw, rh); }
+  });
+  if (cfg.pageNums && !opt.thumb) {
+    const n = PR().pages.indexOf(page) + 1, dark = /^#0|^#1/i.test(cfg.bg);
+    ctx.fillStyle = dark ? '#fff' : '#222'; ctx.font = (3.4 * k) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(String(n), Wp / 2, Hp - Math.max(2.6, cfg.margin * 0.38) * k);
+  }
+  if (opt.guides) { ctx.strokeStyle = 'rgba(47,127,107,.55)'; ctx.setLineDash([6, 5]); ctx.lineWidth = 1; ctx.strokeRect(cfg.margin * k, cfg.margin * k, Wp - 2 * cfg.margin * k, Hp - 2 * cfg.margin * k); ctx.setLineDash([]); }
+  ctx.restore();
+}
+const prCutCanvas = id => prCache.get(id)?.canvas || null;
+function drawPrintPage() {
+  const cv2 = $('#prCanvas'); if (!cv2) return;
+  const lb = $('#prPgLabel'); if (lb) lb.textContent = (prPage + 1) + ' / ' + Math.max(1, PR().pages.length) + '쪽';
+  const [pw, ph] = prPageMM(), page = PR().pages[prPage]; if (cv2.width !== pw * PX_MM) cv2.width = pw * PX_MM; if (cv2.height !== ph * PX_MM) cv2.height = ph * PX_MM;
+  const g = cv2.getContext('2d'); g.clearRect(0, 0, cv2.width, cv2.height);
+  if (!page) { g.fillStyle = '#fff'; g.fillRect(0, 0, cv2.width, cv2.height); fitPrint(); return; }
+  drawPage(g, page, PX_MM, prCutCanvas, { guides: true });
+  const pn = page.panels.find(x => x.id === prSel);
+  if (pn) {
+    const Wp = cv2.width, Hp = cv2.height, rx = pn.x * Wp, ry = pn.y * Hp, rw = pn.w * Wp, rh = pn.h * Hp;
+    g.save(); g.strokeStyle = '#2F7F6B'; g.lineWidth = 3; g.setLineDash([8, 5]); g.strokeRect(rx, ry, rw, rh); g.setLineDash([]);
+    [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]].forEach(([x, y]) => { g.fillStyle = '#fff'; g.fillRect(x - 9, y - 9, 18, 18); g.strokeRect(x - 9, y - 9, 18, 18); });
+    g.restore();
+  }
+  fitPrint();
+}
+function fitPrint() {
+  const wr = $('#prWrap'), c = $('#prCanvas'); if (!wr || !c || !c.width) return;
+  const bw = wr.clientWidth, bh = wr.clientHeight; if (!bw || !bh) return;
+  const k = Math.min(bw / c.width, bh / c.height); c.style.width = Math.floor(c.width * k) + 'px'; c.style.height = Math.floor(c.height * k) + 'px';
+}
+new ResizeObserver(fitPrint).observe($('#prWrap'));
+function drawPageThumbs() {
+  document.querySelectorAll('#prLeft canvas.pgc').forEach(c => {
+    const page = PR().pages[+c.dataset.pi]; if (!page) return; const [pw, ph] = prPageMM(), k = 0.5;
+    c.width = Math.round(pw * k); c.height = Math.round(ph * k); drawPage(c.getContext('2d'), page, k, prCutCanvas, { thumb: true });
+  });
+}
+
+/* ---- 화면 조립 ---- */
+function renderPrint() {
+  const cfg = PR(); cfg.pages = cfg.pages.map(pg => ({ ...pg, panels: pg.panels.filter(x => P.panels.some(p => p.id === x.cut)) }));
+  if (!cfg.pages.length && P.panels.length) autoLocal();
+  prPage = clamp(prPage, 0, Math.max(0, cfg.pages.length - 1));
+  renderPrintSide(); drawPrintPage(); prLoadCuts();
+}
+function renderPrintSide() {
+  const cfg = PR(), placed = new Set(); cfg.pages.forEach(pg => pg.panels.forEach(x => placed.add(x.cut)));
+  const un = P.panels.filter(p => !placed.has(p.id));
+  $('#prLeft').innerHTML = '<section class="sec"><div class="sec-h"><h3>페이지 ' + cfg.pages.length + '장</h3><button type="button" class="b ghost sm" id="prAddPage">+ 페이지</button></div>' +
+    '<div class="pgl">' + cfg.pages.map((pg, i) => '<button type="button" class="pgt ' + (i === prPage ? 'on' : '') + '" data-pi="' + i + '"><canvas class="pgc" data-pi="' + i + '"></canvas><span>' + (i + 1) + '</span></button>').join('') + '</div>' +
+    '<div class="row"><button type="button" class="b ghost sm" id="prPageUp" ' + (prPage <= 0 ? 'disabled' : '') + '>◀ 앞으로</button><button type="button" class="b ghost sm" id="prPageDn" ' + (prPage >= cfg.pages.length - 1 ? 'disabled' : '') + '>뒤로 ▶</button><button type="button" class="b danger sm" id="prDelPage" ' + (cfg.pages.length ? '' : 'disabled') + '>페이지 삭제</button></div></section>' +
+    '<section class="sec"><h3>배치 안 된 컷 ' + un.length + '개</h3>' + (un.length ? un.map(p => '<div class="row" style="align-items:center"><span style="flex:1" class="note">' + prCutName(p.id) + ' · ' + esc((p.prompt || '').slice(0, 18)) + '</span><button type="button" class="b ghost sm" data-prput="' + p.id + '">현재 페이지에 넣기</button></div>').join('') : '<p class="note">모든 컷이 배치되어 있습니다.</p>') + '</section>';
+  const pn = (cfg.pages[prPage] || { panels: [] }).panels.find(x => x.id === prSel), [pw, ph] = prPageMM();
+  const sel = pn ? '<section class="sec"><h3>선택한 칸 — ' + prCutName(pn.cut) + '</h3>' +
+    '<div class="g2"><label><span class="lbl">가로 위치(mm)</span><input type="number" step="0.5" id="pnX" value="' + (pn.x * pw).toFixed(1) + '"></label><label><span class="lbl">세로 위치(mm)</span><input type="number" step="0.5" id="pnY" value="' + (pn.y * ph).toFixed(1) + '"></label>' +
+    '<label><span class="lbl">너비(mm)</span><input type="number" step="0.5" id="pnW" value="' + (pn.w * pw).toFixed(1) + '"></label><label><span class="lbl">높이(mm)</span><input type="number" step="0.5" id="pnH" value="' + (pn.h * ph).toFixed(1) + '"></label></div>' +
+    '<label><span class="lbl">그림 맞춤</span><select id="pnFit"><option value="cover"' + (pn.fit !== 'contain' ? ' selected' : '') + '>칸을 가득 채움 (넘치는 부분 잘림)</option><option value="contain"' + (pn.fit === 'contain' ? ' selected' : '') + '>그림 전체 보이기 (여백 생길 수 있음)</option></select></label>' +
+    '<label class="sl"><span>그림 가로 위치</span><input type="range" id="pnFx" min="0" max="1" step="0.01" value="' + (pn.fx ?? 0.5) + '"></label><label class="sl"><span>그림 세로 위치</span><input type="range" id="pnFy" min="0" max="1" step="0.01" value="' + (pn.fy ?? 0.5) + '"></label>' +
+    '<div class="row"><button type="button" class="b ghost sm" id="pnFront">맨 앞으로</button><button type="button" class="b ghost sm" id="pnRemove">배치에서 빼기</button></div>' +
+    '<label><span class="lbl">다른 페이지로 옮기기</span><select id="pnMove"><option value="">선택…</option>' + cfg.pages.map((_, i) => '<option value="' + i + '">' + (i + 1) + '쪽</option>').join('') + '</select></label></section>' : '<section class="sec"><p class="note">칸을 누르면 선택됩니다. 끌어서 옮기고, 모서리 네모를 끌어 크기를 바꿉니다. 칸 가장자리는 용지 여백·다른 칸에 자석처럼 붙습니다.</p></section>';
+  $('#prRight').innerHTML = '<section class="sec"><h3>자동 배치</h3><div class="row"><button type="button" class="b" id="prAi">✨ AI가 검토해 배치</button><button type="button" class="b ghost sm" id="prLocal">기본 알고리즘</button></div>' +
+    '<div class="st" id="prAiSt">' + esc(cfg.note || '') + '</div><p class="note">컷 순서는 유지하고, AI가 장면 중요도·컷 비율·대사량을 보고 칸 크기와 줄 구성을 정합니다. 결과는 아래에서 마음대로 고칠 수 있습니다. 다시 배치하면 지금 배치는 사라집니다.</p></section>' + sel +
+    '<section class="sec"><h3>용지·여백</h3><div class="g2">' +
+    '<label><span class="lbl">용지</span><select id="prPaper">' + Object.entries(PAPERS).map(([k, v]) => '<option value="' + k + '"' + (k === cfg.paper ? ' selected' : '') + '>' + v[2] + '</option>').join('') + '</select></label>' +
+    '<label><span class="lbl">방향</span><select id="prOrient"><option value="portrait"' + (cfg.orient === 'portrait' ? ' selected' : '') + '>세로</option><option value="landscape"' + (cfg.orient === 'landscape' ? ' selected' : '') + '>가로</option></select></label>' +
+    '<label><span class="lbl">바깥 여백(mm)</span><input type="number" id="prMargin" min="0" max="40" step="0.5" value="' + cfg.margin + '"></label><label><span class="lbl">칸 사이(mm)</span><input type="number" id="prGutter" min="0" max="20" step="0.5" value="' + cfg.gutter + '"></label>' +
+    '<label><span class="lbl">칸 테두리(mm)</span><input type="number" id="prBorder" min="0" max="3" step="0.1" value="' + cfg.border + '"></label><label><span class="lbl">읽는 방향</span><select id="prDir"><option value="ltr"' + (cfg.dir === 'ltr' ? ' selected' : '') + '>왼쪽 → 오른쪽</option><option value="rtl"' + (cfg.dir === 'rtl' ? ' selected' : '') + '>오른쪽 → 왼쪽</option></select></label></div>' +
+    '<div class="row" style="align-items:center"><label class="chk"><input type="checkbox" id="prNums" ' + (cfg.pageNums ? 'checked' : '') + '> 쪽 번호</label><label class="chk">종이색 <input type="color" id="prBg" value="' + cfg.bg + '"></label></div>' +
+    '<p class="note">용지·방향·읽는 방향을 바꾸면 다시 자동 배치합니다. 여백·칸 사이·테두리는 지금 배치에 바로 반영됩니다(칸 위치는 그대로).</p></section>' +
+    '<section class="sec"><h3>내보내기</h3><label><span class="lbl">해상도</span><select id="prDpi"><option value="150">150dpi (미리보기·웹)</option><option value="300" selected>300dpi (인쇄)</option></select></label>' +
+    '<div class="row"><button type="button" class="b" id="prPdf">PDF 한 파일</button><button type="button" class="b ghost" id="prPng">페이지 PNG (ZIP)</button></div><div class="st" id="prExSt"></div></section>';
+  bindPrint(); drawPageThumbs();
+}
+function bindPrint() {
+  const cfg = PR(), q = s => $(s, document), page = () => cfg.pages[prPage];
+  q('#prAddPage').onclick = () => { cfg.pages.push({ id: uid(), panels: [] }); prPage = cfg.pages.length - 1; prSel = null; save(); renderPrintSide(); drawPrintPage(); };
+  document.querySelectorAll('.pgt').forEach(b => (b.onclick = () => { prPage = +b.dataset.pi; prSel = null; renderPrintSide(); drawPrintPage(); }));
+  q('#prPageUp').onclick = () => { const a = cfg.pages; [a[prPage - 1], a[prPage]] = [a[prPage], a[prPage - 1]]; prPage--; save(); renderPrintSide(); drawPrintPage(); };
+  q('#prPageDn').onclick = () => { const a = cfg.pages; [a[prPage + 1], a[prPage]] = [a[prPage], a[prPage + 1]]; prPage++; save(); renderPrintSide(); drawPrintPage(); };
+  q('#prDelPage').onclick = () => { if (!confirm('이 페이지를 삭제할까요? 들어 있던 컷은 "배치 안 된 컷"으로 돌아갑니다.')) return; cfg.pages.splice(prPage, 1); prPage = clamp(prPage, 0, Math.max(0, cfg.pages.length - 1)); prSel = null; save(); renderPrint(); };
+  document.querySelectorAll('[data-prput]').forEach(b => (b.onclick = () => {
+    if (!page()) { cfg.pages.push({ id: uid(), panels: [] }); prPage = cfg.pages.length - 1; }
+    const [pw, ph] = prPageMM(), w = 0.46, h = Math.min(0.3, (w * pw / (W / H)) / ph); const id = uid();
+    page().panels.push({ id, cut: b.dataset.prput, x: (1 - w) / 2, y: (1 - h) / 2, w, h, fit: 'cover', fx: 0.5, fy: 0.5 }); prSel = id; save(); renderPrint();
+  }));
+  q('#prAi').onclick = () => { if (cfg.pages.some(p => p.panels.length) && !confirm('지금 배치를 지우고 AI가 다시 배치할까요?')) return; autoAI(); };
+  q('#prLocal').onclick = () => { if (cfg.pages.some(p => p.panels.length) && !confirm('지금 배치를 지우고 기본 알고리즘으로 다시 배치할까요?')) return; autoLocal(); save(); renderPrint(); };
+  const rel = () => { autoLocal(); save(); renderPrint(); };
+  q('#prPaper').onchange = e => { cfg.paper = e.target.value; rel(); }; q('#prOrient').onchange = e => { cfg.orient = e.target.value; rel(); }; q('#prDir').onchange = e => { cfg.dir = e.target.value; rel(); };
+  const live = (id, key, fn) => (q(id).oninput = e => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; cfg[key] = fn ? fn(v) : v; save(); drawPrintPage(); drawPageThumbs(); });
+  live('#prMargin', 'margin', v => clamp(v, 0, 40)); live('#prGutter', 'gutter', v => clamp(v, 0, 20)); live('#prBorder', 'border', v => clamp(v, 0, 3));
+  q('#prNums').onchange = e => { cfg.pageNums = e.target.checked; save(); drawPrintPage(); drawPageThumbs(); };
+  q('#prBg').oninput = e => { cfg.bg = e.target.value; save(); drawPrintPage(); drawPageThumbs(); };
+  const pn = page()?.panels.find(x => x.id === prSel);
+  if (pn) {
+    const [pw, ph] = prPageMM(), put = () => { pn.x = clamp(pn.x, 0, 1 - pn.w); pn.y = clamp(pn.y, 0, 1 - pn.h); save(); drawPrintPage(); drawPageThumbs(); };
+    q('#pnX').oninput = e => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) { pn.x = v / pw; put(); } };
+    q('#pnY').oninput = e => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) { pn.y = v / ph; put(); } };
+    q('#pnW').oninput = e => { const v = parseFloat(e.target.value); if (!Number.isNaN(v) && v > 5) { pn.w = Math.min(v / pw, 1 - pn.x); put(); } };
+    q('#pnH').oninput = e => { const v = parseFloat(e.target.value); if (!Number.isNaN(v) && v > 5) { pn.h = Math.min(v / ph, 1 - pn.y); put(); } };
+    q('#pnFit').onchange = e => { pn.fit = e.target.value; save(); drawPrintPage(); drawPageThumbs(); };
+    q('#pnFx').oninput = e => { pn.fx = +e.target.value; save(); drawPrintPage(); drawPageThumbs(); }; q('#pnFy').oninput = e => { pn.fy = +e.target.value; save(); drawPrintPage(); drawPageThumbs(); };
+    q('#pnFront').onclick = () => { const a = page().panels; a.splice(a.indexOf(pn), 1); a.push(pn); save(); drawPrintPage(); drawPageThumbs(); };
+    q('#pnRemove').onclick = () => { const a = page().panels; a.splice(a.indexOf(pn), 1); prSel = null; save(); renderPrint(); };
+    q('#pnMove').onchange = e => { if (e.target.value === '') return; const to = +e.target.value; const a = page().panels; a.splice(a.indexOf(pn), 1); cfg.pages[to].panels.push(pn); prPage = to; save(); renderPrint(); };
+  }
+  q('#prPng').onclick = () => exportPrint('png'); q('#prPdf').onclick = () => exportPrint('pdf');
+}
+
+/* ---- 칸 끌기·크기 조절 (자석 포함) ---- */
+(function () {
+  const c = $('#prCanvas'), HIT = 22;
+  const pt = e => { const r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, px: (e.clientX - r.left) / r.width * c.width, py: (e.clientY - r.top) / r.height * c.height }; };
+  const snapList = (page, skip, axis) => {
+    const cfg = PR(), [pw, ph] = prPageMM(), m = axis === 'x' ? cfg.margin / pw : cfg.margin / ph, g = axis === 'x' ? cfg.gutter / pw : cfg.gutter / ph, out = [m, 1 - m];
+    page.panels.forEach(o => { if (o === skip) return; const a = axis === 'x' ? o.x : o.y, b = a + (axis === 'x' ? o.w : o.h); out.push(a, b, a - g, b + g); });
+    return out;
+  };
+  const snap = (v, list, thr) => { let best = v, d = thr; list.forEach(s => { if (Math.abs(s - v) < d) { d = Math.abs(s - v); best = s; } }); return best; };
+  c.addEventListener('pointerdown', e => {
+    const page = PR().pages[prPage]; if (!page) return; const p = pt(e), Wp = c.width, Hp = c.height;
+    const cur = page.panels.find(x => x.id === prSel);
+    if (cur) {
+      const cs = { nw: [cur.x, cur.y], ne: [cur.x + cur.w, cur.y], sw: [cur.x, cur.y + cur.h], se: [cur.x + cur.w, cur.y + cur.h] };
+      for (const [k, [x, y]] of Object.entries(cs)) if (Math.hypot(p.px - x * Wp, p.py - y * Hp) < HIT) { prDrag = { mode: 'resize', k, pn: cur, x0: cur.x, y0: cur.y, w0: cur.w, h0: cur.h }; try { c.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ } e.preventDefault(); return; }
+    }
+    const hit = [...page.panels].reverse().find(x => p.x >= x.x && p.x <= x.x + x.w && p.y >= x.y && p.y <= x.y + x.h);
+    if (!hit) { if (prSel) { prSel = null; renderPrintSide(); drawPrintPage(); } return; }
+    const changed = prSel !== hit.id; prSel = hit.id; prDrag = { mode: 'move', pn: hit, dx: p.x - hit.x, dy: p.y - hit.y };
+    if (changed) { renderPrintSide(); } drawPrintPage();
+    try { c.setPointerCapture(e.pointerId); } catch (er) { /* 무시 */ } e.preventDefault();
+  });
+  c.addEventListener('pointermove', e => {
+    const page = PR().pages[prPage]; if (!page) return;
+    if (!prDrag) { // 커서 모양
+      const p = pt(e), cur = page.panels.find(x => x.id === prSel); let cursor = '';
+      if (cur) [[cur.x, cur.y, 'nwse-resize'], [cur.x + cur.w, cur.y, 'nesw-resize'], [cur.x, cur.y + cur.h, 'nesw-resize'], [cur.x + cur.w, cur.y + cur.h, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x * c.width, p.py - y * c.height) < HIT) cursor = cu; });
+      if (!cursor && page.panels.some(x => p.x >= x.x && p.x <= x.x + x.w && p.y >= x.y && p.y <= x.y + x.h)) cursor = 'move';
+      c.style.cursor = cursor; return;
+    }
+    const p = pt(e), d = prDrag, pn = d.pn, thrX = 8 / c.width, thrY = 8 / c.height, xs = snapList(page, pn, 'x'), ys = snapList(page, pn, 'y'), MIN = 0.05;
+    if (d.mode === 'move') {
+      let x = clamp(p.x - d.dx, 0, 1 - pn.w), y = clamp(p.y - d.dy, 0, 1 - pn.h);
+      const ax = snap(x, xs, thrX), bx = snap(x + pn.w, xs, thrX) - pn.w, ay = snap(y, ys, thrY), by = snap(y + pn.h, ys, thrY) - pn.h;
+      x = Math.abs(ax - x) > 1e-9 && (Math.abs(bx - x) < 1e-9 || Math.abs(ax - x) <= Math.abs(bx - x)) ? ax : bx;
+      y = Math.abs(ay - y) > 1e-9 && (Math.abs(by - y) < 1e-9 || Math.abs(ay - y) <= Math.abs(by - y)) ? ay : by;
+      pn.x = clamp(x, 0, 1 - pn.w); pn.y = clamp(y, 0, 1 - pn.h);
+    } else {
+      const left = d.k.includes('w'), top = d.k.includes('n'); let nx = clamp(snap(clamp(p.x, 0, 1), xs, thrX), 0, 1), ny = clamp(snap(clamp(p.y, 0, 1), ys, thrY), 0, 1);
+      const r0 = d.x0 + d.w0, b0 = d.y0 + d.h0;
+      if (left) { nx = Math.min(nx, r0 - MIN); pn.x = nx; pn.w = r0 - nx; } else { nx = Math.max(nx, d.x0 + MIN); pn.w = nx - d.x0; }
+      if (top) { ny = Math.min(ny, b0 - MIN); pn.y = ny; pn.h = b0 - ny; } else { ny = Math.max(ny, d.y0 + MIN); pn.h = ny - d.y0; }
+    }
+    drawPrintPage();
+  });
+  const end = () => { if (prDrag) { prDrag = null; save(); renderPrintSide(); drawPrintPage(); } };
+  c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+  window.addEventListener('keydown', e => { // Delete: 선택한 칸 배치에서 빼기
+    if (view !== 'print' || !prSel || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { const a = PR().pages[prPage]?.panels; const i = a ? a.findIndex(x => x.id === prSel) : -1; if (i >= 0) { a.splice(i, 1); prSel = null; save(); renderPrint(); e.preventDefault(); } }
+  });
+})();
+
+/* ---- 인쇄용 내보내기: 페이지마다 컷을 원본 해상도로 다시 그려 PNG(ZIP) 또는 PDF ---- */
+async function exportPrint(kind) {
+  const cfg = PR(), st = $('#prExSt'), dpi = +$('#prDpi').value || 300, k = dpi / 25.4, [pw, ph] = prPageMM();
+  if (!cfg.pages.some(p => p.panels.length)) return toast('배치된 컷이 없습니다');
+  $('#prPdf').disabled = $('#prPng').disabled = true;
+  const files = [], pdfPages = [];
+  try {
+    for (let i = 0; i < cfg.pages.length; i++) {
+      const page = cfg.pages[i]; st.textContent = (i + 1) + ' / ' + cfg.pages.length + '쪽 그리는 중…';
+      const cuts = new Map();
+      for (const pn of page.panels) { const p = P.panels.find(x => x.id === pn.cut); if (p && !cuts.has(pn.cut)) cuts.set(pn.cut, await renderCutCanvas(p, { text: true })); }
+      const c = document.createElement('canvas'); c.width = Math.round(pw * k); c.height = Math.round(ph * k);
+      drawPage(c.getContext('2d'), page, k, id => cuts.get(id) || null);
+      if (kind === 'png') files.push({ name: safeName(P.title) + '_인쇄_' + String(i + 1).padStart(2, '0') + '.png', blob: await canvasBlob(c) });
+      else pdfPages.push({ w: pw * 72 / 25.4, h: ph * 72 / 25.4, pw: c.width, ph: c.height, jpeg: await canvasBlob(c, 'image/jpeg', 0.93) });
+      await new Promise(r => setTimeout(r, 0));
+    }
+    st.textContent = '파일 만드는 중…';
+    if (kind === 'png') download(await makeZip(files), safeName(P.title) + '_인쇄용_PNG.zip'); else download(await makePdf(pdfPages), safeName(P.title) + '_인쇄용.pdf');
+    st.className = 'st ok'; st.textContent = '✓ 저장했습니다 (' + dpi + 'dpi, ' + cfg.pages.length + '쪽)';
+  } catch (e) { st.className = 'st err'; st.textContent = '실패: ' + e.message; }
+  $('#prPdf').disabled = $('#prPng').disabled = false;
+}
+
+$('#prPrev').onclick = () => { prPage = Math.max(0, prPage - 1); prSel = null; renderPrintSide(); drawPrintPage(); };
+$('#prNext').onclick = () => { prPage = Math.min(Math.max(0, PR().pages.length - 1), prPage + 1); prSel = null; renderPrintSide(); drawPrintPage(); };
+
 /* 한 줄 → 대사 하나. 모양 자동 판별 + 위치·시각 자동 배치 */
 function parseLine(raw, forced) {
   let t = raw.trim(), kind = 'speech';
@@ -2579,6 +3015,8 @@ function tabCut(p) {
     <button type="button" class="b ghost sm" id="transAll">이 전환을 모든 컷에</button>
     <button type="button" class="b ghost sm" id="dupPanel">컷 복제</button>
     <button type="button" class="b ghost sm" id="pngBtn">현재 프레임 PNG</button>
+    <button type="button" class="b ghost sm" id="cutImgBtn">이 컷 이미지 저장 (완성)</button>
+    <button type="button" class="b ghost sm" id="cutImgsBtn">컷 이미지 여러 장…</button>
   </div>
   <div class="grp"><span class="lbl">대사 음성</span><div class="row">
     <button type="button" class="b ghost sm" id="voiceAll">이 컷 대사 음성 모두 만들기</button>
@@ -2591,6 +3029,8 @@ function bindCut(p, el) {
   $('#transAll', el).onclick = () => { P.panels.forEach(x => (x.trans = p.trans)); save(); toast('모든 컷에 적용했습니다'); };
   $('#dupPanel', el).onclick = () => duplicatePanel(p);
   $('#pngBtn', el).onclick = savePNG;
+  $('#cutImgBtn', el).onclick = () => saveCutImage(p);
+  $('#cutImgsBtn', el).onclick = () => openCutExport(p);
   $('#voiceAll', el).onclick = () => genVoicesForPanel(p);
   $('#fitVoice', el).onclick = () => { if (fitPanelToVoices(p)) { save(); renderInspector(); renderPanels(); requestDraw(); toast(`컷 길이 ${panelDur(p).toFixed(1)}초`); } else toast('이미 충분히 깁니다'); };
   $('#autoFit', el).onchange = e => { S.autoFit = e.target.checked; saveSettings(); };
@@ -2737,6 +3177,7 @@ fileMenu.onclick = async e => {
   if (m === 'bgmOff') { const id = P.bgm; P.bgm = null; dropAssetIfUnused(id); save(); toast('배경음악을 뺐습니다'); }
   if (m === 'cloudSave') cloudSave(true);
   if (m === 'cloudOpen') cloudOpenList();
+  if (m === 'cutImgs') openCutExport();
   if (m === 'png') savePNG();
 };
 $('#bgmFile').onchange = async e => {
@@ -2864,7 +3305,7 @@ $('#aspectSel').onchange = e => {
   P.aspect = e.target.value; applyAspect(); save(); renderAll(); toast('화면 비율: ' + e.target.value);
 };
 
-function renderAll() { applyAspect(); $('#title').value = P.title; renderStyle(); renderChars(); renderPanels(); renderTabs(); renderInspector(); updateCost(); prepareFonts(); requestDraw(); }
+function renderAll() { applyAspect(); if (typeof view !== 'undefined' && view === 'print') renderPrint(); $('#title').value = P.title; renderStyle(); renderChars(); renderPanels(); renderTabs(); renderInspector(); updateCost(); prepareFonts(); requestDraw(); }
 
 /* =========================================================
    시작
