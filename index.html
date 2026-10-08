@@ -2013,7 +2013,7 @@ function renderChars() {
       <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple hidden></label><button type="button" class="b ghost sm gen" ${c._busy ? 'disabled' : ''}>${c._busy ? '생성 중…' : '시트 생성'}</button></div>
       <div class="st ${/^실패/.test(c._st || '') ? 'err' : ''}">${esc(c._st || '')}</div>
       ${isServer() ? `<div class="kv">
-        <div class="row"><select class="vs" aria-label="캐릭터 목소리"></select><button type="button" class="b ghost sm vl">${KLV ? '다시 불러오기' : '목소리 목록'}</button></div>
+        <div class="row"><select class="vs" aria-label="캐릭터 목소리"></select><button type="button" class="b ghost sm vl">${KLV ? '다시 불러오기' : '목소리 목록'}</button>${c.voice?.own ? '<button type="button" class="b ghost sm vd">삭제</button>' : ''}</div>
         <audio class="vp" controls hidden style="width:100%;height:32px"></audio>
         <span class="lbl">내 목소리 만들기 — 아래 목소리·말투로 샘플 문장(5~30초 분량)을 읽혀 클링 목소리로 만듭니다. 비워 두면 설정의 TTS 값을 씁니다</span>
         <label class="lbl">TTS 목소리 (${S.ttsEngine === 'gemini' ? 'Gemini' : S.ttsEngine === 'eleven' ? '일레븐랩스 voice id' : 'OpenAI'})<input type="text" class="tv-v" list="${S.ttsEngine === 'gemini' ? 'gmVoices' : S.ttsEngine === 'openai' ? 'oaVoices' : ''}"></label>
@@ -2041,7 +2041,18 @@ function renderChars() {
       const show = () => { const v = list.find(x => x.id === vs.value); vp.hidden = !(v && v.trial); if (v && v.trial) vp.src = v.trial; };
       show();
       vs.onchange = () => { const v = list.find(x => x.id === vs.value); c.voice = v ? { id: v.id, name: v.name, trial: v.trial, own: v.own } : null; save(); show(); renderChars(); };
-      d.querySelector('.vl').onclick = async () => { KLV = null; if (await loadVoices()) renderChars(); };
+      const vd = d.querySelector('.vd');
+      if (vd) vd.onclick = async () => {
+        const v = c.voice;
+        if (!confirm(`내 목소리 ‘${v.name}’ 을(를) 클링에서 완전히 삭제합니다. 이 목소리로 등록된 캐릭터는 다시 등록해야 할 수 있습니다. 계속할까요?`)) return;
+        try {
+          await srvJSON('/api/kling', { op: 'voicedel', voiceId: v.id });
+          if (KLV) KLV = KLV.filter(x => x.id !== v.id);
+          P.chars.forEach(x => { if (x.voice?.id === v.id) { x.voice = null; x.kEl = null; x._kst = '목소리가 삭제되었습니다. 새 목소리를 고르세요'; } });
+          save(); renderChars(); refreshInspector();
+        } catch (e) { toast('삭제 실패: ' + e.message, 6000); }
+      };
+      d.querySelector('.vl').onclick =async () => { KLV = null; if (await loadVoices()) renderChars(); };
       d.querySelector('.vr').onclick = () => registerKlingChar(c);
     }
     nm.value = c.name; ds.value = c.desc;

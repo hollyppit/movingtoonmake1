@@ -229,6 +229,12 @@ async function handleKlingElement(req, env, who, op) {
     const preset = await klingNew(env, '/v1/general/presets-voices?pageNum=1&pageSize=500');
     return json({ voices: [...pick(mine, true), ...pick(preset, false)] });
   }
+  if (op === 'voicedel' && req.method === 'POST') {
+    const b = await req.json();
+    if (!b.voiceId) return json({ error: 'voiceId 가 없습니다' }, 400);
+    await klingNew(env, '/v1/general/delete-voices', { method: 'POST', body: JSON.stringify({ voice_id: String(b.voiceId) }) });
+    return json({ ok: true });
+  }
   if (op === 'voice' && req.method === 'POST') {
     const b = await req.json();
     const d = await klingNew(env, '/v1/general/custom-voices', { method: 'POST', body: JSON.stringify({ voice_name: String(b.name || '내 목소리').slice(0, 20), voice_url: await signedUrl(env, safeKey(b.key, who)) }) });
@@ -274,7 +280,7 @@ async function handleKlingElement(req, env, who, op) {
 }
 async function handleKlingNew(req, env, who) {
   const op = new URL(req.url).searchParams.get('op') || (req.method === 'POST' ? await req.clone().json().then(j => j.op, () => '') : '');
-  if (op === 'voices' || op === 'element' || op === 'voice') return handleKlingElement(req, env, who, op);
+  if (op === 'voices' || op === 'element' || op === 'voice' || op === 'voicedel') return handleKlingElement(req, env, who, op);
   if (req.method === 'POST') {
     const b = await req.json();
     const img = await r2Get(env, String(b.image || ''), who);
