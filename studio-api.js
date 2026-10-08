@@ -12,6 +12,7 @@
 //
 // 환경변수 이름은 아래 ENV 에서 바꿀 수 있다.
 const ENV = {
+  open: 'OPEN_ACCESS',       // 'true' 면 비밀번호 없이 누구나 사용 (비용·데이터 노출 주의)
   pw: 'ADMIN_PASSWORD',      // 관리자 비밀번호
   sbUrl: 'SUPABASE_URL',                   // https://xxxx.supabase.co
   sbKey: 'SUPABASE_SERVICE_ROLE_KEY',      // service_role 키 (서버 전용 비밀)
@@ -31,6 +32,7 @@ const NO_TEXT = 'Strictly no text of any kind: no letters, no speech balloons, n
 /* ---------- 공통 ---------- */
 const json = (d, status = 200) => new Response(JSON.stringify(d), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 function authed(req, env) {
+  if (String(env[ENV.open] || '').toLowerCase() === 'true') return true; // 인증 없이 열어 둠 (OPEN_ACCESS=true)
   const want = env[ENV.pw];
   const got = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
   return !!want && got === want;
@@ -191,7 +193,7 @@ async function handleKlingNew(req, env) {
     if (b.tail) contents.push({ type: 'last_frame', url: b64((await r2Get(env, String(b.tail))).bytes) });
     const d = await klingNew(env, '/image-to-video/' + encodeURIComponent(model), { method: 'POST', body: JSON.stringify({
       contents,
-      settings: { resolution: b.mode === 'pro' ? '1080p' : '720p', duration: Math.min(15, Math.max(3, +b.duration || 5)), audio: 'off', multi_shot: false },
+      settings: { resolution: b.mode === 'pro' ? '1080p' : '720p', duration: Math.min(15, Math.max(3, +b.duration || 5)), audio: b.audio ? 'native' : 'off', multi_shot: false },
       options: { watermark_info: { enabled: false } },
     }) });
     return json({ taskId: d.id });
