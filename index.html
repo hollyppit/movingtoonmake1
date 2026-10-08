@@ -1257,6 +1257,9 @@ async function loadVoices() {
 /* 내 목소리: 샘플 음성(5~30초, 한 사람, 잡음 없음)을 클링에 올려 voice_id 를 만든다.
    샘플은 설정의 음성(TTS)으로 한국어 문장을 읽혀 만들거나, 직접 녹음한 파일을 올린다 */
 const VOICE_SAMPLE = '안녕하세요. 저는 이 이야기의 주인공입니다. 오늘은 조금 특별한 하루가 될 것 같아요. 천천히 숨을 고르고, 제가 하고 싶은 말을 차분하게 들려드릴게요.';
+/* 캐릭터별 TTS 목소리 선택지 (Gemini 설명은 Google 문서의 목소리 특징) */
+const GM_VOICES = [['Kore', 'Kore — 단단함'], ['Puck', 'Puck — 경쾌함'], ['Zephyr', 'Zephyr — 밝음'], ['Charon', 'Charon — 정보 전달'], ['Aoede', 'Aoede — 산뜻함'], ['Leda', 'Leda — 젊음'], ['Fenrir', 'Fenrir — 들뜸'], ['Orus', 'Orus — 단단함'], ['Callirrhoe', 'Callirrhoe — 느긋함'], ['Autonoe', 'Autonoe — 밝음'], ['Enceladus', 'Enceladus — 숨소리'], ['Iapetus', 'Iapetus — 또렷함'], ['Umbriel', 'Umbriel — 느긋함'], ['Algieba', 'Algieba — 부드러움'], ['Despina', 'Despina — 부드러움'], ['Erinome', 'Erinome — 또렷함'], ['Algenib', 'Algenib — 거친 목소리'], ['Rasalgethi', 'Rasalgethi — 정보 전달'], ['Laomedeia', 'Laomedeia — 경쾌함'], ['Achernar', 'Achernar — 부드럽고 낮음'], ['Alnilam', 'Alnilam — 단단함'], ['Schedar', 'Schedar — 고름'], ['Gacrux', 'Gacrux — 성숙함'], ['Pulcherrima', 'Pulcherrima — 적극적'], ['Achird', 'Achird — 친근함'], ['Zubenelgenubi', 'Zubenelgenubi — 캐주얼'], ['Vindemiatrix', 'Vindemiatrix — 온화함'], ['Sadachbia', 'Sadachbia — 활발함'], ['Sadaltager', 'Sadaltager — 박식함'], ['Sulafat', 'Sulafat — 따뜻함']];
+const OA_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map(v => [v, v]);
 let previewAudio = null;
 /* 클링에 등록하기 전에 TTS 샘플만 들어 본다 (클링 크레딧 안 씀) */
 async function previewVoiceTts(c) {
@@ -1273,7 +1276,7 @@ async function previewVoiceTts(c) {
 async function makeKlingVoice(c, file) {
   const text = (c.vText || VOICE_SAMPLE).trim();
   if (!file && text.length < 40) return toast('샘플 문장이 너무 짧습니다 (40자 이상, 5초 넘게 읽히도록)');
-  if (!confirm(file ? '올린 음성으로 클링 목소리를 만듭니다. 클링 크레딧이 사용될 수 있습니다.' : `TTS 음성(${c.tv?.voice || (S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)})으로 샘플을 만들어 클링 목소리로 등록합니다. 음성과 클링 크레딧이 사용될 수 있습니다.`)) return;
+  if (!confirm(file ? '올린 음성으로 클링 목소리를 만듭니다. 클링 크레딧이 사용될 수 있습니다.' : `TTS 음성(${c.tv?.engine || S.ttsEngine} ${c.tv?.voice || (c.tv?.engine && c.tv.engine !== S.ttsEngine ? '기본' : S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)})으로 샘플을 만들어 클링 목소리로 등록합니다. 음성과 클링 크레딧이 사용될 수 있습니다.`)) return;
   c._kst = '목소리 만드는 중…'; c._kbusy = true; renderChars();
   try {
     let key, blob;
@@ -1445,17 +1448,18 @@ const voiceSig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.gmVoice, S
 const voiceStale = o => !!(o.voice && o.voice.sig !== voiceSig(o));
 /* ov = 캐릭터별 덮어쓰기 { voice, instr, speed } — 없으면 설정의 값을 쓴다 */
 async function ttsBlob(text, force, ov) {
-  const gmV = ov?.voice || S.gmVoice, oaV = ov?.voice || S.ttsVoice, ins = String(ov?.instr?.trim() || S.ttsInstr), spd = +(ov?.speed || S.ttsSpeed) || 1;
+  const eng = ov?.engine || S.ttsEngine, other = eng !== S.ttsEngine; // 캐릭터가 설정과 다른 엔진을 고르면 설정의 목소리 값은 쓰지 않는다
+  const gmV = ov?.voice || (other ? 'Kore' : S.gmVoice), oaV = ov?.voice || (other ? (eng === 'openai' ? 'coral' : '') : S.ttsVoice), ins = String(ov?.instr?.trim() || S.ttsInstr), spd = +(ov?.speed || S.ttsSpeed) || 1;
   if (isServer()) {
-    const body = S.ttsEngine === 'gemini'
+    const body = eng === 'gemini'
       ? { provider: 'gemini', text, voice: gmV, model: S.gmTtsModel, instructions: ins, force: !!force }
-      : S.ttsEngine === 'eleven'
+      : eng === 'eleven'
       ? { text, voiceId: oaV, model: S.elModel, speed: spd, force: !!force }
       : { provider: 'openai', text, voice: oaV, model: S.ttsModel, instructions: ins, speed: spd, force: !!force };
     const r = await srvJSON('/api/tts', body);
     return { blob: await fetchKey(r.key), key: r.key };
   }
-  if (S.ttsEngine === 'gemini') {
+  if (eng === 'gemini') {
     if (!S.gmKey) throw new Error('Gemini 키가 없습니다');
     let g;
     try {
@@ -1474,7 +1478,7 @@ async function ttsBlob(text, force, ov) {
     hd.setUint32(24, 24000, true); hd.setUint32(28, 48000, true); hd.setUint16(32, 2, true); hd.setUint16(34, 16, true); w(36, 'data'); hd.setUint32(40, pcm.length, true);
     return { blob: new Blob([hd, pcm], { type: 'audio/wav' }) };
   }
-  if (S.ttsEngine !== 'openai') throw new Error('일레븐랩스 음성은 서버 모드에서만 만들 수 있습니다');
+  if (eng !== 'openai') throw new Error('일레븐랩스 음성은 서버 모드에서만 만들 수 있습니다');
   if (!S.oaKey) throw new Error('OpenAI 키가 없습니다');
   const body = { model: S.ttsModel, voice: oaV, input: text, speed: spd, response_format: 'mp3' };
   if (ins.trim() && !/^tts-1/.test(S.ttsModel)) body.instructions = ins.trim();
@@ -2006,6 +2010,7 @@ function renderChars() {
   if (!P.chars.length) el.innerHTML = '<p class="note">캐릭터를 등록하면 컷마다 레퍼런스가 자동으로 첨부되어 얼굴·의상이 덜 흔들립니다.</p>';
   P.chars.forEach(c => {
     const d = document.createElement('div'); d.className = 'card';
+    const teng = c.tv?.engine || S.ttsEngine;
     d.innerHTML = `
       <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
       <textarea class="ds" rows="3" placeholder="외형: 나이대, 얼굴형, 머리 모양·색, 눈, 의상, 체형, 상징 색"></textarea>
@@ -2016,9 +2021,10 @@ function renderChars() {
         <div class="row"><select class="vs" aria-label="캐릭터 목소리"></select><button type="button" class="b ghost sm vl">${KLV ? '다시 불러오기' : '목소리 목록'}</button>${c.voice?.own ? '<button type="button" class="b ghost sm vd">삭제</button>' : ''}</div>
         <audio class="vp" controls hidden style="width:100%;height:32px"></audio>
         <span class="lbl">내 목소리 만들기 — 아래 목소리·말투로 샘플 문장(5~30초 분량)을 읽혀 클링 목소리로 만듭니다. 비워 두면 설정의 TTS 값을 씁니다</span>
-        <label class="lbl">TTS 목소리 (${S.ttsEngine === 'gemini' ? 'Gemini' : S.ttsEngine === 'eleven' ? '일레븐랩스 voice id' : 'OpenAI'})<input type="text" class="tv-v" list="${S.ttsEngine === 'gemini' ? 'gmVoices' : S.ttsEngine === 'openai' ? 'oaVoices' : ''}"></label>
+        <label class="lbl">TTS 엔진<select class="tv-e"></select></label>
+        <label class="lbl">TTS 목소리${teng === 'eleven' ? ' (일레븐랩스 voice id)' : ''}${teng === 'eleven' ? '<input type="text" class="tv-v">' : '<select class="tv-v"></select>'}</label>
         <label class="lbl">말투·연기 지시<input type="text" class="tv-i" placeholder="예: 차분하고 낮은 20대 여성, 약간 수줍게, 천천히"></label>
-        ${S.ttsEngine === 'gemini' ? '' : '<label class="lbl">속도<input type="number" class="tv-s" step="0.05" min="0.5" max="1.5"></label>'}
+        ${teng === 'gemini' ? '' : '<label class="lbl">속도<input type="number" class="tv-s" step="0.05" min="0.5" max="1.5"></label>'}
         <textarea class="vt" rows="3"></textarea>
         <div class="row"><button type="button" class="b ghost sm vq">TTS 미리듣기</button><button type="button" class="b ghost sm vm" ${c._kbusy ? 'disabled' : ''}>클링 목소리로 만들기</button><label class="b ghost sm">녹음 파일 올리기<input type="file" class="vf" accept="audio/*" hidden></label></div>
         <div class="row"><button type="button" class="b ghost sm vr" ${c._kbusy ? 'disabled' : ''}>${c._kbusy ? '등록 중…' : c.kEl?.id && c.kEl.sig === klSig(c) ? '클링 캐릭터 다시 등록' : '클링 캐릭터 등록'}</button></div>
@@ -2031,7 +2037,14 @@ function renderChars() {
       const list = KLV ? (c.voice && !KLV.some(v => v.id === c.voice.id) ? [c.voice, ...KLV] : KLV) : (c.voice ? [c.voice] : []);
       const vt = d.querySelector('.vt'); vt.value = c.vText ?? VOICE_SAMPLE; vt.oninput = () => { c.vText = vt.value; save(); };
       const tv = c.tv || (c.tv = {}), tvv = d.querySelector('.tv-v'), tvi = d.querySelector('.tv-i'), tvs = d.querySelector('.tv-s');
-      tvv.placeholder = (S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice) + ' (설정 값)'; tvv.value = tv.voice || ''; tvi.value = tv.instr || ''; if (tvs) tvs.value = tv.speed || '';
+      const tve = d.querySelector('.tv-e'), engs = [['', `설정 따름 (${{ gemini: 'Gemini', eleven: '일레븐랩스', openai: 'OpenAI' }[S.ttsEngine] || S.ttsEngine})`], ['openai', 'OpenAI'], ['gemini', 'Gemini']];
+      tve.innerHTML = engs.map(([v, n]) => `<option value="${v}">${n}</option>`).join(''); tve.value = tv.engine || '';
+      tve.onchange = () => { tv.engine = tve.value; tv.voice = ''; save(); renderChars(); };
+      if (tvv.tagName === 'SELECT') {
+        const setV = S.ttsEngine === teng ? (teng === 'gemini' ? S.gmVoice : S.ttsVoice) : null;
+        tvv.innerHTML = `<option value="">${setV ? `설정 값 (${esc(setV)})` : '기본 목소리'}</option>` + (teng === 'gemini' ? GM_VOICES : OA_VOICES).map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('');
+      } else tvv.placeholder = '일레븐랩스 voice id (설정 값)';
+      tvv.value = tv.voice || ''; tvi.value = tv.instr || ''; if (tvs) tvs.value = tv.speed || '';
       tvv.oninput = () => { tv.voice = tvv.value.trim(); save(); }; tvi.oninput = () => { tv.instr = tvi.value; save(); }; if (tvs) tvs.oninput = () => { tv.speed = +tvs.value || 0; save(); };
       d.querySelector('.vq').onclick = () => previewVoiceTts(c);
       d.querySelector('.vm').onclick = () => makeKlingVoice(c);
