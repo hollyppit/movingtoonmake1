@@ -264,6 +264,13 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .pre3 button:hover:not(:disabled) { border-color: var(--gold); }
 .pre3 button:disabled { opacity: .45; cursor: not-allowed; }
 .pre3 button small { display: block; font-size: .6rem; color: var(--ink-3); }
+
+/* 여러 컷 선택·일괄 생성 */
+.pi .th { position: relative; }
+.pi .pk { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--gold); }
+.pi.pick { border-color: var(--gold-l); }
+.bulk { display: grid; gap: 6px; margin: 0 0 8px; padding: 8px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel); }
+.bulk .st { min-height: 0; }
 </style>
 </head>
 <body>
@@ -316,6 +323,17 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
     </section>
     <section class="sec">
       <div class="sec-h"><h3>컷</h3><span><label class="b ghost sm" title="이미지를 여러 장 고르면 파일 이름 순서대로 컷이 자동으로 만들어집니다">이미지로 컷 만들기<input type="file" accept="image/*" id="cutsUp" multiple hidden></label> <button type="button" class="b ghost sm" id="addPanel">+ 컷</button></span></div>
+      <div class="bulk" id="bulkBar">
+        <div class="row"><label class="chk"><input type="checkbox" id="selAll"> 전체 선택</label><span class="note" id="selCnt" style="margin:0"></span></div>
+        <div class="row" id="bulkBtns" hidden>
+          <button type="button" class="b ghost sm" id="bkGen" title="선택한 컷의 이미지를 만듭니다 (이미 이미지가 있으면 새 버전이 추가됩니다)">이미지 생성</button>
+          <button type="button" class="b ghost sm" id="bkRegen" title="선택한 컷을 각 컷의 ‘재생성 방식’대로 다시 만듭니다">↻ 재생성</button>
+          <button type="button" class="b sm" id="bkVid" title="선택한 컷을 클링으로 영상화합니다. 동시에 4컷씩 진행합니다">영상 생성 (4컷씩)</button>
+          <button type="button" class="b ghost sm" id="bkCancel" hidden>대기 취소</button>
+        </div>
+        <div class="st" id="bulkSt"></div>
+        <p class="note" style="margin:0">컷 썸네일의 체크박스로 고릅니다. Shift+클릭으로 범위 선택.</p>
+      </div>
       <ol id="panelList" class="plist"></ol>
       <p class="note" id="totalNote"></p>
     </section>
@@ -1476,6 +1494,76 @@ async function registerKlingChar(c) {
   } catch (e) { c._kst = '실패: ' + e.message; }
   c._kbusy = false; save(); renderChars(); refreshInspector();
 }
+/* =========================================================
+   여러 컷 일괄 작업
+   - 이미지 생성·재생성: 선택한 컷을 BULK_IMG_PAR 컷씩 처리한다 (API 사용량 폭주 방지)
+   - 영상 생성: 클링 작업이 동시에 BULK_VID_PAR(4)개를 넘지 않게 대기열로 넣고, 하나가 끝날 때마다 다음 컷을 시작한다
+   ========================================================= */
+const SELECT = new Set(); let lastPick = -1;
+const BULK_IMG_PAR = 2, BULK_VID_PAR = 4;
+const vq = [];                       // 영상화 대기 중인 컷 id
+let bulkImg = null;                  // { total, done, fail, cancel, label }
+const jobActive = p => p.job?.status === 'submitting' || p.job?.status === 'processing';
+const imgCost = p => (providerOrder(p.prov || S.provider)[0] === 'openai' ? +S.cOa : +S.cGm) || 0;
+const vidCost = p => p.klingLen * (p.klingMode === 'pro' ? +S.cKlPro : +S.cKlStd) || 0;
+function renderBulk() {
+  for (const id of [...SELECT]) if (!P.panels.some(p => p.id === id)) SELECT.delete(id);
+  const n = SELECT.size, all = $('#selAll'); if (!all) return;
+  all.checked = n > 0 && n === P.panels.length; all.indeterminate = n > 0 && n < P.panels.length;
+  $('#selCnt').textContent = n ? n + '개 선택' : '';
+  $('#bulkBtns').hidden = !n && !vq.length && !bulkImg;
+  $('#bkGen').disabled = $('#bkRegen').disabled = !!bulkImg || !n;
+  $('#bkVid').disabled = !n;
+  const active = P.panels.filter(jobActive).length;
+  $('#bkCancel').hidden = !(bulkImg || vq.length);
+  $('#bulkSt').textContent = [
+    bulkImg ? `${bulkImg.label}: ${bulkImg.done}/${bulkImg.total}${bulkImg.fail ? ' (실패 ' + bulkImg.fail + ')' : ''}` : '',
+    vq.length || active ? `영상: 진행 ${active}/${BULK_VID_PAR} · 대기 ${vq.length}개` : '',
+  ].filter(Boolean).join('\n');
+}
+async function bulkImages(mode) {
+  if (bulkImg) return;
+  const picked = P.panels.filter(p => SELECT.has(p.id) && !p._busy);
+  const todo = picked.filter(p => p.prompt.trim() || (mode === 'regen' && ((p.extra || '').trim() || (p.skEdit && hasSketch(p)))));
+  if (!todo.length) return toast('선택한 컷에 장면 묘사가 없습니다');
+  const skip = picked.length - todo.length, cost = todo.reduce((s, p) => s + imgCost(p), 0), word = mode === 'regen' ? '재생성' : '생성';
+  if (!confirm(`선택한 컷 ${todo.length}개의 이미지를 ${word}합니다 (${BULK_IMG_PAR}컷씩 순서대로).\n호출 ${todo.length}회 · 약 $${cost.toFixed(2)}${skip ? '\n장면 묘사가 없는 ' + skip + '개 컷은 건너뜁니다.' : ''}\n계속할까요?`)) return;
+  bulkImg = { total: todo.length, done: 0, fail: 0, cancel: false, label: '이미지 ' + word }; renderBulk();
+  let i = 0;
+  const worker = async () => {
+    while (!bulkImg.cancel && i < todo.length) {
+      const p = todo[i++];
+      await (mode === 'regen' ? regenPanel(p) : genPanel(p));
+      bulkImg.done++; if (/^실패/.test(p._st || '')) bulkImg.fail++;
+      renderBulk();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(BULK_IMG_PAR, todo.length) }, worker));
+  const r = bulkImg; bulkImg = null; renderBulk();
+  toast(`이미지 ${word} 끝 — 성공 ${r.done - r.fail}개${r.fail ? ' · 실패 ' + r.fail + '개 (각 컷 이미지 탭에서 확인)' : ''}${r.cancel ? ' · 남은 컷은 취소됨' : ''}`, 6000);
+}
+function bulkVideos() {
+  const picked = P.panels.filter(p => SELECT.has(p.id) && !jobActive(p) && !vq.includes(p.id));
+  const todo = picked.filter(curAsset), skip = picked.length - todo.length;
+  if (!todo.length) return toast('영상으로 만들 이미지가 있는 컷을 선택하세요');
+  const cost = todo.reduce((s, p) => s + vidCost(p), 0);
+  if (!confirm(`선택한 컷 ${todo.length}개를 클링으로 영상화합니다 (동시에 ${BULK_VID_PAR}컷씩).\n각 컷 ‘영상화’ 탭의 프롬프트·모드·길이가 쓰입니다. 약 $${cost.toFixed(2)}${skip ? '\n이미지가 없는 ' + skip + '개 컷은 건너뜁니다.' : ''}\n계속할까요?`)) return;
+  vq.push(...todo.map(p => p.id)); pumpVideo();
+}
+function pumpVideo() {
+  while (vq.length && P.panels.filter(jobActive).length < BULK_VID_PAR) {
+    const id = vq.shift(), p = P.panels.find(x => x.id === id);
+    if (p && curAsset(p) && !jobActive(p)) startKling(p).then(pumpVideo); // startKling 은 첫 await 전에 ‘submitting’ 으로 바꾸므로 슬롯 수가 바로 맞는다
+  }
+  if (vq.length) ensurePolling();
+  renderBulk();
+}
+$('#selAll').onchange = e => { SELECT.clear(); if (e.target.checked) P.panels.forEach(p => SELECT.add(p.id)); lastPick = -1; renderPanels(); };
+$('#bkGen').onclick = () => bulkImages('gen');
+$('#bkRegen').onclick = () => bulkImages('regen');
+$('#bkVid').onclick = bulkVideos;
+$('#bkCancel').onclick = () => { if (bulkImg) bulkImg.cancel = true; vq.length = 0; renderBulk(); toast('대기 중인 컷을 취소했습니다. 이미 시작된 작업은 끝까지 진행됩니다'); };
+
 async function startKling(p) {
   if (!isServer() && (!S.klAK || !S.klSK)) return toast('설정에서 클링 Access Key·Secret Key를 넣으세요 (또는 서버 모드)');
   if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
@@ -1520,7 +1608,7 @@ let pollTimer = null;
 function ensurePolling() { if (!pollTimer) { pollTimer = setInterval(pollAll, 8000); pollAll(); } }
 async function pollAll() {
   const jobs = P.panels.filter(p => p.job?.status === 'processing');
-  if (!jobs.length) { clearInterval(pollTimer); pollTimer = null; return; }
+  if (!jobs.length && !vq.length) { clearInterval(pollTimer); pollTimer = null; return; }
   for (const p of jobs) {
     if (p.job.via === 'server') {
       try {
@@ -1558,7 +1646,7 @@ async function pollAll() {
     } catch (e) { if (p.job) p.job.msg = '상태 확인 오류: ' + e.message; }
     refreshPanel(p);
   }
-  save(); renderPanels();
+  save(); renderPanels(); pumpVideo();
 }
 function jobText(job) {
   if (!job) return '';
@@ -2278,9 +2366,17 @@ function renderPanels() {
       p.overlays.length ? `<i>글 ${p.overlays.length}</i>` : '',
     ].join('');
     li.innerHTML = `
-      <div class="th" style="${id ? `background-image:url('${assetURL(id)}')` : ''}">${id ? '' : i + 1}</div>
+      <div class="th" style="${id ? `background-image:url('${assetURL(id)}')` : ''}"><input type="checkbox" class="pk" data-a="pick" title="일괄 작업에 포함 (Shift+클릭: 범위)" aria-label="컷 ${i + 1} 선택" ${SELECT.has(p.id) ? 'checked' : ''}>${id ? '' : i + 1}</div>
       <div class="meta"><b>컷 ${i + 1} <span class="note">${panelDur(p).toFixed(1)}s</span></b><small>${esc(p.prompt || '장면 미작성')}</small><div>${tags}</div></div>
       <div class="acts"><button type="button" class="ib" data-a="up" title="위로">▲</button><button type="button" class="ib" data-a="down" title="아래로">▼</button><button type="button" class="ib" data-a="del" title="삭제">✕</button></div>`;
+    li.classList.toggle('pick', SELECT.has(p.id));
+    li.querySelector('.pk').onclick = e => {
+      e.stopPropagation();
+      const on = e.target.checked;
+      if (e.shiftKey && lastPick >= 0) { const [a, b] = [Math.min(lastPick, i), Math.max(lastPick, i)]; for (let k = a; k <= b; k++) on ? SELECT.add(P.panels[k].id) : SELECT.delete(P.panels[k].id); }
+      else on ? SELECT.add(p.id) : SELECT.delete(p.id);
+      lastPick = i; renderPanels();
+    };
     li.onclick = e => {
       const a = e.target.closest('[data-a]')?.dataset.a;
       if (a === 'up' && i > 0) { [P.panels[i - 1], P.panels[i]] = [P.panels[i], P.panels[i - 1]]; save(); renderPanels(); return; }
@@ -2292,6 +2388,7 @@ function renderPanels() {
     el.appendChild(li);
   });
   $('#totalNote').textContent = `컷 ${P.panels.length}개 · 전체 ${totalDur().toFixed(1)}초`;
+  renderBulk();
 }
 function selectPanel(id) {
   stop(); sel = id; selOv = null;
