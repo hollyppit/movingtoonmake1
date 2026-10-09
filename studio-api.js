@@ -485,6 +485,7 @@ const PROMPT_COMMON = 'You are a prompt engineer for AI image and video generato
 const PROMPT_TASK = {
   scene: 'Task: write the SCENE prompt for ONE still frame (see "aspect"). Use 3-6 sentences covering: shot size and camera angle, composition (where each character and key object sits in the frame), pose and action, facial expression and gaze direction of each character, setting and time of day, lighting and mood. Merge the "extra" request into the scene. If has_image is true the frame is regenerated from an existing image; still describe the full intended scene.',
   edit: 'Task: write an EDIT INSTRUCTION to apply to an existing image. Output one or two imperative sentences stating exactly what to change (and where in the frame). Do not describe the unchanged parts of the picture.',
+  mix: 'Task: write a COMPOSITING INSTRUCTION. The first image is the base picture; the other images are ATTACHMENT 1..N (see "attachments" for N). Write 1-3 imperative sentences stating exactly what to take from which ATTACHMENT and where and how to place or apply it in the base picture (position, size, pose, which part of the base to replace or keep). Always call them ATTACHMENT 1, ATTACHMENT 2, ... — Korean wording such as "첨부 1", "두 번째 첨부", "첨부한 이미지" maps to these numbers (an unnumbered "첨부한 이미지" with only one attachment means ATTACHMENT 1). Do not describe parts that stay unchanged.',
   motion: 'Task: write an IMAGE-TO-VIDEO MOTION prompt for a short clip (see "len" seconds) that animates a still frame ("scene" tells you what it shows). Describe only motion over time: character movement and expressions, hair/cloth/environment motion, camera movement (push-in, pan, tilt, handheld shake or static) and pacing, as a short sequence that fits the duration. Keep motion natural and moderate unless the draft asks for dramatic action. Do not change the composition, art style, character design or colors. Do not write dialogue. End the prompt with: Keep the exact same art style, character design and colors. No text.',
 };
 export async function handlePrompt(req, env) {
@@ -498,7 +499,7 @@ export async function handlePrompt(req, env) {
     const chars = (Array.isArray(b.characters) ? b.characters : []).slice(0, 6).map(c => ({ name: String(c.name || '').slice(0, 40), appearance: String(c.desc || '').slice(0, 300) }));
     const user = JSON.stringify({
       draft, extra: String(b.extra || '').slice(0, 1000), scene: String(b.scene || '').slice(0, 1000), characters: chars,
-      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!b.hasImage, len: +b.len || 5, audio: !!b.audio,
+      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!b.hasImage, len: +b.len || 5, audio: !!b.audio, attachments: Math.min(8, +b.attachments || 0),
     });
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },

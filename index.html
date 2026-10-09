@@ -300,6 +300,9 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .conv { display: grid; gap: 6px; }
 .convrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .convrow .chk { font-size: .78rem; }
+
+/* 이미지 합성: 첨부 번호 표시 */
+.ref .nx { position: absolute; left: 2px; bottom: 2px; font-size: .6rem; background: rgba(0, 0, 0, .72); color: #fff; padding: 0 4px; border-radius: 2px; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -819,7 +822,7 @@ function referencedIds() {
   P.chars.forEach(c => c.refs.forEach(i => ids.add(i)));
   P.panels.forEach(p => {
     p.versions.forEach(v => ids.add(v.assetId)); p.clips.forEach(c => ids.add(c.assetId));
-    (p.dirRefs || []).forEach(i => ids.add(i)); if (p.sketch) ids.add(p.sketch.assetId);
+    (p.dirRefs || []).forEach(i => ids.add(i)); (p.mixRefs || []).forEach(i => ids.add(i)); if (p.sketch) ids.add(p.sketch.assetId);
     p.overlays.forEach(o => o.voice && ids.add(o.voice.assetId));
   });
   if (P.bgm) ids.add(P.bgm);
@@ -1551,6 +1554,41 @@ async function maskApply() {
   MK.busy = false; p._ebusy = false; $('#mkApply').disabled = false; save(); refreshPanel(p);
 }
 initMask();
+
+/* ---- 이미지 합성: 현재 컷 이미지를 바탕으로, 첨부한 이미지를 지시대로 합친다 ---- */
+async function safeMix(p, instr, n) {
+  if (!isServer() || !wantAuto()) return instr;
+  try { return (await convertDraft('mix', { draft: instr, attachments: n, characters: charCtx(p) })).text; }
+  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 합성합니다: ' + e.message, 6000); return instr; }
+}
+async function aiMix(p) {
+  const refs = (p.mixRefs || []).filter(id => assets.has(id)), instr = (p.mixPrompt || '').trim();
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  if (!refs.length) return toast('합성할 이미지를 먼저 첨부하세요');
+  if (!instr) return toast('어떻게 합성할지 적어 주세요');
+  if (p._ebusy) return toast('이미 수정 중입니다');
+  const label = '이미지 합성';
+  p._ebusy = true; p._est = label + ' 중…'; refreshPanel(p);
+  try {
+    const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
+    const att = []; for (const id of refs) att.push({ blob: await toApiImage(assets.get(id).blob) });
+    const plan = refPlan(p.chars), ci = await safeMix(p, instr, refs.length);
+    const prompt = [
+      'Edit the FIRST attached image (the base picture) by combining it with the other attached images.',
+      'Attached images: ' + refs.map((_, i) => 'image ' + (i + 2) + ' = ATTACHMENT ' + (i + 1)).join(', ') + '. Image 1 is the base picture.',
+      'Instruction: ' + ci,
+      "Blend everything into ONE finished picture: match the base picture's lighting, color grading, perspective, scale, line work and rendering style so nothing looks pasted on. Unless the instruction says otherwise, keep the base picture's composition, camera angle, characters and background unchanged.",
+      plan.length ? refLines(plan, 1 + refs.length) + '\n(Character sheets: only to keep those characters consistent.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const r = await generateImage({ prompt, images: [{ blob: base }, ...att, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
+    const id = await addResult(r);
+    p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label + ': ' + instr, edit: true });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    p._est = r.fellBack ? '✓ ' + PROV[r.first] + ' 실패 → ' + PROV[r.provider] + '로 합성' : '✓ ' + PROV[r.provider] + '로 합성 — 이전 이미지는 버전에 남아 있습니다 (첨부 이미지는 그대로 두었으니 지시만 고쳐 다시 해 볼 수 있습니다)';
+  } catch (e) { p._est = '실패:\n' + e.message; }
+  p._ebusy = false; save(); refreshPanel(p);
+}
 
 /* ---- 웹툰풍 변환: 구도·피사체·색은 그대로, 그림 방식만 고퀄리티 웹툰 일러스트로 ---- */
 const TOON_LVL = {
@@ -2868,6 +2906,13 @@ function tabFix(p) {
   ${isec('inp', '🖌 부분 수정', '칠한 곳만 바꾸기', `
     <p class="note">바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다.</p>
     <div class="row"><button type="button" class="b sm" id="inpBtn" ${dis}>🖌 영역 칠해서 수정…</button></div>`)}
+  ${isec('mix', '🧩 이미지 합성', '다른 이미지 첨부 + 지시', `
+    <p class="note">현재 컷 이미지를 바탕으로, 첨부한 이미지를 지시대로 합칩니다. 첨부는 최대 4장이고, 지시에서는 ‘첨부 1’, ‘첨부 2’처럼 번호로 부를 수 있습니다.</p>
+    <div class="refs" id="mixRefs"></div>
+    <div class="row"><label class="b ghost sm">＋ 이미지 첨부<input type="file" accept="image/*" multiple id="mixUp" hidden></label><span class="note">붙여넣기(Ctrl+V)·끌어놓기도 됩니다</span></div>
+    <textarea data-f="mixPrompt" rows="3" placeholder="예: 첨부 1의 인물을 배경 오른쪽에 자연스럽게 세워 주세요 / 첨부 1의 옷으로 갈아입혀 주세요 / 첨부 2의 소품을 손에 들게"></textarea>
+    <div class="chips">${['첨부 1의 인물을 현재 배경에 자연스럽게 합성', '첨부 1의 옷으로 갈아입히기', '첨부 1의 소품을 장면에 추가', '첨부 1의 배경으로 바꾸고 인물은 유지'].map(t => `<button type="button" class="chip" data-mixp="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="row"><button type="button" class="b sm" id="mixBtn" ${dis}>🧩 합성하기</button></div>`, { id: 'mixZone', badge: (p.mixRefs || []).length || '' })}
   ${isec('face', '🙂 얼굴 각도', '머리 방향만 바꾸기', `
     <p class="note">몸·목·어깨·포즈는 그대로, 머리 방향만 바꿉니다. 둥근 위젯을 끌어도 됩니다.</p>
     <canvas class="facew" id="faceW" width="132" height="132" title="끌어서 얼굴 방향 조절"></canvas>
@@ -2905,6 +2950,11 @@ function bindFix(p, el) {
   $('#faceBtn', el).onclick = () => aiFace(p);
   $('#inpBtn', el).onclick = () => openMask(p);
   $('#toonBtn', el).onclick = () => aiToon(p);
+  const mr = $('#mixRefs', el);
+  (p.mixRefs || []).forEach((id, i) => { const t = refThumb(id, false, () => { p.mixRefs.splice(i, 1); dropAssetIfUnused(id); save(); refreshPanel(p); }); t.insertAdjacentHTML('beforeend', '<span class="nx">첨부 ' + (i + 1) + '</span>'); mr.appendChild(t); });
+  $('#mixUp', el).onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) await placeImages({ kind: 'mix', label: '합성할 이미지' }, fs); };
+  $$('[data-mixp]', el).forEach(b => (b.onclick = () => { const t = $('[data-f="mixPrompt"]', el); t.value = b.dataset.mixp; t.dispatchEvent(new Event('input')); t.focus(); }));
+  $('#mixBtn', el).onclick = () => aiMix(p);
   $$('[data-ins]', el).forEach(b => (b.onclick = () => { $('#editIn', el).value = b.dataset.ins; $('#editIn', el).focus(); }));
   $('#editBtn', el).onclick = () => aiEdit(p, $('#editIn', el).value);
   $$('[data-cam]', el).forEach(b => (b.onclick = () => aiVariant(p, 'cam', CAMERA.find(c => c.k === b.dataset.cam))));
@@ -4459,6 +4509,7 @@ function zoneAt(el) {
     if (c) return { kind: 'char', c, box: card, label: `캐릭터 ‘${c.name || '이름 없음'}’ 레퍼런스` };
   }
   if (tab === 'img') { const g = el.closest('#dirZone'); if (g) return { kind: 'dir', box: g, label: '연출·동작 레퍼런스' }; }
+  if (tab === 'fix') { const g = el.closest('#mixZone'); if (g) return { kind: 'mix', box: g, label: '합성할 이미지' }; }
   if (tab === 'layer' && el.closest('#insp')) return { kind: 'layer', box: $('#insp'), label: '레이어' };
   return null;
 }
@@ -4476,6 +4527,7 @@ async function placeImages(z, files, ids = []) {
   if (z.kind === 'style') { done = addTo(P.style.refs, await mk()); save(); renderStyle(); }
   else if (z.kind === 'char') { done = addTo(z.c.refs, await mk()); save(); renderChars(); refreshInspector(); }
   else if (z.kind === 'dir') { p.dirRefs = p.dirRefs || []; done = addTo(p.dirRefs, await mk(), 2); save(); refreshPanel(p); if (done < n) toast('연출·동작 레퍼런스는 컷당 최대 2장입니다'); }
+  else if (z.kind === 'mix') { p.mixRefs = p.mixRefs || []; done = addTo(p.mixRefs, await mk(), 4); save(); refreshPanel(p); if (done < n) toast('합성할 이미지는 컷당 최대 4장입니다'); }
   else if (z.kind === 'layer') {
     for (const f of files) { try { await addLayerFromBlob(p, f, f.name.replace(/\.[^.]+$/, '')); } catch (e) { toast('이미지를 읽지 못했습니다: ' + f.name, 3500); } }
     for (const id of ids) if (assets.has(id)) await addLayerFromBlob(p, assets.get(id).blob, '결과 이미지');
@@ -4526,7 +4578,7 @@ document.addEventListener('paste', async e => {
   const t = e.target;
   if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName) && [...e.clipboardData.types].includes('text/plain')) return; // 글자 붙여넣기는 그대로
   e.preventDefault();
-  const z = zoneAt(hoverEl) || (tab === 'layer' ? { kind: 'layer', label: '레이어' } : { kind: 'cut', label: '이 컷' });
+  const z = zoneAt(hoverEl) || (tab === 'layer' ? { kind: 'layer', label: '레이어' } : tab === 'fix' && secOpen('mix') ? { kind: 'mix', label: '합성할 이미지' } : { kind: 'cut', label: '이 컷' });
   await placeImages(z, files.map(nameFile), []);
 });
 
