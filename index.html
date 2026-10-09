@@ -1530,6 +1530,37 @@ async function maskApply() {
 }
 initMask();
 
+/* ---- 웹툰풍 변환: 구도·피사체·색은 그대로, 그림 방식만 고퀄리티 웹툰 일러스트로 ---- */
+const TOON_LVL = {
+  keep: ['원본에 충실', 'Stay very faithful to the original shapes, proportions and colors; add only clean line art and gentle cel shading.'],
+  mid: ['보통', 'Use clean ink line art and smooth cel shading with soft gradients.'],
+  strong: ['강하게', 'Stylize boldly: confident, varied-weight ink lines, dramatic cel shading, rich contrast and atmospheric effects — while keeping exactly the same composition and content.'],
+};
+async function aiToon(p) {
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  if (p._ebusy) return toast('이미 수정 중입니다');
+  const lv = TOON_LVL[p.toonLvl] ? p.toonLvl : 'mid', label = '웹툰풍 변환 (' + TOON_LVL[lv][0] + ')';
+  p._ebusy = true; p._est = label + ' 중…'; refreshPanel(p);
+  try {
+    const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
+    const plan = refPlan(p.chars);
+    const prompt = [
+      'Convert the FIRST attached image into a high-quality, professional Korean webtoon (manhwa) illustration.',
+      'Redraw it fully as hand-drawn digital art: clean confident ink line art with consistent line weight, smooth cel shading, polished detailed painted backgrounds, vivid but harmonious colors and a crisp professional finish, like a top-tier webtoon panel. No photographic texture or photo look anywhere. ' + TOON_LVL[lv][1],
+      'Keep exactly the same composition, framing, camera angle, subjects, poses, expressions, layout of objects and buildings, and the overall color palette and lighting. Do not add or remove anything.',
+      P.style.prompt.trim() ? 'Art style: ' + P.style.prompt.trim() : '',
+      plan.length ? refLines(plan, 1) + '\n(Character sheets: keep those characters consistent. Art-style references: match their line, color and rendering style, not their content.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const r = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
+    const id = await addResult(r);
+    p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label, edit: true });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 변환` : `✓ ${PROV[r.provider]}로 웹툰풍 변환 — 이전 이미지는 버전에 남아 있습니다`;
+  } catch (e) { p._est = '실패:\n' + e.message; }
+  p._ebusy = false; save(); refreshPanel(p);
+}
+
 async function aiVariant(p, kind, it) {
   if (!it) return;
   if (p._ebusy) return toast('이미 수정 중입니다');
@@ -2928,6 +2959,10 @@ function tabFix(p) {
     <div class="chips">${presets.map(t => `<button type="button" class="chip" data-ins="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="row"><button type="button" class="b" id="editBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div>
     <div class="st ${stCls(p._est)}">${esc(p._est || '')}</div></div>
+  <div class="grp"><span class="lbl">웹툰풍 변환 — 사진·거친 그림을 구도·피사체는 그대로 두고 고퀄리티 웹툰 일러스트로 다시 그립니다</span>
+    <select data-f="toonLvl"><option value="keep">원본에 충실 — 모양·색을 거의 그대로</option><option value="mid">보통 — 깔끔한 선과 셀 명암</option><option value="strong">강하게 — 선·명암·분위기를 뚜렷하게</option></select>
+    <div class="row"><button type="button" class="b sm" id="toonBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>🎨 고퀄리티 웹툰풍으로 변환</button></div>
+    <p class="note">화풍 고정·화풍 레퍼런스·캐릭터 레퍼런스가 있으면 그 그림체에 맞춰 변환합니다.</p></div>
   <div class="grp"><span class="lbl">부분 수정 (인페인트) — 바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다</span>
     <div class="row"><button type="button" class="b ghost sm" id="inpBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>🖌 영역 칠해서 수정…</button></div></div>
   <div class="grp"><span class="lbl">얼굴 각도 — 몸·목·어깨·포즈는 그대로, 머리 방향만 바꿉니다 (위 둥근 위젯을 끌어도 됩니다)</span>
@@ -2949,6 +2984,7 @@ function tabFix(p) {
 }
 function bindFix(p, el) {
   p.face = p.face || { yaw: 0, pitch: 0, roll: 0 };
+  p.toonLvl = p.toonLvl || 'mid';
   bind(el, p, f => { if (f.startsWith('face.')) drawFaceWidget(fw, p.face); });
   const fw = $('#faceW', el); drawFaceWidget(fw, p.face);
   const setFace = (k, v) => { const s = $(`[data-f="face.${k}"]`, el); s.value = clamp(Math.round(v), +s.min, +s.max); s.dispatchEvent(new Event('input')); };
@@ -2959,6 +2995,7 @@ function bindFix(p, el) {
   $('#faceReset', el).onclick = () => ['yaw', 'pitch', 'roll'].forEach(k => setFace(k, 0));
   $('#faceBtn', el).onclick = () => aiFace(p);
   $('#inpBtn', el).onclick = () => openMask(p);
+  $('#toonBtn', el).onclick = () => aiToon(p);
   $$('[data-ins]', el).forEach(b => (b.onclick = () => { $('#editIn', el).value = b.dataset.ins; $('#editIn', el).focus(); }));
   $('#editBtn', el).onclick = () => aiEdit(p, $('#editIn', el).value);
   $$('[data-cam]', el).forEach(b => (b.onclick = () => aiVariant(p, 'cam', CAMERA.find(c => c.k === b.dataset.cam))));
