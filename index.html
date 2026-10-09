@@ -250,6 +250,20 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .pgt canvas { width: 100%; height: auto; display: block; border: 1px solid var(--line-2); }
 .pgt span { font-size: .7rem; color: var(--ink-3); }
 @media (max-width: 1100px) { .printapp { grid-template-columns: 1fr; height: auto; } }
+
+/* 붙여넣기·드래그 앤 드롭 표시, 확대 보기, 앵글·조명 프리셋 */
+.dropping { outline: 2px dashed var(--gold); outline-offset: 2px; background: rgba(154, 122, 46, .10); }
+.ver .zoom { position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border: 0; border-radius: 2px; background: rgba(0, 0, 0, .7); color: #fff; font-size: .7rem; cursor: zoom-in; opacity: 0; transition: opacity .12s; }
+.ver:hover .zoom, .ver .zoom:focus-visible { opacity: 1; }
+#lightbox { position: fixed; inset: 0; z-index: 9999; background: rgba(20, 16, 8, .88); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+#lightbox img { max-width: 94vw; max-height: 92vh; object-fit: contain; box-shadow: 0 8px 40px rgba(0, 0, 0, .6); background: repeating-conic-gradient(#3a3a3a 0 25%, #2e2e2e 0 50%) 0 0 / 20px 20px; }
+#lightbox .lb-dl { position: absolute; right: 18px; top: 14px; cursor: pointer; }
+#lightbox .lb-hint { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; font-size: .72rem; color: #ddd; pointer-events: none; }
+.pre3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.pre3 button { min-height: 34px; padding: 3px 4px; font-size: .74rem; line-height: 1.2; border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.pre3 button:hover:not(:disabled) { border-color: var(--gold); }
+.pre3 button:disabled { opacity: .45; cursor: not-allowed; }
+.pre3 button small { display: block; font-size: .6rem; color: var(--ink-3); }
 </style>
 </head>
 <body>
@@ -516,6 +530,7 @@ const easeOutBack = p => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math
 const easeInOut = p => -(Math.cos(Math.PI * p) - 1) / 2;
 const enc = new TextEncoder();
 
+const NO_EXTRA = 'Draw only the requested single scene: the characters and the background. Do not add extra inset faces, costume close-up insets, collage panels, model-sheet elements or additional figures.';
 const NO_TEXT = 'Strictly no text of any kind: no letters, no speech balloons, no captions, no sound-effect lettering, no watermark, no signature, no panel borders.';
 const DEFAULT_MOTION = 'Subtle natural motion: hair and clothes move gently, soft breathing and blinking, the camera slowly pushes in. Keep the exact same art style, character design and colors. No text.';
 const DEFAULT_NEG = 'text, letters, subtitles, watermark, distorted face, extra fingers, morphing, style change, flicker';
@@ -1121,6 +1136,7 @@ function buildPrompt(p, plan) {
   if ((p.extra || '').trim()) L.push('Additional request (apply on top of the scene): ' + p.extra.trim());
   const ar = P.aspect || '9:16';
   L.push('Format: one ' + (ar === '16:9' ? 'horizontal 16:9 widescreen' : ar === '1:1' ? 'square 1:1' : 'vertical 9:16') + ' webtoon / motion-comic frame, full-bleed illustration, keep the main subject away from the edges, leave calm empty areas where speech balloons can be placed later.');
+  L.push(NO_EXTRA);
   const r = refLines(plan); if (r) L.push(r);
   L.push(NO_TEXT);
   return L.join('\n\n');
@@ -1206,6 +1222,56 @@ async function regenPanel(p) {
     p._st = r.fellBack ? '✓ ' + PROV[r.first] + ' 실패 → ' + PROV[r.provider] + '로 재생성' : '✓ ' + PROV[r.provider] + '로 재생성 (이전 이미지는 버전에 남아 있습니다)';
   } catch (e) { p._st = '실패:\n' + e.message; }
   p._busy = false; save(); refreshPanel(p);
+}
+
+/* 카메라 앵글·조명 프리셋: 현재 화면(보정·크롭 포함)을 기준으로, 캐릭터·화풍은 100% 유지하고 촬영 각도 또는 빛만 바꾼다 */
+const CAMERA = [
+  { k: 'eye', n: '아이 레벨', s: '눈높이', en: 'eye-level shot, camera at the subject\'s eye height, neutral straight-on perspective' },
+  { k: 'high', n: '하이 앵글', s: '위에서 내려봄', en: 'high-angle shot, camera above the subject looking down at about 30–45 degrees' },
+  { k: 'low', n: '로우 앵글', s: '아래서 올려봄', en: 'low-angle shot, camera below the subject looking up at about 20–35 degrees, heroic and imposing' },
+  { k: 'bird', n: '버드아이', s: '수직 부감', en: 'bird\'s-eye view, camera directly overhead looking straight down at the scene' },
+  { k: 'worm', n: '웜아이', s: '바닥에서', en: 'worm\'s-eye view, camera on the ground looking steeply upward, dramatic extreme low angle' },
+  { k: 'dutch', n: '더치 앵글', s: '기울인 화면', en: 'Dutch angle, the camera tilted about 15–20 degrees so the horizon is diagonal, tense and unsettling' },
+  { k: 'close', n: '클로즈업', s: '표정 강조', en: 'close-up, the camera moves in so the face and upper body fill the frame' },
+  { k: 'wide', n: '와이드 샷', s: '전신+배경', en: 'wide shot, the camera pulls back to show the full body and the surrounding environment' },
+  { k: 'side', n: '사이드 뷰', s: '측면에서', en: 'side view, the camera moves 90 degrees around the subject to show the profile' },
+];
+const LIGHTS = [
+  { k: 'front', n: '정면광', s: '부드럽게', en: 'soft frontal light from the camera side, even and flat shading with gentle shadows' },
+  { k: 'left', n: '왼쪽 측광', s: '반쪽 그림자', en: 'strong side light from the left of the frame; the left side is lit, the right side falls into shadow' },
+  { k: 'right', n: '오른쪽 측광', s: '반쪽 그림자', en: 'strong side light from the right of the frame; the right side is lit, the left side falls into shadow' },
+  { k: 'back', n: '역광', s: '실루엣·림', en: 'backlight from behind the subject, glowing rim light along the edges and a darker front' },
+  { k: 'top', n: '위에서', s: '탑 라이트', en: 'top light from directly above, shadows under the brows, nose and chin' },
+  { k: 'under', n: '아래에서', s: '언더 라이트', en: 'under-lighting from below the subject, upward-cast shadows, eerie and dramatic' },
+  { k: 'keyL', n: '좌상단 45°', s: '키 라이트', en: 'key light from the upper left at 45 degrees with soft fill, classic dimensional shading' },
+  { k: 'keyR', n: '우상단 45°', s: '키 라이트', en: 'key light from the upper right at 45 degrees with soft fill, classic dimensional shading' },
+  { k: 'dim', n: '어둡게', s: '로우키', en: 'low-key lighting, mostly dark with a single dim light source and deep shadows' },
+];
+async function aiVariant(p, kind, it) {
+  if (!it) return;
+  if (p._ebusy) return toast('이미 수정 중입니다');
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  const cam = kind === 'cam', label = (cam ? '카메라 앵글: ' : '조명: ') + it.n;
+  p._ebusy = true; p._est = label + ' 적용 중…'; refreshPanel(p);
+  try {
+    const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
+    const plan = refPlan(p.chars);
+    const prompt = [
+      cam ? 'Redraw the FIRST attached image as if the camera had moved to a new position: ' + it.en + '.' : 'Relight the FIRST attached image: ' + it.en + '.',
+      cam
+        ? 'Keep everything 100% consistent: the same characters (face, hairstyle, outfit, colors, body proportions), the same pose and action, the same setting and props, and the same art style (line work, coloring, rendering). Change ONLY the camera angle, framing and perspective; the background and shading follow the new viewpoint naturally.'
+        : 'Keep everything 100% identical: composition, camera angle, characters (face, hairstyle, outfit, colors, proportions), pose, setting, props and art style. Change ONLY the direction and quality of the light and the resulting shading, shadows, highlights and color temperature.',
+      NO_EXTRA,
+      plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const r = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
+    const id = await addResult(r);
+    p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label, edit: true });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 생성 (${label})` : `✓ ${PROV[r.provider]}로 생성 (${label}) — 이전 이미지는 버전에 남아 있습니다`;
+  } catch (e) { p._est = '실패:\n' + e.message; }
+  p._ebusy = false; save(); refreshPanel(p);
 }
 
 async function aiEdit(p, instr) {
@@ -2304,7 +2370,7 @@ function tabImg(p) {
   const chips = P.chars.length
     ? P.chars.map(c => `<button type="button" class="chip" data-char="${c.id}" aria-pressed="${p.chars.includes(c.id)}">${esc(c.name || '이름 없음')}${c.refs.length ? '' : ' · 레퍼런스 없음'}</button>`).join('')
     : '<span class="note">왼쪽에서 캐릭터를 추가하면 여기서 고를 수 있습니다.</span>';
-  const vers = p.versions.map((v, i) => `<div class="ver ${i === p.cur ? 'on' : ''}" data-v="${i}" title="${esc(v.prompt || '')}"><img src="${assetURL(v.assetId)}" alt="버전 ${i + 1}" loading="lazy"><span class="tag">${i + 1} · ${v.edit ? 'AI수정·' : ''}${SRC[v.src] || v.src}</span><button type="button" class="del" data-vdel="${i}" title="버전 삭제">✕</button></div>`).join('');
+  const vers = p.versions.map((v, i) => `<div class="ver ${i === p.cur ? 'on' : ''}" data-v="${i}" draggable="true" title="${esc(v.prompt || '')} — 끌어서 캐릭터·화풍·연출 레퍼런스에 넣을 수 있습니다"><img src="${assetURL(v.assetId)}" alt="버전 ${i + 1}" loading="lazy" draggable="false"><button type="button" class="zoom" data-vzoom title="크게 보기">⤢</button><span class="tag">${i + 1} · ${v.edit ? 'AI수정·' : ''}${SRC[v.src] || v.src}</span><button type="button" class="del" data-vdel="${i}" title="버전 삭제">✕</button></div>`).join('');
   const provLbl = { auto: 'OpenAI → Gemini', 'gemini-first': 'Gemini → OpenAI', openai: 'OpenAI만', gemini: 'Gemini만' };
   return `
   <div class="grp"><span class="lbl">장면 묘사</span>
@@ -2361,6 +2427,7 @@ function bindImg(p, el) {
   $('#extraEdit', el).onclick = () => aiEdit(p, p.extra || '');
   $('#upImg', el).onchange = async e => { const fs = e.target.files; if (fs.length) await addImagesAsCuts(fs); };
   $$('.ver', el).forEach(v => (v.onclick = e => {
+    if (e.target.closest('[data-vzoom]')) return openLightbox(p.versions[+v.dataset.v]?.assetId, `${safeName(P.title)}_컷${P.panels.indexOf(p) + 1}_v${+v.dataset.v + 1}`);
     const di = e.target.closest('[data-vdel]')?.dataset.vdel;
     if (di !== undefined) {
       if (!confirm('이 버전을 삭제할까요?')) return;
@@ -2493,6 +2560,10 @@ function tabFix(p) {
     <div class="chips">${presets.map(t => `<button type="button" class="chip" data-ins="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="row"><button type="button" class="b" id="editBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div>
     <div class="st ${stCls(p._est)}">${esc(p._est || '')}</div></div>
+  <div class="grp"><span class="lbl">카메라 앵글 — 캐릭터·화풍·포즈는 그대로, 촬영 각도만 바꿔 새 버전으로 만듭니다</span>
+    <div class="pre3">${CAMERA.map(c => `<button type="button" data-cam="${c.k}" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${c.n}<small>${c.s}</small></button>`).join('')}</div></div>
+  <div class="grp"><span class="lbl">조명 방향 — 구도·캐릭터는 그대로, 빛의 방향과 명암만 바꿉니다</span>
+    <div class="pre3">${LIGHTS.map(c => `<button type="button" data-lit="${c.k}" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${c.n}<small>${c.s}</small></button>`).join('')}</div></div>
   <div class="grp"><span class="lbl">색 보정 (실시간 미리보기)</span>
     ${sl('밝기', 'adj.b', 40, 180, 1, '%')}${sl('대비', 'adj.c', 40, 180, 1, '%')}${sl('채도', 'adj.s', 0, 200, 1, '%')}
     ${sl('색조', 'adj.h', -180, 180, 1, '°')}${sl('따뜻함', 'adj.warm', 0, 100, 1, '%')}${sl('흐림', 'adj.blur', 0, 12, 0.5, 'px')}${sl('비네팅', 'adj.vig', 0, 90, 1, '%')}</div>
@@ -2505,6 +2576,8 @@ function bindFix(p, el) {
   bind(el, p);
   $$('[data-ins]', el).forEach(b => (b.onclick = () => { $('#editIn', el).value = b.dataset.ins; $('#editIn', el).focus(); }));
   $('#editBtn', el).onclick = () => aiEdit(p, $('#editIn', el).value);
+  $$('[data-cam]', el).forEach(b => (b.onclick = () => aiVariant(p, 'cam', CAMERA.find(c => c.k === b.dataset.cam))));
+  $$('[data-lit]', el).forEach(b => (b.onclick = () => aiVariant(p, 'lit', LIGHTS.find(c => c.k === b.dataset.lit))));
   $('#adjReset', el).onclick = () => { resetFraming(p); save(); renderInspector(); requestDraw(); };
   $('#bakeBtn', el).onclick = () => bakeToVersion(p);
 }
@@ -4029,6 +4102,111 @@ wrapEl.addEventListener('drop', async e => {
   if (f.type.startsWith('image/')) await addImagesAsCuts(e.dataTransfer.files);
   else if (f.type.startsWith('video/')) { await addClip(p, f); toast('이 컷의 영상 클립으로 넣었습니다'); }
 });
+
+/* =========================================================
+   붙여넣기(Ctrl+V) · 드래그 앤 드롭 · 결과 이미지를 레퍼런스로 끌어넣기 · 확대 보기
+   - 붙여넣기: 마우스를 올려 둔 칸(화풍·캐릭터·연출 레퍼런스·레이어)으로, 없으면 지금 탭에 맞는 곳으로 들어간다
+   - 끌어넣기: 컷의 ‘버전’ 썸네일을 캐릭터·화풍·연출 레퍼런스 칸으로 끌면 바로 레퍼런스가 된다 (피드백 루프)
+   ========================================================= */
+const ASSET_MIME = 'application/x-mt-asset';
+let hoverEl = null;
+document.addEventListener('pointerover', e => { hoverEl = e.target; }, true);
+
+function zoneAt(el) {
+  if (!el || !el.closest || el.closest('dialog[open]')) return null;
+  const sec = el.closest('.sec');
+  if (sec && sec.querySelector('#styleRefs')) return { kind: 'style', box: sec, label: '화풍 레퍼런스' };
+  const card = el.closest('#charList .card');
+  if (card) {
+    const c = P.chars[[...$('#charList').children].indexOf(card)];
+    if (c) return { kind: 'char', c, box: card, label: `캐릭터 ‘${c.name || '이름 없음'}’ 레퍼런스` };
+  }
+  if (tab === 'img') { const g = el.closest('#insp .grp'); if (g && g.querySelector('#dirRefs')) return { kind: 'dir', box: g, label: '연출·동작 레퍼런스' }; }
+  if (tab === 'layer' && el.closest('#insp')) return { kind: 'layer', box: $('#insp'), label: '레이어' };
+  return null;
+}
+const imgFiles = list => [...(list || [])].filter(f => f.type.startsWith('image/'));
+const nameFile = (f, i) => (f.name && !/^image\.\w+$/i.test(f.name) ? f : new File([f], `붙여넣기-${Date.now()}-${i}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type }));
+
+async function placeImages(z, files, ids = []) {
+  const p = selPanel(), n = files.length + ids.length;
+  const mk = async () => { const out = [...ids]; for (const f of files) out.push(await addAsset(f)); return out; };
+  const addTo = (arr, all, max = Infinity) => {
+    const fresh = all.filter((id, i) => !arr.includes(id) && all.indexOf(id) === i).slice(0, Math.max(0, max - arr.length));
+    arr.push(...fresh); all.filter(id => !arr.includes(id)).forEach(dropAssetIfUnused); return fresh.length;
+  };
+  let done = n;
+  if (z.kind === 'style') { done = addTo(P.style.refs, await mk()); save(); renderStyle(); }
+  else if (z.kind === 'char') { done = addTo(z.c.refs, await mk()); save(); renderChars(); refreshInspector(); }
+  else if (z.kind === 'dir') { p.dirRefs = p.dirRefs || []; done = addTo(p.dirRefs, await mk(), 2); save(); refreshPanel(p); if (done < n) toast('연출·동작 레퍼런스는 컷당 최대 2장입니다'); }
+  else if (z.kind === 'layer') {
+    for (const f of files) { try { await addLayerFromBlob(p, f, f.name.replace(/\.[^.]+$/, '')); } catch (e) { toast('이미지를 읽지 못했습니다: ' + f.name, 3500); } }
+    for (const id of ids) if (assets.has(id)) await addLayerFromBlob(p, assets.get(id).blob, '결과 이미지');
+    save(); renderInspector(); renderPanels(); requestDraw();
+  } else if (z.kind === 'cut') { await addImagesAsCuts(files); return; }
+  if (done) toast(`${z.label}에 ${done}장 넣었습니다`);
+}
+
+const hasDragImg = e => { const t = [...(e.dataTransfer?.types || [])]; return t.includes('Files') || t.includes(ASSET_MIME); };
+let dropBox = null;
+const clearDrop = () => { dropBox?.classList.remove('dropping'); dropBox = null; };
+document.addEventListener('dragover', e => {
+  if (!hasDragImg(e)) return;
+  const z = zoneAt(e.target);
+  if (!z) {
+    clearDrop();
+    // 칸 밖에 파일을 놓으면 브라우저가 그 파일을 열어 버리므로 막는다 (캔버스·입력칸·대화상자는 자기 처리를 따른다)
+    if (!e.target.closest?.('#stageWrap, input, dialog')) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+    return;
+  }
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  if (dropBox !== z.box) { clearDrop(); dropBox = z.box; dropBox.classList.add('dropping'); }
+});
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) clearDrop(); });
+document.addEventListener('dragend', clearDrop);
+document.addEventListener('drop', async e => {
+  clearDrop(); if (!hasDragImg(e)) return;
+  const z = zoneAt(e.target); if (!z) return;
+  e.preventDefault();
+  const id = e.dataTransfer.getData(ASSET_MIME), files = imgFiles(e.dataTransfer.files);
+  if (!files.length && !(id && assets.has(id))) return;
+  await placeImages(z, files, id && assets.has(id) ? [id] : []);
+});
+/* 결과 이미지를 미리보기 화면에 놓으면 레이어로 올린다 (파일 드롭은 위의 기존 처리가 맡는다) */
+wrapEl.addEventListener('drop', async e => {
+  const id = e.dataTransfer.getData(ASSET_MIME); if (!id || !assets.has(id)) return;
+  e.preventDefault(); wrapEl.classList.remove('drop');
+  setTab('layer'); await placeImages({ kind: 'layer', label: '레이어' }, [], [id]);
+});
+document.addEventListener('dragstart', e => {
+  const v = e.target.closest?.('.ver'); if (!v) return;
+  const a = selPanel().versions[+v.dataset.v]?.assetId; if (!a) return;
+  e.dataTransfer.setData(ASSET_MIME, a); e.dataTransfer.effectAllowed = 'copy';
+});
+document.addEventListener('paste', async e => {
+  if (document.querySelector('dialog[open]')) return;
+  const files = imgFiles(e.clipboardData?.files); if (!files.length) return;
+  const t = e.target;
+  if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName) && [...e.clipboardData.types].includes('text/plain')) return; // 글자 붙여넣기는 그대로
+  e.preventDefault();
+  const z = zoneAt(hoverEl) || (tab === 'layer' ? { kind: 'layer', label: '레이어' } : { kind: 'cut', label: '이 컷' });
+  await placeImages(z, files.map(nameFile), []);
+});
+
+/* 확대 보기: 아무 곳이나(이미지 포함) 누르면 닫히고, 저장 버튼은 닫지 않고 저장만 한다 */
+function closeLightbox() { $('#lightbox')?.remove(); }
+function openLightbox(id, name) {
+  const a = assets.get(id); if (!a) return;
+  closeLightbox();
+  const box = document.createElement('div'); box.id = 'lightbox';
+  const ext = a.blob.type === 'image/jpeg' ? 'jpg' : a.blob.type === 'image/webp' ? 'webp' : 'png';
+  box.innerHTML = '<img alt=""><button type="button" class="b sm lb-dl">⬇ 저장</button><div class="lb-hint">아무 곳이나 누르면 닫힙니다 · Esc</div>';
+  box.querySelector('img').src = a.url;
+  box.querySelector('.lb-dl').onclick = ev => { ev.stopPropagation(); download(a.blob, `${name || 'image'}.${ext}`); };
+  box.onclick = closeLightbox;
+  document.body.append(box);
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#lightbox')) closeLightbox(); });
 
 /* =========================================================
    상단·전송부·대화상자
