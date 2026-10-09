@@ -623,7 +623,7 @@ const ADJ0 = { b: 100, c: 100, s: 100, h: 0, warm: 0, blur: 0, vig: 0 };
 const PROV = { openai: 'OpenAI', gemini: 'Gemini', kling: 'Kling', tts: '음성', server: '서버', anthropic: 'Claude' };
 const SRC = { openai: 'OA', gemini: 'GM', upload: '업로드', bake: '보정' };
 const KINDS = { speech: '말풍선', thought: '생각', shout: '외침', narration: '나레이션', caption: '자막' };
-const DUR_MIN = 3, DUR_MAX = 15; // 컷 길이 범위(초)
+const DUR_MIN = 0.3, DUR_MAX = 15; // 컷 길이 범위(초)
 const OUTS = { fade: '페이드', pop: '작아지며', slideDown: '아래로 내려감', wipe: '와이프', none: '즉시' };
 const ANIMS = { pop: '팝', fade: '페이드', slideUp: '아래에서 올라옴', typewriter: '타자기', shake: '흔들림(충격)', wipe: '와이프', none: '없음' };
 const MOTIONS = { none: '고정', 'zoom-in': '줌인', 'zoom-out': '줌아웃', 'pan-left': '왼쪽으로 팬', 'pan-right': '오른쪽으로 팬', 'pan-up': '위로 팬', 'pan-down': '아래로 팬', shake: '충격 흔들림' };
@@ -2463,14 +2463,14 @@ function syncVideos(t) {
 function renderAt(t) {
   const segs = player.segs; let i = segs.findIndex(s => t >= s.start && t < s.start + s.dur); if (i < 0) i = segs.length - 1;
   const s = segs[i], lt = t - s.start;
-  const trans = player.mode === 'all' && i > 0 && s.p.trans !== 'cut' && lt < TR;
+  const tr = Math.min(TR, s.dur * 0.6), trans = player.mode === 'all' && i > 0 && s.p.trans !== 'cut' && lt < tr;
   if (!trans) { drawPanel(cx, s.p, lt); return; }
-  const prev = segs[i - 1], e = easeInOut(lt / TR);
+  const prev = segs[i - 1], e = easeInOut(lt / tr);
   drawPanel(cx, prev.p, prev.dur - 0.001);
   cx.save();
   if (s.p.trans === 'fade') { cx.globalAlpha = e; drawPanel(cx, s.p, lt); }
   else if (s.p.trans === 'slide') { cx.translate((1 - e) * W, 0); drawPanel(cx, s.p, lt); }
-  else if (s.p.trans === 'flash') { drawPanel(cx, s.p, lt); cx.fillStyle = `rgba(255,255,255,${1 - lt / TR})`; cx.fillRect(0, 0, W, H); }
+  else if (s.p.trans === 'flash') { drawPanel(cx, s.p, lt); cx.fillStyle = `rgba(255,255,255,${1 - lt / tr})`; cx.fillRect(0, 0, W, H); }
   else drawPanel(cx, s.p, lt);
   cx.restore();
 }
@@ -4362,7 +4362,7 @@ function bindAudio(p, el) {
 function tabCut(p) {
   return `
   <div class="g2">
-    <label><span class="lbl">컷 길이(초, 3~15)</span><input type="number" data-f="dur" min="3" max="15" step="0.1"></label>
+    <label><span class="lbl">컷 길이(초, 0.3~15)</span><input type="number" data-f="dur" min="0.3" max="15" step="0.1"></label>
     <label><span class="lbl">이 컷으로 들어올 때 전환</span><select data-f="trans"><option value="cut">컷(즉시)</option><option value="fade">페이드</option><option value="slide">슬라이드</option><option value="flash">플래시</option></select></label>
   </div>
   <div class="grp"><span class="lbl">카메라 모션 — 영상 클립이 없을 때 정지 이미지에 적용</span>
