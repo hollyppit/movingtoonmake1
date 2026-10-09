@@ -279,6 +279,27 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 
 /* 프롬프트 자동 변환 */
 .conv textarea { font-size: .78rem; }
+
+/* 오른쪽 패널 정리: 접이식 구역·주요 버튼 줄 */
+.tabs { grid-template-columns: repeat(7, 1fr); }
+.tabs button { font-size: .74rem; padding: 12px 0; }
+#insp { gap: 12px; padding: 14px; }
+.isecs { display: grid; gap: 8px; }
+.isec { border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); }
+.isec > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; font-size: .84rem; font-weight: 600; color: var(--ink); }
+.isec > summary::-webkit-details-marker { display: none; }
+.isec > summary::before { content: '▸'; color: var(--gold); font-size: .78rem; transition: transform .12s; }
+.isec[open] > summary::before { transform: rotate(90deg); }
+.isec > summary:hover { color: var(--gold-l); }
+.isec > summary small { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; font-size: .7rem; color: var(--ink-3); }
+.isec > summary .bd { font-style: normal; font-size: .66rem; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; color: var(--gold-l); font-weight: 500; }
+.isec-b { padding: 10px 12px 12px; border-top: 1px solid var(--line-2); }
+.actbar { display: flex; gap: 6px; flex-wrap: wrap; }
+.actbar .b { flex: 1 1 auto; justify-content: center; text-align: center; }
+.actbar .b:first-child { flex: 1.6 1 0; }
+.conv { display: grid; gap: 6px; }
+.convrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.convrow .chk { font-size: .78rem; }
 </style>
 </head>
 <body>
@@ -1276,9 +1297,10 @@ async function safeEdit(p, instr) {
 }
 function convUI(p, kind) {
   const c = kind === 'scene' ? convFresh(p) : motionFresh(p), what = kind === 'scene' ? '이미지' : '영상 움직임';
-  return `<div class="grp conv"><label class="chk"><input type="checkbox" data-auto ${wantAuto() ? 'checked' : ''}> ✨ 입력한 초안을 AI가 ${what} 프롬프트로 자동 변환한 뒤 생성</label>
+  return `<div class="conv">
+    <div class="convrow"><label class="chk" title="초안이 그대로면 변환 결과를 다시 쓰니 비용이 늘지 않습니다"><input type="checkbox" data-auto ${wantAuto() ? 'checked' : ''}> ✨ AI가 ${what} 프롬프트로 자동 변환</label>
+      <button type="button" class="b ghost sm" data-convprev ${p._cbusy ? 'disabled' : ''}>${p._cbusy ? '변환 중…' : '미리보기'}</button></div>
     ${isServer() ? '' : '<p class="note">서버 모드에서만 동작합니다 (서버에 ANTHROPIC_API_KEY 필요).</p>'}
-    <div class="row"><button type="button" class="b ghost sm" data-convprev ${p._cbusy ? 'disabled' : ''}>${p._cbusy ? '변환 중…' : '변환 미리보기'}</button><span class="note">초안이 그대로면 변환 결과를 다시 쓰니 비용이 늘지 않습니다</span></div>
     ${c ? `<div class="convbox"><span class="lbl">변환된 프롬프트 — 고쳐 쓸 수 있고, 생성할 때 이 내용이 쓰입니다${c.note ? ' · ' + esc(c.note) : ''}</span><textarea data-convtxt rows="6">${esc(c.text)}</textarea></div>` : ''}</div>`;
 }
 function bindConv(el, p, kind) {
@@ -1685,27 +1707,15 @@ async function fetchBlob(url) {
 }
 /* 서버 모드: /api/kling 이 서명·전송을 맡고, 완성 영상을 Supabase Storage에 저장해 키로 돌려준다(링크 만료·CORS 문제 없음) */
 /* 클링에 보낼 최종 프롬프트: 움직임 + (소리를 켠 경우) 대사·목소리 */
-/* 클링 캐릭터(Element): 이미지·목소리가 그대로이고 소리를 켠 컷에서만, 등장 캐릭터 중 최대 3명을 붙인다 */
-const klName = c => String(c.name || '').replace(/\s+/g, '').slice(0, 20);
-const klSig = c => (c.voice?.id || '') + '|' + c.refs.slice(0, 4).join(',') + '|' + klName(c);
-function klingElements(p) {
-  if (!p.klingAudio || !isServer()) return [];
-  return p.chars.map(id => P.chars.find(c => c.id === id)).filter(c => c?.kEl?.id && c.kEl.sig === klSig(c)).slice(0, 3);
-}
 const klingNegText = p => ((p.klingNeg || DEFAULT_NEG) + (p.klingSlow ? ', ' + SLOWMO_NEG : '')).slice(0, 2500);
 function klingFinalPrompt(p, motion) { // motion: AI가 변환한 움직임 프롬프트 (있으면 직접 쓴 초안 대신 쓴다)
   let t = (motion || p.klingPrompt || DEFAULT_MOTION).trim();
   if (p.klingSlow) t += ' ' + SLOWMO;
-  const els = klingElements(p);
   const lines = p.klingAudio ? String(p.klingDialogue || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean) : [];
-  if (els.length) t += '\n\nCharacters in this shot: ' + els.map(c => '@' + klName(c)).join(', ') + '. Each speaks only with their own voice.';
   if (lines.length) {
-    const said = lines.map(l => {
-      const m = l.match(/^(.+?)\s*[:：]\s*(.+)$/), c = m && els.find(x => x.name.trim().toLowerCase() === m[1].trim().toLowerCase());
-      return c ? '@' + klName(c) + ': "' + m[2].replace(/"/g, "'") + '"' : '"' + l.replace(/"/g, "'") + '"';
-    });
+    const said = lines.map(l => '"' + l.replace(/"/g, "'") + '"');
     t += '\n\nDialogue, spoken aloud in Korean and in sync with the lip movement, in this order: ' + said.join(' ');
-    if ((p.klingVoice || '').trim() && !els.length) t += '\nVoice and delivery: ' + p.klingVoice.trim();
+    if ((p.klingVoice || '').trim()) t += '\nVoice and delivery: ' + p.klingVoice.trim();
   } else if (p.klingAudio) t += '\n\nAdd fitting ambient sound; no speech.';
   return t.slice(0, 2500);
 }
@@ -1717,81 +1727,8 @@ async function startKlingServer(p) {
   const d = await srvJSON('/api/kling', {
     image: img, tail, model: S.klModel, mode: p.klingMode, duration: String(p.klingLen), audio: !!p.klingAudio,
     prompt: klingFinalPrompt(p, motion), negative: klingNegText(p),
-    elements: klingElements(p).map(c => ({ id: c.kEl.id })),
   });
   return d.taskId;
-}
-/* 클링 기본 목소리 목록(한 번만 불러온다) */
-let KLV = null;
-async function loadVoices() {
-  if (KLV) return KLV;
-  try { KLV = (await srv('/api/kling?op=voices')).voices || []; } catch (e) { toast('목소리 목록을 못 불러왔습니다: ' + e.message, 6000); return null; }
-  return KLV;
-}
-/* 내 목소리: 샘플 음성(5~30초, 한 사람, 잡음 없음)을 클링에 올려 voice_id 를 만든다.
-   샘플은 설정의 음성(TTS)으로 한국어 문장을 읽혀 만들거나, 직접 녹음한 파일을 올린다 */
-const VOICE_SAMPLE = '안녕하세요. 저는 이 이야기의 주인공입니다. 오늘은 조금 특별한 하루가 될 것 같아요. 천천히 숨을 고르고, 제가 하고 싶은 말을 차분하게 들려드릴게요.';
-/* 캐릭터별 TTS 목소리 선택지 (Gemini 설명은 Google 문서의 목소리 특징) */
-const GM_VOICES = [['Kore', 'Kore — 단단함'], ['Puck', 'Puck — 경쾌함'], ['Zephyr', 'Zephyr — 밝음'], ['Charon', 'Charon — 정보 전달'], ['Aoede', 'Aoede — 산뜻함'], ['Leda', 'Leda — 젊음'], ['Fenrir', 'Fenrir — 들뜸'], ['Orus', 'Orus — 단단함'], ['Callirrhoe', 'Callirrhoe — 느긋함'], ['Autonoe', 'Autonoe — 밝음'], ['Enceladus', 'Enceladus — 숨소리'], ['Iapetus', 'Iapetus — 또렷함'], ['Umbriel', 'Umbriel — 느긋함'], ['Algieba', 'Algieba — 부드러움'], ['Despina', 'Despina — 부드러움'], ['Erinome', 'Erinome — 또렷함'], ['Algenib', 'Algenib — 거친 목소리'], ['Rasalgethi', 'Rasalgethi — 정보 전달'], ['Laomedeia', 'Laomedeia — 경쾌함'], ['Achernar', 'Achernar — 부드럽고 낮음'], ['Alnilam', 'Alnilam — 단단함'], ['Schedar', 'Schedar — 고름'], ['Gacrux', 'Gacrux — 성숙함'], ['Pulcherrima', 'Pulcherrima — 적극적'], ['Achird', 'Achird — 친근함'], ['Zubenelgenubi', 'Zubenelgenubi — 캐주얼'], ['Vindemiatrix', 'Vindemiatrix — 온화함'], ['Sadachbia', 'Sadachbia — 활발함'], ['Sadaltager', 'Sadaltager — 박식함'], ['Sulafat', 'Sulafat — 따뜻함']];
-const OA_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map(v => [v, v]);
-let previewAudio = null;
-/* 클링에 등록하기 전에 TTS 샘플만 들어 본다 (클링 크레딧 안 씀) */
-async function previewVoiceTts(c) {
-  const text = (c.vText || VOICE_SAMPLE).trim(); if (!text) return toast('샘플 문장을 쓰세요');
-  c._kst = '미리듣기 만드는 중…'; renderChars();
-  try {
-    const r = await ttsBlob(text, true, c.tv);
-    if (previewAudio) previewAudio.pause();
-    previewAudio = new Audio(URL.createObjectURL(r.blob)); await previewAudio.play();
-    c._kst = '미리듣기 재생 중 — 마음에 들 때까지 목소리·말투를 바꿔 보세요';
-  } catch (e) { c._kst = '실패: ' + e.message; }
-  renderChars();
-}
-async function makeKlingVoice(c, file) {
-  const text = (c.vText || VOICE_SAMPLE).trim();
-  if (!file && text.length < 40) return toast('샘플 문장이 너무 짧습니다 (40자 이상, 5초 넘게 읽히도록)');
-  if (!confirm(file ? '올린 음성으로 클링 목소리를 만듭니다. 클링 크레딧이 사용될 수 있습니다.' : `TTS 음성(${c.tv?.engine || S.ttsEngine} ${c.tv?.voice || (c.tv?.engine && c.tv.engine !== S.ttsEngine ? '기본' : S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)})으로 샘플을 만들어 클링 목소리로 등록합니다. 음성과 클링 크레딧이 사용될 수 있습니다.`)) return;
-  c._kst = '목소리 만드는 중…'; c._kbusy = true; renderChars();
-  try {
-    let key, blob;
-    if (file) { blob = file; key = await uploadBlob(file, file.name || 'voice.mp3'); }
-    else { const r = await ttsBlob(text, true, c.tv); blob = r.blob; key = r.key; }
-    const dur = (await actx().decodeAudioData(await blob.arrayBuffer())).duration;
-    if (dur < 5 || dur > 30) throw new Error(`음성 길이가 ${dur.toFixed(1)}초입니다. 5~30초여야 합니다`);
-    const { taskId } = await srvJSON('/api/kling', { op: 'voice', name: (klName(c) || '캐릭터').slice(0, 12) + ' 목소리', key });
-    let v = null;
-    for (let i = 0; i < 40 && !v; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      const d = await srv('/api/kling?op=voice&id=' + encodeURIComponent(taskId));
-      if (d.status === 'succeed') v = d.voice;
-      else if (d.status === 'failed') throw new Error(d.error || '목소리 등록 실패');
-    }
-    if (!v) throw new Error('시간이 너무 오래 걸립니다. 잠시 후 목록을 다시 불러와 보세요');
-    c.voice = v; if (KLV) KLV = [v, ...KLV.filter(x => x.id !== v.id)];
-    c._kst = '목소리 완성 — 아래에서 미리 듣고, 마음에 들면 캐릭터 등록을 누르세요';
-  } catch (e) { c._kst = '실패: ' + e.message; }
-  c._kbusy = false; save(); renderChars();
-}
-/* 캐릭터(이미지+목소리)를 클링에 등록하고 element_id 를 저장한다 */
-async function registerKlingChar(c) {
-  if (!c.voice?.id) return toast('먼저 목소리를 고르세요');
-  if (!c.refs.length) return toast('캐릭터 레퍼런스 이미지를 먼저 올리거나 시트를 만드세요');
-  if (!klName(c)) return toast('캐릭터 이름을 먼저 쓰세요');
-  if (!confirm(`‘${c.name}’ 을(를) 클링에 등록합니다. 클링 크레딧이 사용될 수 있습니다.`)) return;
-  c._kst = '등록 중…'; c._kbusy = true; renderChars();
-  try {
-    const keys = [];
-    for (const id of c.refs.slice(0, 4)) keys.push(await ensureKey(id + ':api', await toApiImage(assets.get(id).blob), 'kl-char.jpg'));
-    const { taskId } = await srvJSON('/api/kling', { op: 'element', name: klName(c), desc: (c.desc || c.name).slice(0, 100), voiceId: c.voice.id, frontal: keys[0], refers: keys.slice(1) });
-    for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      const d = await srv('/api/kling?op=element&id=' + encodeURIComponent(taskId));
-      if (d.status === 'succeed') { c.kEl = { id: d.elementId, sig: klSig(c) }; c._kst = '등록 완료 — 소리를 켠 컷에 자동으로 붙습니다'; break; }
-      if (d.status === 'failed') throw new Error(d.error || '등록 실패');
-    }
-    if (!c.kEl || c.kEl.sig !== klSig(c)) { if (!/완료/.test(c._kst)) c._kst = '실패: 시간이 너무 오래 걸립니다. 잠시 후 다시 시도하세요'; }
-  } catch (e) { c._kst = '실패: ' + e.message; }
-  c._kbusy = false; save(); renderChars(); refreshInspector();
 }
 /* =========================================================
    여러 컷 일괄 작업
@@ -2578,64 +2515,13 @@ function renderChars() {
   if (!P.chars.length) el.innerHTML = '<p class="note">캐릭터를 등록하면 컷마다 레퍼런스가 자동으로 첨부되어 얼굴·의상이 덜 흔들립니다.</p>';
   P.chars.forEach(c => {
     const d = document.createElement('div'); d.className = 'card';
-    const teng = c.tv?.engine || S.ttsEngine;
     d.innerHTML = `
       <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
       <textarea class="ds" rows="3" placeholder="외형: 나이대, 얼굴형, 머리 모양·색, 눈, 의상, 체형, 상징 색"></textarea>
       <div class="refs"></div>
       <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple hidden></label><button type="button" class="b ghost sm gen" ${c._busy ? 'disabled' : ''}>${c._busy ? '생성 중…' : '시트 생성'}</button></div>
-      <div class="st ${/^실패/.test(c._st || '') ? 'err' : ''}">${esc(c._st || '')}</div>
-      ${isServer() ? `<div class="kv">
-        <div class="row"><select class="vs" aria-label="캐릭터 목소리"></select><button type="button" class="b ghost sm vl">${KLV ? '다시 불러오기' : '목소리 목록'}</button>${c.voice?.own ? '<button type="button" class="b ghost sm vd">삭제</button>' : ''}</div>
-        <audio class="vp" controls hidden style="width:100%;height:32px"></audio>
-        <span class="lbl">내 목소리 만들기 — 아래 목소리·말투로 샘플 문장(5~30초 분량)을 읽혀 클링 목소리로 만듭니다. 비워 두면 설정의 TTS 값을 씁니다</span>
-        <label class="lbl">TTS 엔진<select class="tv-e"></select></label>
-        <label class="lbl">TTS 목소리${teng === 'eleven' ? ' (일레븐랩스 voice id)' : ''}${teng === 'eleven' ? '<input type="text" class="tv-v">' : '<select class="tv-v"></select>'}</label>
-        <label class="lbl">말투·연기 지시<input type="text" class="tv-i" placeholder="예: 차분하고 낮은 20대 여성, 약간 수줍게, 천천히"></label>
-        ${teng === 'gemini' ? '' : '<label class="lbl">속도<input type="number" class="tv-s" step="0.05" min="0.5" max="1.5"></label>'}
-        <textarea class="vt" rows="3"></textarea>
-        <div class="row"><button type="button" class="b ghost sm vq">TTS 미리듣기</button><button type="button" class="b ghost sm vm" ${c._kbusy ? 'disabled' : ''}>클링 목소리로 만들기</button><label class="b ghost sm">녹음 파일 올리기<input type="file" class="vf" accept="audio/*" hidden></label></div>
-        <div class="row"><button type="button" class="b ghost sm vr" ${c._kbusy ? 'disabled' : ''}>${c._kbusy ? '등록 중…' : c.kEl?.id && c.kEl.sig === klSig(c) ? '클링 캐릭터 다시 등록' : '클링 캐릭터 등록'}</button></div>
-        <div class="st ${/^실패/.test(c._kst || '') ? 'err' : ''}">${esc(c._kst || (c.kEl?.id ? (c.kEl.sig === klSig(c) ? '등록됨 — 소리를 켠 컷에 자동으로 붙습니다' : '이미지·목소리·이름이 바뀌었습니다. 다시 등록하세요') : '목소리를 고르고 등록하면 영상에서 같은 목소리가 쓰입니다'))}</div>
-      </div>` : ''}`;
+      <div class="st ${/^실패/.test(c._st || '') ? 'err' : ''}">${esc(c._st || '')}</div>`;
     const nm = d.querySelector('.nm'), ds = d.querySelector('.ds');
-    const vs = d.querySelector('.vs');
-    if (vs) {
-      const vp = d.querySelector('.vp');
-      const list = KLV ? (c.voice && !KLV.some(v => v.id === c.voice.id) ? [c.voice, ...KLV] : KLV) : (c.voice ? [c.voice] : []);
-      const vt = d.querySelector('.vt'); vt.value = c.vText ?? VOICE_SAMPLE; vt.oninput = () => { c.vText = vt.value; save(); };
-      const tv = c.tv || (c.tv = {}), tvv = d.querySelector('.tv-v'), tvi = d.querySelector('.tv-i'), tvs = d.querySelector('.tv-s');
-      const tve = d.querySelector('.tv-e'), engs = [['', `설정 따름 (${{ gemini: 'Gemini', eleven: '일레븐랩스', openai: 'OpenAI' }[S.ttsEngine] || S.ttsEngine})`], ['openai', 'OpenAI'], ['gemini', 'Gemini']];
-      tve.innerHTML = engs.map(([v, n]) => `<option value="${v}">${n}</option>`).join(''); tve.value = tv.engine || '';
-      tve.onchange = () => { tv.engine = tve.value; tv.voice = ''; save(); renderChars(); };
-      if (tvv.tagName === 'SELECT') {
-        const setV = S.ttsEngine === teng ? (teng === 'gemini' ? S.gmVoice : S.ttsVoice) : null;
-        tvv.innerHTML = `<option value="">${setV ? `설정 값 (${esc(setV)})` : '기본 목소리'}</option>` + (teng === 'gemini' ? GM_VOICES : OA_VOICES).map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('');
-      } else tvv.placeholder = '일레븐랩스 voice id (설정 값)';
-      tvv.value = tv.voice || ''; tvi.value = tv.instr || ''; if (tvs) tvs.value = tv.speed || '';
-      tvv.oninput = () => { tv.voice = tvv.value.trim(); save(); }; tvi.oninput = () => { tv.instr = tvi.value; save(); }; if (tvs) tvs.oninput = () => { tv.speed = +tvs.value || 0; save(); };
-      d.querySelector('.vq').onclick = () => previewVoiceTts(c);
-      d.querySelector('.vm').onclick = () => makeKlingVoice(c);
-      d.querySelector('.vf').onchange = e => { const f = e.target.files[0]; if (f) makeKlingVoice(c, f); };
-      vs.innerHTML = '<option value="">(목소리 없음)</option>' + list.map(v => `<option value="${esc(v.id)}">${esc(v.name || v.id)}</option>`).join('');
-      vs.value = c.voice?.id || '';
-      const show = () => { const v = list.find(x => x.id === vs.value); vp.hidden = !(v && v.trial); if (v && v.trial) vp.src = v.trial; };
-      show();
-      vs.onchange = () => { const v = list.find(x => x.id === vs.value); c.voice = v ? { id: v.id, name: v.name, trial: v.trial, own: v.own } : null; save(); show(); renderChars(); };
-      const vd = d.querySelector('.vd');
-      if (vd) vd.onclick = async () => {
-        const v = c.voice;
-        if (!confirm(`내 목소리 ‘${v.name}’ 을(를) 클링에서 완전히 삭제합니다. 이 목소리로 등록된 캐릭터는 다시 등록해야 할 수 있습니다. 계속할까요?`)) return;
-        try {
-          await srvJSON('/api/kling', { op: 'voicedel', voiceId: v.id });
-          if (KLV) KLV = KLV.filter(x => x.id !== v.id);
-          P.chars.forEach(x => { if (x.voice?.id === v.id) { x.voice = null; x.kEl = null; x._kst = '목소리가 삭제되었습니다. 새 목소리를 고르세요'; } });
-          save(); renderChars(); refreshInspector();
-        } catch (e) { toast('삭제 실패: ' + e.message, 6000); }
-      };
-      d.querySelector('.vl').onclick =async () => { KLV = null; if (await loadVoices()) renderChars(); };
-      d.querySelector('.vr').onclick = () => registerKlingChar(c);
-    }
     nm.value = c.name; ds.value = c.desc;
     nm.oninput = () => { c.name = nm.value; save(); };
     nm.onchange = () => refreshInspector();
@@ -2754,6 +2640,7 @@ function refreshInspector() {
 }
 function refreshPanel(p) { renderPanels(); if (p.id === sel) { refreshInspector(); requestDraw(); } }
 
+$('#insp').addEventListener('toggle', e => { const dt = e.target; if (dt.dataset && dt.dataset.sec) { S.secOpen = { ...(S.secOpen || {}), [dt.dataset.sec]: dt.open }; saveSettings(); } }, true);
 function renderInspector() {
   const p = selPanel(), el = $('#insp'); if (!p) return;
   el.innerHTML = ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
@@ -2762,18 +2649,20 @@ function renderInspector() {
 }
 
 /* ---- 이미지 탭 ---- */
+/* 접이식 구역: 자주 쓰는 것은 펼쳐 두고, 가끔 쓰는 것은 한 줄로 접어 둔다. 열림 상태는 기억한다 */
+const secOpen = (k, dflt) => (S.secOpen && k in S.secOpen ? !!S.secOpen[k] : !!dflt);
+function isec(key, title, hint, body, o = {}) {
+  return `<details class="isec" ${o.id ? 'id="' + o.id + '"' : ''} data-sec="${key}" ${secOpen(key, o.open) ? 'open' : ''}><summary><span class="t">${title}</span>${o.badge ? `<i class="bd">${o.badge}</i>` : ''}<small>${hint || ''}</small></summary><div class="isec-b grp">${body}</div></details>`;
+}
 function tabImg(p) {
   const chips = P.chars.length
     ? P.chars.map(c => `<button type="button" class="chip" data-char="${c.id}" aria-pressed="${p.chars.includes(c.id)}">${esc(c.name || '이름 없음')}${c.refs.length ? '' : ' · 레퍼런스 없음'}</button>`).join('')
     : '<span class="note">왼쪽에서 캐릭터를 추가하면 여기서 고를 수 있습니다.</span>';
   const vers = p.versions.map((v, i) => `<div class="ver ${i === p.cur ? 'on' : ''}" data-v="${i}" draggable="true" title="${esc(v.prompt || '')} — 끌어서 캐릭터·화풍·연출 레퍼런스에 넣을 수 있습니다"><img src="${assetURL(v.assetId)}" alt="버전 ${i + 1}" loading="lazy" draggable="false"><button type="button" class="zoom" data-vzoom title="크게 보기">⤢</button><span class="tag">${i + 1} · ${v.edit ? 'AI수정·' : ''}${SRC[v.src] || v.src}</span><button type="button" class="del" data-vdel="${i}" title="버전 삭제">✕</button></div>`).join('');
   const provLbl = { auto: 'OpenAI → Gemini', 'gemini-first': 'Gemini → OpenAI', openai: 'OpenAI만', gemini: 'Gemini만' };
-  return `
-  <div class="grp"><span class="lbl">장면 묘사</span>
-    <textarea data-f="prompt" rows="5" placeholder="예: 비 오는 밤 골목, 민아가 우산을 접으며 뒤돌아본다. 로우앵글, 역광, 젖은 바닥에 네온 반사"></textarea>
-    <p class="note">대사·효과음 글자는 쓰지 말고 ‘말풍선’ 탭에서 넣으세요. 그림 속 글자는 클링 영상화 때 뭉개집니다.</p></div>
-  <div class="grp"><span class="lbl">등장 캐릭터 — 고른 캐릭터의 레퍼런스가 자동 첨부됩니다</span><div class="chips">${chips}</div></div>
-  <div class="grp"><span class="lbl">연출·동작 레퍼런스 — 구도·포즈·동작·카메라만 참고합니다 (화풍·캐릭터는 따라 하지 않음)</span>
+  const nDir = (p.dirRefs || []).length + (hasSketch(p) ? 1 : 0);
+  const dirBody = `
+    <p class="note">구도·포즈·동작·카메라만 참고합니다 (화풍·캐릭터는 따라 하지 않음)</p>
     <div class="refs" id="dirRefs"></div>
     <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple id="dirUp" hidden></label><button type="button" class="b ghost sm" id="padOpen">✏️ 스케치 패드 ${hasSketch(p) ? '열기' : '그리기'}</button></div>
     ${hasSketch(p) ? `<div class="row" style="align-items:flex-start">
@@ -2781,25 +2670,36 @@ function tabImg(p) {
       <div class="grp" style="gap:4px">
         <label class="note"><input type="checkbox" data-sk="skRef" ${p.skRef ? 'checked' : ''}> 연출+동작 레퍼런스와 연결하기 — 이미지 생성 때 구도·포즈 참고로 보냅니다</label>
         <label class="note"><input type="checkbox" data-sk="skEdit" ${p.skEdit ? 'checked' : ''}> 수정 생성에 연결하기 — 이미 만든 이미지를 재생성·AI 수정할 때 이 선을 따라 고칩니다</label>
-      </div></div>` : ''}</div>
-  <label class="grp"><span class="lbl">이 컷의 엔진</span><select data-f="prov">
-    <option value="">설정 따름 (${provLbl[S.provider]})</option>${opts(provLbl, null)}</select></label>
+      </div></div>` : ''}`;
+  const moreBody = `
+    <div class="grp"><span class="lbl">추가 요청 (선택) — 이미지 생성 때 장면 묘사에 더해 반영됩니다</span>
+      <textarea data-f="extra" rows="2" placeholder="예: 더 어둡고 비장한 분위기로 / 광각 로우앵글 / 캐릭터를 화면 오른쪽에"></textarea></div>
+    ${p.versions.length ? '<label class="grp"><span class="lbl">재생성 방식</span><select data-f="regenLvl"><option value="keep">비슷하게 — 구도·포즈 유지, 새로 다듬기</option><option value="vary">다르게 — 구도·포즈 바꿔도 됨</option><option value="new">처음부터 — 현재 이미지 참고 안 함</option></select></label>' : ''}
+    <div class="row"><button type="button" class="b ghost sm" id="extraEdit" ${p._ebusy ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : '현재 이미지에 적용 (AI 수정)'}</button><span class="note">지금 이미지를 이 요청대로 고칩니다</span></div>`;
+  const advBody = `
+    <label class="grp"><span class="lbl">이 컷의 엔진</span><select data-f="prov">
+      <option value="">설정 따름 (${provLbl[S.provider]})</option>${opts(provLbl, null)}</select></label>
+    <details><summary class="note">실제로 보낼 프롬프트 보기</summary><pre id="pp"></pre></details>`;
+  return `
+  <div class="grp"><span class="lbl">① 장면 묘사</span>
+    <textarea data-f="prompt" rows="4" placeholder="예: 비 오는 밤 골목, 민아가 우산을 접으며 뒤돌아본다. 로우앵글, 역광, 젖은 바닥에 네온 반사"></textarea>
+    <p class="note">대사·효과음 글자는 ‘말풍선’ 탭에서 넣으세요 (그림 속 글자는 영상화 때 뭉개집니다).</p></div>
+  <div class="grp"><span class="lbl">② 등장 캐릭터 <span class="note">— 고르면 레퍼런스가 자동 첨부됩니다</span></span><div class="chips">${chips}</div></div>
   ${convUI(p, 'scene')}
-  <div class="row">
+  <div class="actbar">
     <button type="button" class="b" id="genBtn" ${p._busy ? 'disabled' : ''}>${p._busy ? '생성 중…' : '이미지 생성'}</button>
     ${p.versions.length ? '<button type="button" class="b ghost" id="regenBtn" ' + (p._busy ? 'disabled' : '') + '>↻ 재생성</button>' : ''}
     <label class="b ghost" title="여러 장을 고르면 파일 이름 순서대로 컷이 자동으로 만들어집니다">이미지 올리기<input type="file" accept="image/*" id="upImg" multiple hidden></label>
-    <span class="note" id="refNote"></span>
   </div>
-  ${p.versions.length ? '<label class="grp"><span class="lbl">재생성 방식</span><select data-f="regenLvl"><option value="keep">비슷하게 — 구도·포즈 유지, 새로 다듬기</option><option value="vary">다르게 — 구도·포즈 바꿔도 됨</option><option value="new">처음부터 — 현재 이미지 참고 안 함</option></select></label>' : ''}
-  <div class="grp"><span class="lbl">추가 요청 (선택) — 이미지 생성 때 장면 묘사에 더해 반영됩니다</span>
-    <textarea data-f="extra" rows="2" placeholder="예: 더 어둡고 비장한 분위기로 / 광각 로우앵글 / 캐릭터를 화면 오른쪽에"></textarea>
-    <div class="row"><button type="button" class="b ghost sm" id="extraEdit" ${p._ebusy ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : '현재 이미지에 적용 (AI 수정)'}</button></div>
-    <div class="st ${stCls(p._est)}">${esc(p._est || '')}</div></div>
-  <div class="st ${stCls(p._st)}">${esc(p._st || '')}</div>
-  <details><summary class="note">실제로 보낼 프롬프트 보기</summary><pre id="pp"></pre></details>
+  <span class="note" id="refNote"></span>
+  ${p._st ? `<div class="st ${stCls(p._st)}">${esc(p._st)}</div>` : ''}
+  ${p._est ? `<div class="st ${stCls(p._est)}">${esc(p._est)}</div>` : ''}
+  ${isec('dir', '🧭 연출·동작 레퍼런스', '구도·포즈 참고', dirBody, { id: 'dirZone', badge: nDir || '' })}
+  ${isec('more', '✏️ 추가 요청 · 재생성 방식', '', moreBody, { badge: (p.extra || '').trim() ? '입력됨' : '' })}
+  ${isec('adv', '⚙️ 엔진 · 보낼 프롬프트', '고급', advBody)}
   <div class="grp"><span class="lbl">버전 ${p.versions.length}개 — 선택한 버전이 이 컷에 쓰입니다</span>${p.versions.length ? `<div class="vers">${vers}</div>` : '<span class="note">아직 없습니다. 생성하거나, 그려 둔 원고를 올리세요(캔버스에 끌어다 놓아도 됩니다).</span>'}</div>`;
 }
+
 function bindImg(p, el) {
   const upd = () => {
     const plan = [...refPlan(p.chars), ...dirItems(p)];
@@ -2953,35 +2853,44 @@ let rpT = null; const renderPanelsDebounced = () => { clearTimeout(rpT); rpT = s
 /* ---- 후보정 탭 ---- */
 function tabFix(p) {
   const presets = ['표정을 더 놀란 얼굴로', '배경을 비 오는 밤으로', '손가락 모양을 자연스럽게', '조명을 역광으로 드라마틱하게', '의상 색을 레퍼런스와 똑같이'];
+  const dis = p._ebusy || !curAsset(p) ? 'disabled' : '';
   return `
-  <div class="grp"><span class="lbl">AI 수정 — 지금 화면(보정·크롭 포함)을 기준으로 고칩니다</span>
+  ${p._est ? `<div class="st ${stCls(p._est)}">${esc(p._est)}</div>` : ''}
+  <div class="grp"><span class="lbl">✨ AI로 고치기 — 지금 화면(보정·크롭 포함)을 기준으로 고칩니다</span>
     <textarea id="editIn" rows="3" placeholder="예: 오른손이 우산 손잡이를 자연스럽게 쥐도록"></textarea>
     <div class="chips">${presets.map(t => `<button type="button" class="chip" data-ins="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <div class="row"><button type="button" class="b" id="editBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div>
-    <div class="st ${stCls(p._est)}">${esc(p._est || '')}</div></div>
-  <div class="grp"><span class="lbl">웹툰풍 변환 — 사진·거친 그림을 구도·피사체는 그대로 두고 고퀄리티 웹툰 일러스트로 다시 그립니다</span>
+    <div class="row"><button type="button" class="b" id="editBtn" ${dis}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div></div>
+  <div class="isecs">
+  ${isec('toon', '🎨 웹툰풍 변환', '사진·거친 그림 → 웹툰', `
+    <p class="note">구도·피사체는 그대로 두고 고퀄리티 웹툰 일러스트로 다시 그립니다. 화풍·캐릭터 레퍼런스가 있으면 그 그림체에 맞춥니다.</p>
     <select data-f="toonLvl"><option value="keep">원본에 충실 — 모양·색을 거의 그대로</option><option value="mid">보통 — 깔끔한 선과 셀 명암</option><option value="strong">강하게 — 선·명암·분위기를 뚜렷하게</option></select>
-    <div class="row"><button type="button" class="b sm" id="toonBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>🎨 고퀄리티 웹툰풍으로 변환</button></div>
-    <p class="note">화풍 고정·화풍 레퍼런스·캐릭터 레퍼런스가 있으면 그 그림체에 맞춰 변환합니다.</p></div>
-  <div class="grp"><span class="lbl">부분 수정 (인페인트) — 바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다</span>
-    <div class="row"><button type="button" class="b ghost sm" id="inpBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>🖌 영역 칠해서 수정…</button></div></div>
-  <div class="grp"><span class="lbl">얼굴 각도 — 몸·목·어깨·포즈는 그대로, 머리 방향만 바꿉니다 (위 둥근 위젯을 끌어도 됩니다)</span>
+    <div class="row"><button type="button" class="b sm" id="toonBtn" ${dis}>🎨 웹툰풍으로 변환</button></div>`)}
+  ${isec('inp', '🖌 부분 수정', '칠한 곳만 바꾸기', `
+    <p class="note">바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다.</p>
+    <div class="row"><button type="button" class="b sm" id="inpBtn" ${dis}>🖌 영역 칠해서 수정…</button></div>`)}
+  ${isec('face', '🙂 얼굴 각도', '머리 방향만 바꾸기', `
+    <p class="note">몸·목·어깨·포즈는 그대로, 머리 방향만 바꿉니다. 둥근 위젯을 끌어도 됩니다.</p>
     <canvas class="facew" id="faceW" width="132" height="132" title="끌어서 얼굴 방향 조절"></canvas>
     ${sl('좌우 (Yaw) · + 는 화면 오른쪽', 'face.yaw', -60, 60, 1, '°')}${sl('상하 (Pitch) · + 는 위', 'face.pitch', -40, 40, 1, '°')}${sl('기울기 (Roll) · + 는 오른쪽', 'face.roll', -30, 30, 1, '°')}
     <input type="text" data-f="faceTarget" placeholder="대상 캐릭터 (여러 명일 때만) 예: 왼쪽의 교복 소녀">
-    <div class="row"><button type="button" class="b ghost sm" id="faceReset">0으로</button><button type="button" class="b sm" id="faceBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>얼굴 각도 적용</button></div></div>
-  <div class="grp"><span class="lbl">카메라 앵글 — 캐릭터·화풍·포즈는 그대로, 촬영 각도만 바꿔 새 버전으로 만듭니다</span>
-    <div class="pre3">${CAMERA.map(c => `<button type="button" data-cam="${c.k}" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${c.n}<small>${c.s}</small></button>`).join('')}</div></div>
-  <div class="grp"><span class="lbl">조명 방향 — 구도·캐릭터는 그대로, 빛의 방향과 명암만 바꿉니다</span>
-    <div class="pre3">${LIGHTS.map(c => `<button type="button" data-lit="${c.k}" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${c.n}<small>${c.s}</small></button>`).join('')}</div></div>
-  <div class="grp"><span class="lbl">색 보정 (실시간 미리보기)</span>
+    <div class="row"><button type="button" class="b ghost sm" id="faceReset">0으로</button><button type="button" class="b sm" id="faceBtn" ${dis}>얼굴 각도 적용</button></div>`)}
+  ${isec('cam', '🎥 카메라 앵글', '촬영 각도만 바꾸기', `
+    <p class="note">캐릭터·화풍·포즈는 그대로, 촬영 각도만 바꿔 새 버전으로 만듭니다.</p>
+    <div class="pre3">${CAMERA.map(c => `<button type="button" data-cam="${c.k}" ${dis}>${c.n}<small>${c.s}</small></button>`).join('')}</div>`)}
+  ${isec('lit', '💡 조명 방향', '빛·명암만 바꾸기', `
+    <p class="note">구도·캐릭터는 그대로, 빛의 방향과 명암만 바꿉니다.</p>
+    <div class="pre3">${LIGHTS.map(c => `<button type="button" data-lit="${c.k}" ${dis}>${c.n}<small>${c.s}</small></button>`).join('')}</div>`)}
+  ${isec('adj', '🎚 색 보정 · 구도', '실시간 미리보기', `
+    <span class="lbl">색 보정</span>
     ${sl('밝기', 'adj.b', 40, 180, 1, '%')}${sl('대비', 'adj.c', 40, 180, 1, '%')}${sl('채도', 'adj.s', 0, 200, 1, '%')}
-    ${sl('색조', 'adj.h', -180, 180, 1, '°')}${sl('따뜻함', 'adj.warm', 0, 100, 1, '%')}${sl('흐림', 'adj.blur', 0, 12, 0.5, 'px')}${sl('비네팅', 'adj.vig', 0, 90, 1, '%')}</div>
-  <div class="grp"><span class="lbl">구도 (화면 비율 크롭)</span>
-    ${sl('확대', 'zoom', 1, 2.5, 0.01, '×')}${sl('가로 위치', 'fx', 0, 1, 0.01)}${sl('세로 위치', 'fy', 0, 1, 0.01)}</div>
-  <div class="row"><button type="button" class="b ghost sm" id="adjReset">보정 초기화</button><button type="button" class="b sm" id="bakeBtn" ${curAsset(p) ? '' : 'disabled'}>보정 결과를 새 버전으로 굽기</button></div>
-  <p class="note">클링에는 이 탭의 보정·크롭이 반영된 화면이 그대로 전송됩니다. 굽기를 하면 보정값이 이미지에 고정되고 슬라이더는 초기화됩니다.</p>`;
+    ${sl('색조', 'adj.h', -180, 180, 1, '°')}${sl('따뜻함', 'adj.warm', 0, 100, 1, '%')}${sl('흐림', 'adj.blur', 0, 12, 0.5, 'px')}${sl('비네팅', 'adj.vig', 0, 90, 1, '%')}
+    <span class="lbl">구도 (화면 비율 크롭)</span>
+    ${sl('확대', 'zoom', 1, 2.5, 0.01, '×')}${sl('가로 위치', 'fx', 0, 1, 0.01)}${sl('세로 위치', 'fy', 0, 1, 0.01)}
+    <div class="row"><button type="button" class="b ghost sm" id="adjReset">보정 초기화</button><button type="button" class="b sm" id="bakeBtn" ${curAsset(p) ? '' : 'disabled'}>보정 결과를 새 버전으로 굽기</button></div>
+    <p class="note">클링에는 이 탭의 보정·크롭이 반영된 화면이 그대로 전송됩니다. 굽기를 하면 보정값이 이미지에 고정되고 슬라이더는 초기화됩니다.</p>`)}
+  </div>`;
 }
+
 function bindFix(p, el) {
   p.face = p.face || { yaw: 0, pitch: 0, roll: 0 };
   p.toonLvl = p.toonLvl || 'mid';
@@ -4188,26 +4097,28 @@ function tabVideo(p) {
   const clip = curClip(p), job = p.job, busy = job?.status === 'submitting' || job?.status === 'processing';
   const est = (p.klingLen * (p.klingMode === 'pro' ? +S.cKlPro : +S.cKlStd)).toFixed(2);
   return `
-  <div class="grp"><span class="lbl">움직임 프롬프트</span>
-    <textarea data-f="klingPrompt" rows="4" placeholder="${esc(DEFAULT_MOTION)}"></textarea>
+  <div class="grp"><span class="lbl">① 움직임 프롬프트</span>
+    <textarea data-f="klingPrompt" rows="3" placeholder="${esc(DEFAULT_MOTION)}"></textarea>
     <div class="chips">${MOTION_PRESETS.map(([n, t]) => `<button type="button" class="chip" data-mp="${esc(t)}">${n}</button>`).join('')}</div></div>
   ${convUI(p, 'motion')}
-  <div class="grp"><label class="chk"><input type="checkbox" data-f="klingAudio"> 소리·대사 넣기 (클링 3.0 오디오)</label>
+  <div class="grp"><span class="lbl">② 영상 설정</span>
+    <div class="g2">
+      <label><span class="lbl">모드</span><select data-f="klingMode"><option value="std">Standard</option><option value="pro">Pro (고화질·비쌈)</option></select></label>
+      <label><span class="lbl">길이</span><select data-f="klingLen" data-num><option value="3">3초</option><option value="4">4초</option><option value="5">5초</option><option value="6">6초</option><option value="7">7초</option><option value="8">8초</option><option value="9">9초</option><option value="10">10초</option><option value="11">11초</option><option value="12">12초</option><option value="13">13초</option><option value="14">14초</option><option value="15">15초</option></select></label>
+    </div>
+    <label class="chk"><input type="checkbox" data-f="klingSlow"> 🎞 영화적인 슬로우모션 <span class="note">— 모든 움직임을 느리고 묵직하게</span></label>
+    <label class="chk"><input type="checkbox" data-f="klingTail"> 다음 컷 이미지를 끝 프레임으로 <span class="note">(모델·모드에 따라 미지원)</span></label></div>
+  <div class="actbar"><button type="button" class="b" id="klBtn" ${busy || !curAsset(p) ? 'disabled' : ''}>${busy ? '영상화 진행 중…' : '클링으로 영상 만들기'}</button></div>
+  <span class="note" id="klEst">추정 $${est} · 모델 ${esc(S.klModel)}</span>
+  <div class="st ${job?.status === 'failed' ? 'err' : job?.status === 'done' ? 'ok' : ''}" id="jobSt">${esc(jobText(job))}</div>
+  ${job?.status === 'remote' ? `<div class="box note">링크가 만료되기 전에 <a href="${esc(job.url)}" target="_blank" rel="noopener">여기서 직접 내려받은 뒤</a> 아래 ‘영상 올리기’로 넣으세요. 다음부터 자동으로 받으려면 도움말의 프록시를 설정하세요.</div>` : ''}
+  ${isec('aud', '🔊 소리·대사', '클링 3.0 오디오', `<div class="grp"><label class="chk"><input type="checkbox" data-f="klingAudio"> 소리·대사 넣기 (클링 3.0 오디오)</label>
     ${p.klingAudio ? `<span class="lbl">대사 — 한 줄에 하나, 말하는 순서대로 (누가 말하는지 적으면 더 정확합니다)</span>
       <textarea data-f="klingDialogue" rows="3" placeholder="소녀: 기다려요!&#10;남자: …이제 와서 무슨 소리지?"></textarea>
       <input type="text" data-f="klingVoice" placeholder="목소리·분위기 (선택) 예: 차분한 여성 목소리, 약간 떨리는">
       <div class="row"><button type="button" class="b ghost sm" id="klDlgFill">이 컷 말풍선 대사 가져오기</button></div>
-      <p class="note">새 클링 API(KLING_API_KEY)에서만 소리가 나옵니다. 소리를 켜면 비용이 더 들 수 있습니다. 대사를 비워 두면 효과음·분위기 소리만 넣습니다. 영상 위의 말풍선은 별도이니, 같은 대사를 말풍선으로도 보이게 하려면 말풍선 탭에도 넣으세요.</p>` : ''}</div>
-  <details><summary class="note">네거티브 프롬프트</summary><textarea data-f="klingNeg" rows="2" placeholder="${esc(DEFAULT_NEG)}"></textarea></details>
-  <div class="g2">
-    <label><span class="lbl">모드</span><select data-f="klingMode"><option value="std">Standard</option><option value="pro">Pro (고화질·비쌈)</option></select></label>
-    <label><span class="lbl">길이</span><select data-f="klingLen" data-num><option value="3">3초</option><option value="4">4초</option><option value="5">5초</option><option value="6">6초</option><option value="7">7초</option><option value="8">8초</option><option value="9">9초</option><option value="10">10초</option><option value="11">11초</option><option value="12">12초</option><option value="13">13초</option><option value="14">14초</option><option value="15">15초</option></select></label>
-  </div>
-  <label class="chk"><input type="checkbox" data-f="klingSlow"> 🎞 영화적인 슬로우모션 — 모든 움직임을 느리고 부드럽게, 묵직한 슬로모션으로 만듭니다</label>
-  <label class="chk"><input type="checkbox" data-f="klingTail"> 다음 컷 이미지를 끝 프레임으로 (모델·모드에 따라 미지원)</label>
-  <div class="row"><button type="button" class="b" id="klBtn" ${busy || !curAsset(p) ? 'disabled' : ''}>${busy ? '영상화 진행 중…' : '클링으로 영상 만들기'}</button><span class="note" id="klEst">추정 $${est} · 모델 ${esc(S.klModel)}</span></div>
-  <div class="st ${job?.status === 'failed' ? 'err' : job?.status === 'done' ? 'ok' : ''}" id="jobSt">${esc(jobText(job))}</div>
-  ${job?.status === 'remote' ? `<div class="box note">링크가 만료되기 전에 <a href="${esc(job.url)}" target="_blank" rel="noopener">여기서 직접 내려받은 뒤</a> 아래 ‘영상 올리기’로 넣으세요. 다음부터 자동으로 받으려면 도움말의 프록시를 설정하세요.</div>` : ''}
+      <p class="note">새 클링 API(KLING_API_KEY)에서만 소리가 나옵니다. 소리를 켜면 비용이 더 들 수 있습니다. 대사를 비워 두면 효과음·분위기 소리만 넣습니다. 영상 위의 말풍선은 별도이니, 같은 대사를 말풍선으로도 보이게 하려면 말풍선 탭에도 넣으세요.</p>` : ''}</div>`, { badge: p.klingAudio ? '켜짐' : '' })}
+  ${isec('neg', '🚫 네거티브 프롬프트', '고급', `<textarea data-f="klingNeg" rows="2" placeholder="${esc(DEFAULT_NEG)}"></textarea>`)}
   <div class="grp"><span class="lbl">이 컷의 영상 클립 ${p.clips.length}개</span>
     ${clip ? `<video class="vprev" src="${assetURL(clip.assetId)}" controls playsinline loop></video>` : '<span class="note">아직 없습니다. 클링으로 만들거나 직접 만든 영상을 올리세요.</span>'}
     ${p.clips.length > 1 ? `<div class="chips">${p.clips.map((c, i) => `<button type="button" class="chip" data-clip="${i}" aria-pressed="${i === p.clipCur}">${i + 1} · ${(+c.dur || 0).toFixed(1)}s${c.mode ? ' · ' + c.mode : ''}</button>`).join('')}</div>` : ''}
@@ -4218,6 +4129,7 @@ function tabVideo(p) {
     </div></div>
   <p class="note">‘후보정’ 탭의 보정·크롭이 반영된 화면이 전송됩니다. 말풍선은 전송하지 않고 영상 위에 따로 합성합니다.</p>`;
 }
+
 function bindVideo(p, el) {
   bindConv(el, p, 'motion');
   bind(el, p, f => {
@@ -4546,7 +4458,7 @@ function zoneAt(el) {
     const c = P.chars[[...$('#charList').children].indexOf(card)];
     if (c) return { kind: 'char', c, box: card, label: `캐릭터 ‘${c.name || '이름 없음'}’ 레퍼런스` };
   }
-  if (tab === 'img') { const g = el.closest('#insp .grp'); if (g && g.querySelector('#dirRefs')) return { kind: 'dir', box: g, label: '연출·동작 레퍼런스' }; }
+  if (tab === 'img') { const g = el.closest('#dirZone'); if (g) return { kind: 'dir', box: g, label: '연출·동작 레퍼런스' }; }
   if (tab === 'layer' && el.closest('#insp')) return { kind: 'layer', box: $('#insp'), label: '레이어' };
   return null;
 }
