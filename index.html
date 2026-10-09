@@ -271,6 +271,11 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .pi.pick { border-color: var(--gold-l); }
 .bulk { display: grid; gap: 6px; margin: 0 0 8px; padding: 8px; border: 1px solid var(--line-2); border-radius: 4px; background: var(--panel); }
 .bulk .st { min-height: 0; }
+
+/* 부분 수정(마스크)·얼굴 각도 */
+#mkWrap img { opacity: 1; }
+#mkCv { opacity: .55; }
+.facew { display: block; margin: 4px auto; border: 1px solid var(--line-2); border-radius: 50%; background: var(--panel); cursor: grab; touch-action: none; }
 </style>
 </head>
 <body>
@@ -526,6 +531,28 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
     <p class="note">단축키 — 펜 P · 지우개 E · 굵기 [ 작게 / ] 크게 (Shift 누르면 5씩) · 되돌리기 Ctrl+Z · 다시 Ctrl+Shift+Z.<br>선은 투명 배경으로 저장됩니다. 이미지 위에 고칠 부분을 그릴 땐 ‘현재 이미지 깔기’를 켜 두세요(깔린 이미지는 저장되지 않습니다). 거친 낙서보다 또렷한 선이 더 잘 전달됩니다.</p>
   </div>
   <div class="dlg-f"><button type="button" class="b sm" id="padSave">저장</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
+<!-- 부분 수정(인페인트): 바꿀 영역만 칠하면 그 안쪽만 AI 결과로 바뀌고, 바깥은 원본 픽셀 그대로 남는다 -->
+<dialog id="dlgMask">
+  <div class="dlg-h"><h3>부분 수정 — 바꿀 영역을 칠하세요</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b">
+    <div class="padtools">
+      <button type="button" class="b ghost sm" id="mkBrush" aria-pressed="true" title="단축키 B">🖌 브러시</button>
+      <button type="button" class="b ghost sm" id="mkEraser" aria-pressed="false" title="단축키 E">🧹 지우개</button>
+      <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="mkSize" min="4" max="160" value="40"> <b id="mkSizeV">40</b></label>
+      <button type="button" class="b ghost sm" id="mkUndo" title="Ctrl+Z">↶ 되돌리기</button>
+      <button type="button" class="b ghost sm" id="mkRedo" title="Ctrl+Shift+Z">↷ 다시</button>
+      <button type="button" class="b ghost sm" id="mkClear">전체 지우기</button>
+    </div>
+    <div class="padwrap" id="mkWrap"><img id="mkUnder" alt=""><canvas id="mkCv"></canvas></div>
+    <label class="grp"><span class="lbl">칠한 부분을 어떻게 바꿀까요?</span>
+      <textarea id="mkPrompt" rows="2" placeholder="예: 웃는 표정으로 / 안경 추가 / 오른손에 우산을 쥐게 / 이 부분 배경을 창문으로"></textarea></label>
+    <label class="chk"><input type="checkbox" id="mkFeather" checked> 가장자리 부드럽게 (원본과 자연스럽게 이어 붙임)</label>
+    <p class="note">칠한 영역 밖은 원본 그대로 유지됩니다(AI 결과를 칠한 영역 안쪽에만 합성). 펜 태블릿은 필압으로 굵기가 달라집니다. 단축키 — 브러시 B · 지우개 E · 굵기 [ ] · 되돌리기 Ctrl+Z.</p>
+    <div class="st" id="mkSt"></div>
+  </div>
+  <div class="dlg-f"><button type="button" class="b sm" id="mkApply">적용</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
 <input type="file" id="importFile" accept=".json,application/json" hidden>
@@ -1265,6 +1292,167 @@ const LIGHTS = [
   { k: 'keyR', n: '우상단 45°', s: '키 라이트', en: 'key light from the upper right at 45 degrees with soft fill, classic dimensional shading' },
   { k: 'dim', n: '어둡게', s: '로우키', en: 'low-key lighting, mostly dark with a single dim light source and deep shadows' },
 ];
+/* ---- 얼굴 각도: 몸은 그대로 두고 머리 방향만 바꾼다 ---- */
+function drawFaceWidget(cv, f) {
+  const x = cv.getContext('2d'), w = cv.width, R = w * 0.34, rad = v => (v * Math.PI) / 180;
+  const yaw = rad(f.yaw || 0), pitch = rad(f.pitch || 0), roll = rad(f.roll || 0);
+  x.clearRect(0, 0, w, cv.height); x.save(); x.translate(w / 2, cv.height / 2); x.rotate(roll);
+  const proj = (lon, lat) => { // 구 위의 점: lon 0 = 정면. 좌우(yaw) → 위아래(pitch) 순서로 돌린다
+    const X = Math.cos(lat) * Math.sin(lon), Y = -Math.sin(lat), Z = Math.cos(lat) * Math.cos(lon);
+    const X1 = X * Math.cos(yaw) + Z * Math.sin(yaw), Z1 = -X * Math.sin(yaw) + Z * Math.cos(yaw);
+    return [X1 * R, (Y * Math.cos(pitch) - Z1 * Math.sin(pitch)) * R, Y * Math.sin(pitch) + Z1 * Math.cos(pitch)];
+  };
+  x.lineWidth = 1.4; x.lineCap = 'round';
+  const curve = (pts, front) => { x.beginPath(); let on = false; for (const [px, py, pz] of pts) { if ((pz > 0) === front) { on ? x.lineTo(px, py) : x.moveTo(px, py); on = true; } else on = false; } x.stroke(); };
+  for (const front of [false, true]) {
+    x.strokeStyle = front ? '#9A7A2E' : 'rgba(154,122,46,.22)';
+    for (let lon = -180; lon < 180; lon += 30) curve(Array.from({ length: 37 }, (_, i) => proj(rad(lon), rad(-90 + i * 5))), front);
+    for (const lat of [-45, 0, 45]) curve(Array.from({ length: 73 }, (_, i) => proj(rad(-180 + i * 5), rad(lat))), front);
+  }
+  x.strokeStyle = '#9A7A2E'; x.lineWidth = 2; x.beginPath(); x.arc(0, 0, R, 0, 7); x.stroke();
+  const [nx, ny, nz] = proj(0, 0); // 정면 한가운데 (코 위치)
+  if (nz > 0) { x.fillStyle = '#c0392b'; x.beginPath(); x.arc(nx, ny, 5, 0, 7); x.fill(); }
+  for (const s of [-1, 1]) { const [ex, ey, ez] = proj(rad(s * 28), rad(8)); if (ez > 0) { x.fillStyle = '#333'; x.beginPath(); x.arc(ex, ey, 3, 0, 7); x.fill(); } }
+  x.restore();
+}
+async function aiFace(p) {
+  const f = p.face || {}, yaw = Math.round(+f.yaw || 0), pitch = Math.round(+f.pitch || 0), roll = Math.round(+f.roll || 0);
+  if (!yaw && !pitch && !roll) return toast('얼굴 각도를 먼저 조절하세요');
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  if (p._ebusy) return toast('이미 수정 중입니다');
+  const parts = [], lbl = [];
+  if (yaw) { parts.push(`turn the head ${Math.abs(yaw)} degrees toward the ${yaw > 0 ? 'RIGHT' : 'LEFT'} side of the image (yaw)`); lbl.push(`좌우 ${yaw > 0 ? '+' : ''}${yaw}°`); }
+  if (pitch) { parts.push(`tilt the head ${Math.abs(pitch)} degrees ${pitch > 0 ? 'UPWARD (chin raised, looking up)' : 'DOWNWARD (chin lowered, looking down)'} (pitch)`); lbl.push(`상하 ${pitch > 0 ? '+' : ''}${pitch}°`); }
+  if (roll) { parts.push(`tilt the head sideways ${Math.abs(roll)} degrees so the ear moves toward the ${roll > 0 ? 'RIGHT' : 'LEFT'} shoulder of the image (roll)`); lbl.push(`기울기 ${roll > 0 ? '+' : ''}${roll}°`); }
+  const label = '얼굴 각도: ' + lbl.join(' · '), target = (p.faceTarget || '').trim();
+  p._ebusy = true; p._est = label + ' 적용 중…'; refreshPanel(p);
+  try {
+    const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
+    const plan = refPlan(p.chars);
+    const prompt = [
+      'Edit the FIRST attached image. Change ONLY the head orientation of ' + (target ? 'this character: ' + target : 'the main character') + ': ' + parts.join('; ') + '.',
+      'Keep the neck base, shoulders, torso, arms, hands, pose, clothing, hair color, any other characters, the background, the camera angle and the art style exactly the same as the original. The face must stay the same person — same eyes, nose, mouth, hairstyle and proportions, just seen from the new head direction; the gaze follows the head.',
+      NO_EXTRA,
+      plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const r = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
+    const id = await addResult(r);
+    p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label, edit: true });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 생성 (${label})` : `✓ ${PROV[r.provider]}로 생성 (${label}) — 이전 이미지는 버전에 남아 있습니다`;
+  } catch (e) { p._est = '실패:\n' + e.message; }
+  p._ebusy = false; save(); refreshPanel(p);
+}
+
+/* ---- 부분 수정(인페인트): 칠한 영역 안쪽만 AI 결과를 합성하고 바깥은 원본 픽셀을 그대로 둔다 ---- */
+const MK = { p: null, strokes: [], redo: [], cur: null, size: 40, tool: 'brush', W: 0, H: 0, base: null, url: '', busy: false };
+function mkRedraw() { const cv = $('#mkCv'), ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height); MK.strokes.forEach(s => padStroke(ctx, s)); }
+function mkMaskCanvas() { // 칠한 곳 = 불투명, 나머지 = 투명
+  const c = document.createElement('canvas'); c.width = MK.W; c.height = MK.H; const x = c.getContext('2d');
+  MK.strokes.forEach(s => padStroke(x, { ...s, color: '#000' })); return c;
+}
+async function openMask(p) {
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  if (MK.busy) return toast('이전 부분 수정이 아직 진행 중입니다');
+  MK.p = p; MK.strokes = []; MK.redo = []; MK.cur = null; $('#mkSt').textContent = ''; $('#mkPrompt').value = '';
+  MK.base = await bakePanel(p, 'image/png'); MK.W = W; MK.H = H; // 합성에 쓰는 원본은 무손실로 둔다
+  const cv = $('#mkCv'); cv.width = W; cv.height = H;
+  const sc = Math.min(Math.min(innerWidth - 80, 560) / W, Math.min(innerHeight * 0.6, 760) / H), wrap = $('#mkWrap');
+  wrap.style.width = Math.round(W * sc) + 'px'; wrap.style.height = Math.round(H * sc) + 'px';
+  if (MK.url) URL.revokeObjectURL(MK.url);
+  MK.url = URL.createObjectURL(MK.base); $('#mkUnder').src = MK.url;
+  mkRedraw(); $('#mkApply').disabled = false; $('#dlgMask').showModal();
+}
+function initMask() {
+  const cv = $('#mkCv'), ctx = cv.getContext('2d');
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height, e.pointerType === 'pen' ? (e.pressure || 0.5) : 1]; };
+  const unit = () => cv.width / 540; // 굵기 1 = 캔버스 너비 540 기준 1px
+  cv.addEventListener('pointerdown', e => {
+    if (e.button > 0) return; cv.setPointerCapture(e.pointerId); e.preventDefault();
+    MK.cur = { tool: MK.tool === 'eraser' ? 'eraser' : 'pen', color: '#ff2d55', size: MK.size * unit(), pen: e.pointerType === 'pen', pts: [pos(e)] };
+    MK.strokes.push(MK.cur); MK.redo = []; padStroke(ctx, MK.cur);
+  });
+  cv.addEventListener('pointermove', e => {
+    const s = MK.cur; if (!s) return; const from = s.pts.length, co = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    for (const ev of (co.length ? co : [e])) s.pts.push(pos(ev));
+    padStroke(ctx, s, from);
+  });
+  const end = () => { MK.cur = null; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  const setTool = t => { MK.tool = t; $('#mkBrush').setAttribute('aria-pressed', String(t === 'brush')); $('#mkEraser').setAttribute('aria-pressed', String(t === 'eraser')); };
+  const setSize = v => { MK.size = clamp(v, 4, 160); $('#mkSize').value = MK.size; $('#mkSizeV').textContent = MK.size; };
+  const undo = () => { const s = MK.strokes.pop(); if (s) { MK.redo.push(s); mkRedraw(); } };
+  const redo = () => { const s = MK.redo.pop(); if (s) { MK.strokes.push(s); mkRedraw(); } };
+  $('#mkBrush').onclick = () => setTool('brush'); $('#mkEraser').onclick = () => setTool('eraser');
+  $('#mkSize').oninput = e => setSize(+e.target.value);
+  $('#mkUndo').onclick = undo; $('#mkRedo').onclick = redo;
+  $('#mkClear').onclick = () => { if (MK.strokes.length && !confirm('칠한 영역을 모두 지울까요?')) return; MK.strokes = []; MK.redo = []; mkRedraw(); };
+  $('#dlgMask').addEventListener('keydown', e => {
+    if (e.altKey || e.target.tagName === 'TEXTAREA') return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
+    else if (mod) return;
+    else if (e.code === 'KeyB') { e.preventDefault(); setTool('brush'); }
+    else if (e.code === 'KeyE') { e.preventDefault(); setTool('eraser'); }
+    else if (e.code === 'BracketRight') { e.preventDefault(); setSize(MK.size + (e.shiftKey ? 10 : 2)); }
+    else if (e.code === 'BracketLeft') { e.preventDefault(); setSize(MK.size - (e.shiftKey ? 10 : 2)); }
+  });
+  $('#dlgMask').addEventListener('close', () => { if (MK.url && !MK.busy) { URL.revokeObjectURL(MK.url); MK.url = ''; } });
+  $('#mkApply').onclick = maskApply;
+}
+async function mkGuide(maskCv) { // 원본 위에 바꿀 영역을 반투명 빨강으로 칠한 안내 이미지
+  const bi = await loadImageFromBlob(MK.base), c = document.createElement('canvas'); c.width = MK.W; c.height = MK.H;
+  const x = c.getContext('2d'); x.drawImage(bi, 0, 0, c.width, c.height);
+  const t = document.createElement('canvas'); t.width = c.width; t.height = c.height; const tx = t.getContext('2d');
+  tx.drawImage(maskCv, 0, 0); tx.globalCompositeOperation = 'source-in'; tx.fillStyle = '#ff0033'; tx.fillRect(0, 0, t.width, t.height);
+  x.globalAlpha = 0.6; x.drawImage(t, 0, 0);
+  return canvasBlob(c, 'image/jpeg', 0.9);
+}
+async function mkComposite(baseBlob, resBlob, maskCv, feather) {
+  const [bi, ri] = await Promise.all([loadImageFromBlob(baseBlob), loadImageFromBlob(resBlob)]);
+  const w = bi.naturalWidth, h = bi.naturalHeight, tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h;
+  const t = tmp.getContext('2d'), ra = ri.naturalWidth / ri.naturalHeight, ba = w / h;
+  let sx = 0, sy = 0, sw = ri.naturalWidth, sh = ri.naturalHeight, cropped = false;
+  if (Math.abs(ra / ba - 1) > 0.04) { cropped = true; if (ra > ba) { sw = sh * ba; sx = (ri.naturalWidth - sw) / 2; } else { sh = sw / ba; sy = (ri.naturalHeight - sh) / 2; } } // 비율이 다르면 가운데 기준으로 맞춰 자른다
+  t.drawImage(ri, sx, sy, sw, sh, 0, 0, w, h);
+  const m = document.createElement('canvas'); m.width = w; m.height = h; const mc = m.getContext('2d');
+  if (feather && 'filter' in mc) mc.filter = 'blur(' + Math.max(2, w / 180) + 'px)';
+  mc.drawImage(maskCv, 0, 0, w, h); mc.drawImage(maskCv, 0, 0, w, h); // 두 번 겹쳐 가는 선도 흐려져 사라지지 않게
+  t.globalCompositeOperation = 'destination-in'; t.drawImage(m, 0, 0);
+  const out = document.createElement('canvas'); out.width = w; out.height = h; const o = out.getContext('2d');
+  o.drawImage(bi, 0, 0, w, h); o.drawImage(tmp, 0, 0);
+  return { blob: await canvasBlob(out, 'image/png'), cropped };
+}
+async function maskApply() {
+  const p = MK.p; if (!p || MK.busy) return;
+  const instr = $('#mkPrompt').value.trim(), st = s => { $('#mkSt').textContent = s; };
+  if (!MK.strokes.length) return toast('바꿀 영역을 먼저 칠하세요');
+  if (!instr) return toast('칠한 부분을 어떻게 바꿀지 적어 주세요');
+  MK.busy = true; p._ebusy = true; $('#mkApply').disabled = true; st('수정 중… (보통 10~40초)');
+  try {
+    const maskCv = mkMaskCanvas(), feather = $('#mkFeather').checked;
+    const base = await toApiImage(MK.base), guide = await toApiImage(await mkGuide(maskCv));
+    const plan = refPlan(p.chars);
+    const prompt = [
+      'Edit the FIRST attached image. The SECOND attached image is the same picture with the area to change painted in translucent red.',
+      'Change ONLY inside the red-marked area: ' + instr + '.',
+      'Everything outside the red area must stay exactly identical to the first image — same composition, camera angle, characters, faces, outfits, colors, line work and art style. Blend the edited area seamlessly into its surroundings. Never draw the red marking in the result.',
+      plan.length ? refLines(plan, 2) + '\n(Use them only to keep the characters consistent.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const r = await generateImage({ prompt, images: [{ blob: base }, { blob: guide }, ...(await refBlobs(plan))], purpose: '부분 수정', prov: p.prov });
+    const out = await mkComposite(MK.base, r.blob, maskCv, feather);
+    const id = await addAsset(out.blob);
+    p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: '부분 수정: ' + instr, edit: true });
+    p.cur = p.versions.length - 1; resetFraming(p);
+    p._est = '✓ ' + PROV[r.provider] + '로 부분 수정 — 칠한 영역 밖은 원본 그대로입니다' + (out.cropped ? ' (AI 결과 비율이 달라 가운데 기준으로 맞췄습니다)' : '');
+    $('#dlgMask').close(); toast('부분 수정을 새 버전으로 추가했습니다');
+  } catch (e) { st('실패:\n' + e.message); p._est = '실패:\n' + e.message; }
+  MK.busy = false; p._ebusy = false; $('#mkApply').disabled = false; save(); refreshPanel(p);
+}
+initMask();
+
 async function aiVariant(p, kind, it) {
   if (!it) return;
   if (p._ebusy) return toast('이미 수정 중입니다');
@@ -2657,6 +2845,13 @@ function tabFix(p) {
     <div class="chips">${presets.map(t => `<button type="button" class="chip" data-ins="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="row"><button type="button" class="b" id="editBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div>
     <div class="st ${stCls(p._est)}">${esc(p._est || '')}</div></div>
+  <div class="grp"><span class="lbl">부분 수정 (인페인트) — 바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다</span>
+    <div class="row"><button type="button" class="b ghost sm" id="inpBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>🖌 영역 칠해서 수정…</button></div></div>
+  <div class="grp"><span class="lbl">얼굴 각도 — 몸·목·어깨·포즈는 그대로, 머리 방향만 바꿉니다 (위 둥근 위젯을 끌어도 됩니다)</span>
+    <canvas class="facew" id="faceW" width="132" height="132" title="끌어서 얼굴 방향 조절"></canvas>
+    ${sl('좌우 (Yaw) · + 는 화면 오른쪽', 'face.yaw', -60, 60, 1, '°')}${sl('상하 (Pitch) · + 는 위', 'face.pitch', -40, 40, 1, '°')}${sl('기울기 (Roll) · + 는 오른쪽', 'face.roll', -30, 30, 1, '°')}
+    <input type="text" data-f="faceTarget" placeholder="대상 캐릭터 (여러 명일 때만) 예: 왼쪽의 교복 소녀">
+    <div class="row"><button type="button" class="b ghost sm" id="faceReset">0으로</button><button type="button" class="b sm" id="faceBtn" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>얼굴 각도 적용</button></div></div>
   <div class="grp"><span class="lbl">카메라 앵글 — 캐릭터·화풍·포즈는 그대로, 촬영 각도만 바꿔 새 버전으로 만듭니다</span>
     <div class="pre3">${CAMERA.map(c => `<button type="button" data-cam="${c.k}" ${p._ebusy || !curAsset(p) ? 'disabled' : ''}>${c.n}<small>${c.s}</small></button>`).join('')}</div></div>
   <div class="grp"><span class="lbl">조명 방향 — 구도·캐릭터는 그대로, 빛의 방향과 명암만 바꿉니다</span>
@@ -2670,7 +2865,17 @@ function tabFix(p) {
   <p class="note">클링에는 이 탭의 보정·크롭이 반영된 화면이 그대로 전송됩니다. 굽기를 하면 보정값이 이미지에 고정되고 슬라이더는 초기화됩니다.</p>`;
 }
 function bindFix(p, el) {
-  bind(el, p);
+  p.face = p.face || { yaw: 0, pitch: 0, roll: 0 };
+  bind(el, p, f => { if (f.startsWith('face.')) drawFaceWidget(fw, p.face); });
+  const fw = $('#faceW', el); drawFaceWidget(fw, p.face);
+  const setFace = (k, v) => { const s = $(`[data-f="face.${k}"]`, el); s.value = clamp(Math.round(v), +s.min, +s.max); s.dispatchEvent(new Event('input')); };
+  let fd = null;
+  fw.onpointerdown = e => { fw.setPointerCapture(e.pointerId); fd = { x: e.clientX, y: e.clientY, yaw: p.face.yaw, pitch: p.face.pitch }; fw.style.cursor = 'grabbing'; };
+  fw.onpointermove = e => { if (fd) { setFace('yaw', fd.yaw + (e.clientX - fd.x) * 0.6); setFace('pitch', fd.pitch - (e.clientY - fd.y) * 0.6); } };
+  fw.onpointerup = fw.onpointercancel = () => { fd = null; fw.style.cursor = ''; };
+  $('#faceReset', el).onclick = () => ['yaw', 'pitch', 'roll'].forEach(k => setFace(k, 0));
+  $('#faceBtn', el).onclick = () => aiFace(p);
+  $('#inpBtn', el).onclick = () => openMask(p);
   $$('[data-ins]', el).forEach(b => (b.onclick = () => { $('#editIn', el).value = b.dataset.ins; $('#editIn', el).focus(); }));
   $('#editBtn', el).onclick = () => aiEdit(p, $('#editIn', el).value);
   $$('[data-cam]', el).forEach(b => (b.onclick = () => aiVariant(p, 'cam', CAMERA.find(c => c.k === b.dataset.cam))));
