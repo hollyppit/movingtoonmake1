@@ -581,6 +581,9 @@ const enc = new TextEncoder();
 const NO_EXTRA = 'Draw only the requested single scene: the characters and the background. Do not add extra inset faces, costume close-up insets, collage panels, model-sheet elements or additional figures.';
 const NO_TEXT = 'Strictly no text of any kind: no letters, no speech balloons, no captions, no sound-effect lettering, no watermark, no signature, no panel borders.';
 const DEFAULT_MOTION = 'Subtle natural motion: hair and clothes move gently, soft breathing and blinking, the camera slowly pushes in. Keep the exact same art style, character design and colors. No text.';
+/* 영화적인 슬로우모션: 클링에는 속도 값이 없어 프롬프트로 지시한다 (긍정 문구 + 부정 프롬프트) */
+const SLOWMO = 'Cinematic slow motion: render everything as if filmed at high frame rate and slowed down — all movement (characters, hair, cloth, particles, light, camera) is smooth, graceful, fluid and noticeably slowed, with dramatic weight; the camera drifts slowly and steadily.';
+const SLOWMO_NEG = 'fast motion, speed up, time-lapse, jerky, rapid cuts, shaky';
 const DEFAULT_NEG = 'text, letters, subtitles, watermark, distorted face, extra fingers, morphing, style change, flicker';
 const MOTION_PRESETS = [
   ['은은한 움직임', 'Subtle idle motion: hair and clothes sway gently, slow blinking, soft breathing. Static camera.'],
@@ -1658,8 +1661,10 @@ function klingElements(p) {
   if (!p.klingAudio || !isServer()) return [];
   return p.chars.map(id => P.chars.find(c => c.id === id)).filter(c => c?.kEl?.id && c.kEl.sig === klSig(c)).slice(0, 3);
 }
+const klingNegText = p => ((p.klingNeg || DEFAULT_NEG) + (p.klingSlow ? ', ' + SLOWMO_NEG : '')).slice(0, 2500);
 function klingFinalPrompt(p, motion) { // motion: AI가 변환한 움직임 프롬프트 (있으면 직접 쓴 초안 대신 쓴다)
   let t = (motion || p.klingPrompt || DEFAULT_MOTION).trim();
+  if (p.klingSlow) t += ' ' + SLOWMO;
   const els = klingElements(p);
   const lines = p.klingAudio ? String(p.klingDialogue || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean) : [];
   if (els.length) t += '\n\nCharacters in this shot: ' + els.map(c => '@' + klName(c)).join(', ') + '. Each speaks only with their own voice.';
@@ -1680,7 +1685,7 @@ async function startKlingServer(p) {
   if (p.klingTail) { const nx = P.panels[P.panels.indexOf(p) + 1]; if (nx && curAsset(nx)) tail = await uploadBlob(await bakePanel(nx, 'image/jpeg', 0.9), 'kling-tail.jpg'); }
   const d = await srvJSON('/api/kling', {
     image: img, tail, model: S.klModel, mode: p.klingMode, duration: String(p.klingLen), audio: !!p.klingAudio,
-    prompt: klingFinalPrompt(p, motion), negative: (p.klingNeg || DEFAULT_NEG).slice(0, 2500),
+    prompt: klingFinalPrompt(p, motion), negative: klingNegText(p),
     elements: klingElements(p).map(c => ({ id: c.kEl.id })),
   });
   return d.taskId;
@@ -1849,8 +1854,8 @@ async function startKling(p) {
     const body = {
       model_name: S.klModel,
       image: await blobToB64(await bakePanel(p, 'image/jpeg', 0.9)),
-      prompt: (p.klingPrompt || DEFAULT_MOTION).slice(0, 2500),
-      negative_prompt: (p.klingNeg || DEFAULT_NEG).slice(0, 2500),
+      prompt: ((p.klingPrompt || DEFAULT_MOTION) + (p.klingSlow ? ' ' + SLOWMO : '')).slice(0, 2500),
+      negative_prompt: klingNegText(p),
       cfg_scale: 0.5, mode: p.klingMode, duration: String(p.klingLen),
     };
     if (p.klingTail) {
@@ -4161,6 +4166,7 @@ function tabVideo(p) {
     <label><span class="lbl">모드</span><select data-f="klingMode"><option value="std">Standard</option><option value="pro">Pro (고화질·비쌈)</option></select></label>
     <label><span class="lbl">길이</span><select data-f="klingLen" data-num><option value="3">3초</option><option value="4">4초</option><option value="5">5초</option><option value="6">6초</option><option value="7">7초</option><option value="8">8초</option><option value="9">9초</option><option value="10">10초</option><option value="11">11초</option><option value="12">12초</option><option value="13">13초</option><option value="14">14초</option><option value="15">15초</option></select></label>
   </div>
+  <label class="chk"><input type="checkbox" data-f="klingSlow"> 🎞 영화적인 슬로우모션 — 모든 움직임을 느리고 부드럽게, 묵직한 슬로모션으로 만듭니다</label>
   <label class="chk"><input type="checkbox" data-f="klingTail"> 다음 컷 이미지를 끝 프레임으로 (모델·모드에 따라 미지원)</label>
   <div class="row"><button type="button" class="b" id="klBtn" ${busy || !curAsset(p) ? 'disabled' : ''}>${busy ? '영상화 진행 중…' : '클링으로 영상 만들기'}</button><span class="note" id="klEst">추정 $${est} · 모델 ${esc(S.klModel)}</span></div>
   <div class="st ${job?.status === 'failed' ? 'err' : job?.status === 'done' ? 'ok' : ''}" id="jobSt">${esc(jobText(job))}</div>
