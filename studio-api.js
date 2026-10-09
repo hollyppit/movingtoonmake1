@@ -474,6 +474,47 @@ export async function handlePolish(req, env) {
   } catch (e) { return json({ error: e.message }, 502); }
 }
 
+/* ---------- 프롬프트 변환: 거친 초안(한국어 등)을 이미지·수정·영상 모델이 잘 알아듣는 영어 프롬프트로 바꾼다 — Claude ---------- */
+const PROMPT_MODEL = 'claude-sonnet-5-5';
+const PROMPT_COMMON = 'You are a prompt engineer for AI image and video generators that produce webtoon and motion-comic frames. The user writes a rough draft, usually in Korean and often vague or colloquial. Rewrite it into a precise English prompt. ' +
+  'Keep every concrete fact the user stated (who, what, where, emotion, props, camera, lighting) and never contradict it. Resolve vague parts with sensible, cinematic webtoon choices instead of leaving them open. ' +
+  'Left/right words, including Korean "카메라 오른쪽" or "화면 왼쪽", mean the left/right side AS SEEN IN THE IMAGE; "카메라를 바라본다" means looking straight into the lens. ' +
+  'Refer to characters by the given names; do not re-describe their appearance (reference sheets are attached separately) and do not invent clothing or features that conflict with the given descriptions. ' +
+  'Do not add text, speech balloons, captions or sound-effect lettering. Do not add characters, objects or story the user did not ask for. Do not mention art style (it is added separately). ' +
+  'Reply with ONLY JSON, no markdown: {"prompt": "...", "note": "..."} where note is ONE short Korean sentence (max 70 characters) explaining how you interpreted anything ambiguous, or an empty string if nothing was ambiguous.';
+const PROMPT_TASK = {
+  scene: 'Task: write the SCENE prompt for ONE still frame (see "aspect"). Use 3-6 sentences covering: shot size and camera angle, composition (where each character and key object sits in the frame), pose and action, facial expression and gaze direction of each character, setting and time of day, lighting and mood. Merge the "extra" request into the scene. If has_image is true the frame is regenerated from an existing image; still describe the full intended scene.',
+  edit: 'Task: write an EDIT INSTRUCTION to apply to an existing image. Output one or two imperative sentences stating exactly what to change (and where in the frame). Do not describe the unchanged parts of the picture.',
+  motion: 'Task: write an IMAGE-TO-VIDEO MOTION prompt for a short clip (see "len" seconds) that animates a still frame ("scene" tells you what it shows). Describe only motion over time: character movement and expressions, hair/cloth/environment motion, camera movement (push-in, pan, tilt, handheld shake or static) and pacing, as a short sequence that fits the duration. Keep motion natural and moderate unless the draft asks for dramatic action. Do not change the composition, art style, character design or colors. Do not write dialogue. End the prompt with: Keep the exact same art style, character design and colors. No text.',
+};
+export async function handlePrompt(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
+  try {
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const b = await req.json();
+    const mode = PROMPT_TASK[b.mode] ? b.mode : 'scene', draft = String(b.draft || '').slice(0, 2000);
+    if (!draft.trim() && !String(b.extra || '').trim()) return json({ error: '초안이 비었습니다' }, 400);
+    const chars = (Array.isArray(b.characters) ? b.characters : []).slice(0, 6).map(c => ({ name: String(c.name || '').slice(0, 40), appearance: String(c.desc || '').slice(0, 300) }));
+    const user = JSON.stringify({
+      draft, extra: String(b.extra || '').slice(0, 1000), scene: String(b.scene || '').slice(0, 1000), characters: chars,
+      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!b.hasImage, len: +b.len || 5, audio: !!b.audio,
+    });
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: PROMPT_MODEL, max_tokens: 1200, system: PROMPT_COMMON + ' ' + PROMPT_TASK[mode], messages: [{ role: 'user', content: user }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+    let out = null; const m = txt.match(/\{[\s\S]*\}/);
+    if (m) { try { out = JSON.parse(m[0]); } catch (e) { out = null; } }
+    const prompt = String(out?.prompt || (m ? '' : txt)).trim();
+    if (!prompt) return json({ error: 'AI 응답에서 프롬프트를 읽지 못했습니다' }, 502);
+    return json({ prompt: prompt.slice(0, 2400), note: String(out?.note || '').slice(0, 140), model: PROMPT_MODEL });
+  } catch (e) { return json({ error: e.message }, 502); }
+}
+
 /* ---------- 출판만화 배치: 컷 순서는 그대로 두고 페이지·줄·칸 크기를 Claude 가 정한다 ---------- */
 const LAYOUT_MODEL = 'claude-sonnet-5-5';
 export async function handleLayout(req, env) {
@@ -563,6 +604,7 @@ export default {
     if (p === '/api/admin') return handleAdmin(req, env);
     if (p === '/api/polish') return handlePolish(req, env);
     if (p === '/api/layout') return handleLayout(req, env);
+    if (p === '/api/prompt') return handlePrompt(req, env);
     if (p === '/api/config') return handleConfig(req, env);
     return json({ error: 'not found' }, 404);
   },

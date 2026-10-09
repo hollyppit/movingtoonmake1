@@ -276,6 +276,9 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 #mkWrap img { opacity: 1; }
 #mkCv { opacity: .55; }
 .facew { display: block; margin: 4px auto; border: 1px solid var(--line-2); border-radius: 50%; background: var(--panel); cursor: grab; touch-action: none; }
+
+/* 프롬프트 자동 변환 */
+.conv textarea { font-size: .78rem; }
 </style>
 </head>
 <body>
@@ -1172,13 +1175,13 @@ function refLines(plan, offset = 0) {
   if (!plan.length) return '';
   return 'Reference images, in the order attached:\n' + plan.map((r, i) => `${i + 1 + offset}) ${r.label}`).join('\n');
 }
-function buildPrompt(p, plan) {
+function buildPrompt(p, plan, scene) { // scene: AI가 변환한 장면 프롬프트 (있으면 ‘장면 묘사’+‘추가 요청’ 대신 쓴다)
   const chars = p.chars.map(id => P.chars.find(c => c.id === id)).filter(Boolean);
   const L = [];
   if (P.style.prompt.trim()) L.push('Art style: ' + P.style.prompt.trim());
   if (chars.length) L.push('Characters in this panel — match their reference sheets exactly (same face, hairstyle, outfit, colors, proportions):\n' + chars.map(c => `- ${c.name || 'character'}: ${c.desc || ''}`).join('\n'));
-  L.push('Scene: ' + (p.prompt.trim() || '(describe the scene)'));
-  if ((p.extra || '').trim()) L.push('Additional request (apply on top of the scene): ' + p.extra.trim());
+  L.push('Scene: ' + (scene || p.prompt.trim() || '(describe the scene)'));
+  if (!scene && (p.extra || '').trim()) L.push('Additional request (apply on top of the scene): ' + p.extra.trim());
   const ar = P.aspect || '9:16';
   L.push('Format: one ' + (ar === '16:9' ? 'horizontal 16:9 widescreen' : ar === '1:1' ? 'square 1:1' : 'vertical 9:16') + ' webtoon / motion-comic frame, full-bleed illustration, keep the main subject away from the edges, leave calm empty areas where speech balloons can be placed later.');
   L.push(NO_EXTRA);
@@ -1222,6 +1225,75 @@ async function overlaySketch(baseBlob, p) {
 const REF_NOTE_DIR = '\n(Character sheets and style references: only to keep the characters and style consistent. Direction references and sketches: only for composition, pose, gesture and camera angle.)';
 
 /* =========================================================
+   프롬프트 자동 변환: 초안(한국어·두루뭉술한 글)을 AI가 이미지·수정·영상 모델용 프롬프트로 바꾼 뒤 생성한다
+   - 서버 모드(/api/prompt, ANTHROPIC_API_KEY)에서만 동작한다. 실패하면 입력한 글 그대로 생성한다
+   - 변환 결과는 컷에 저장해 두고(초안이 그대로면 재사용), 사용자가 고쳐 쓸 수 있다
+   ========================================================= */
+const wantAuto = () => S.autoPrompt !== false;
+const charCtx = p => p.chars.map(id => P.chars.find(c => c.id === id)).filter(Boolean).map(c => ({ name: c.name || '', desc: c.desc || '' }));
+async function convertDraft(mode, body) {
+  try {
+    const d = await srvJSON('/api/prompt', { mode, aspect: P.aspect || '9:16', ...body });
+    logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: true, cost: 0.004 });
+    return { text: d.prompt, note: d.note || '' };
+  } catch (e) { logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: false, err: e.kind || 'bad', msg: e.message }); throw e; }
+}
+const sceneSig = p => JSON.stringify([p.prompt.trim(), (p.extra || '').trim(), charCtx(p), P.aspect]);
+const convFresh = p => (p.conv && p.conv.sig === sceneSig(p) ? p.conv : null);
+async function sceneFor(p, force) {
+  if (!isServer() || (!force && !wantAuto())) return null;
+  if (!p.prompt.trim() && !(p.extra || '').trim()) return null;
+  const c = !force && convFresh(p); if (c) return c.text;
+  const r = await convertDraft('scene', { draft: p.prompt, extra: p.extra || '', characters: charCtx(p), hasImage: !!curAsset(p) });
+  p.conv = { sig: sceneSig(p), text: r.text, note: r.note, at: Date.now() }; save();
+  return r.text;
+}
+const motionSig = p => JSON.stringify([(p.klingPrompt || '').trim(), p.prompt.trim(), p.klingLen, charCtx(p)]);
+const motionFresh = p => (p.convMotion && p.convMotion.sig === motionSig(p) ? p.convMotion : null);
+async function motionFor(p, force) {
+  if (!isServer() || (!force && !wantAuto())) return null;
+  if (!(p.klingPrompt || '').trim()) return null;
+  const c = !force && motionFresh(p); if (c) return c.text;
+  const r = await convertDraft('motion', { draft: p.klingPrompt, scene: p.prompt, len: p.klingLen, audio: !!p.klingAudio, characters: charCtx(p) });
+  p.convMotion = { sig: motionSig(p), text: r.text, note: r.note, at: Date.now() }; save();
+  return r.text;
+}
+/* 생성 도중에 쓰는 안전판: 변환이 실패해도 생성은 입력한 글 그대로 계속한다 */
+async function safeScene(p) {
+  const keep = p._st, need = isServer() && wantAuto() && (p.prompt.trim() || (p.extra || '').trim()) && !convFresh(p);
+  if (need) { p._st = '✨ 프롬프트 변환 중…'; refreshPanel(p); }
+  try { return await sceneFor(p); }
+  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 생성합니다: ' + e.message, 6000); return null; }
+  finally { if (need) { p._st = keep; refreshPanel(p); } }
+}
+async function safeEdit(p, instr) {
+  if (!isServer() || !wantAuto() || !(instr || '').trim()) return instr;
+  try { return (await convertDraft('edit', { draft: instr, characters: charCtx(p) })).text; }
+  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 수정합니다: ' + e.message, 6000); return instr; }
+}
+function convUI(p, kind) {
+  const c = kind === 'scene' ? convFresh(p) : motionFresh(p), what = kind === 'scene' ? '이미지' : '영상 움직임';
+  return `<div class="grp conv"><label class="chk"><input type="checkbox" data-auto ${wantAuto() ? 'checked' : ''}> ✨ 입력한 초안을 AI가 ${what} 프롬프트로 자동 변환한 뒤 생성</label>
+    ${isServer() ? '' : '<p class="note">서버 모드에서만 동작합니다 (서버에 ANTHROPIC_API_KEY 필요).</p>'}
+    <div class="row"><button type="button" class="b ghost sm" data-convprev ${p._cbusy ? 'disabled' : ''}>${p._cbusy ? '변환 중…' : '변환 미리보기'}</button><span class="note">초안이 그대로면 변환 결과를 다시 쓰니 비용이 늘지 않습니다</span></div>
+    ${c ? `<div class="convbox"><span class="lbl">변환된 프롬프트 — 고쳐 쓸 수 있고, 생성할 때 이 내용이 쓰입니다${c.note ? ' · ' + esc(c.note) : ''}</span><textarea data-convtxt rows="6">${esc(c.text)}</textarea></div>` : ''}</div>`;
+}
+function bindConv(el, p, kind) {
+  const ck = $('[data-auto]', el); if (ck) ck.onchange = () => { S.autoPrompt = ck.checked; saveSettings(); };
+  const pv = $('[data-convprev]', el);
+  if (pv) pv.onclick = async () => {
+    if (!isServer()) return toast('프롬프트 변환은 서버 모드에서만 됩니다');
+    if (kind === 'scene' ? !p.prompt.trim() && !(p.extra || '').trim() : !(p.klingPrompt || '').trim()) return toast('먼저 초안을 입력하세요');
+    p._cbusy = true; refreshPanel(p);
+    try { await (kind === 'scene' ? sceneFor(p, true) : motionFor(p, true)); } catch (e) { toast('변환 실패: ' + e.message, 6000); }
+    p._cbusy = false; save(); refreshPanel(p);
+  };
+  $$(kind === 'scene' ? '[data-f="prompt"],[data-f="extra"]' : '[data-f="klingPrompt"]', el).forEach(t => t.addEventListener('input', () => setTimeout(() => { const cb = $('.convbox', el); if (cb && !(kind === 'scene' ? convFresh(p) : motionFresh(p))) cb.remove(); }, 0)));
+  const tx = $('[data-convtxt]', el);
+  if (tx) tx.oninput = () => { const c = kind === 'scene' ? p.conv : p.convMotion; if (c) { c.text = tx.value; save(); } };
+}
+
+/* =========================================================
    생성 작업들
    ========================================================= */
 async function genPanel(p) {
@@ -1229,7 +1301,8 @@ async function genPanel(p) {
   p._busy = true; p._st = '생성 중… (보통 10~40초)'; refreshPanel(p);
   try {
     const plan = refPlan(p.chars), dir = dirItems(p);
-    const r = await generateImage({ prompt: buildPrompt(p, [...plan, ...dir]), images: [...await refBlobs(plan), ...await dirBlobs(p, dir)], purpose: '컷 생성', prov: p.prov });
+    const scene = await safeScene(p);
+    const r = await generateImage({ prompt: buildPrompt(p, [...plan, ...dir], scene), images: [...await refBlobs(plan), ...await dirBlobs(p, dir)], purpose: '컷 생성', prov: p.prov });
     const id = await addResult(r);
     p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: p.prompt });
     p.cur = p.versions.length - 1;
@@ -1247,6 +1320,7 @@ async function regenPanel(p) {
   if (!p.prompt.trim() && !(p.extra || '').trim() && !useSk) return toast('장면 묘사나 추가 요청을 입력하세요');
   p._busy = true; p._st = '재생성 중… (보통 10~40초)'; refreshPanel(p);
   try {
+    const scene = await safeScene(p);
     let base = await toApiImage(assets.get(curAsset(p)).blob);
     if (useSk) base = await overlaySketch(base, p);
     const plan = refPlan(p.chars), dir = dirItems(p, useSk);
@@ -1257,7 +1331,7 @@ async function regenPanel(p) {
     const prompt = [
       'Regenerate the FIRST attached image as a new variation. ' + strength,
       useSk ? SK_EDIT : '',
-      buildPrompt(p, []),
+      buildPrompt(p, [], scene),
       all.length ? refLines(all, 1) + (dir.length ? REF_NOTE_DIR : '\n(Use them only to keep the characters consistent.)') : '',
     ].filter(Boolean).join('\n\n');
     const r = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan)), ...(await dirBlobs(p, dir))], purpose: '컷 재생성', prov: p.prov });
@@ -1433,10 +1507,10 @@ async function maskApply() {
   try {
     const maskCv = mkMaskCanvas(), feather = $('#mkFeather').checked;
     const base = await toApiImage(MK.base), guide = await toApiImage(await mkGuide(maskCv));
-    const plan = refPlan(p.chars);
+    const plan = refPlan(p.chars), ci = await safeEdit(p, instr);
     const prompt = [
       'Edit the FIRST attached image. The SECOND attached image is the same picture with the area to change painted in translucent red.',
-      'Change ONLY inside the red-marked area: ' + instr + '.',
+      'Change ONLY inside the red-marked area: ' + ci + '.',
       'Everything outside the red area must stay exactly identical to the first image — same composition, camera angle, characters, faces, outfits, colors, line work and art style. Blend the edited area seamlessly into its surroundings. Never draw the red marking in the result.',
       plan.length ? refLines(plan, 2) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
@@ -1487,11 +1561,11 @@ async function aiEdit(p, instr) {
   p._ebusy = true; p._est = 'AI 수정 중…'; refreshPanel(p);
   try {
     const base = useSk ? await overlaySketch(await toApiImage(assets.get(curAsset(p)).blob), p) : await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
-    const plan = refPlan(p.chars);
+    const plan = refPlan(p.chars), ins = await safeEdit(p, instr);
     const prompt = [
       'Edit the FIRST attached image.',
       useSk ? SK_EDIT : '',
-      'Change only this: ' + (instr.trim() || 'what the hand-drawn guide strokes indicate'),
+      'Change only this: ' + (ins.trim() || 'what the hand-drawn guide strokes indicate'),
       'Keep everything else identical — composition, camera angle, character faces, hairstyles, outfits, art style, colors and lighting.',
       plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
@@ -1584,8 +1658,8 @@ function klingElements(p) {
   if (!p.klingAudio || !isServer()) return [];
   return p.chars.map(id => P.chars.find(c => c.id === id)).filter(c => c?.kEl?.id && c.kEl.sig === klSig(c)).slice(0, 3);
 }
-function klingFinalPrompt(p) {
-  let t = (p.klingPrompt || DEFAULT_MOTION).trim();
+function klingFinalPrompt(p, motion) { // motion: AI가 변환한 움직임 프롬프트 (있으면 직접 쓴 초안 대신 쓴다)
+  let t = (motion || p.klingPrompt || DEFAULT_MOTION).trim();
   const els = klingElements(p);
   const lines = p.klingAudio ? String(p.klingDialogue || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean) : [];
   if (els.length) t += '\n\nCharacters in this shot: ' + els.map(c => '@' + klName(c)).join(', ') + '. Each speaks only with their own voice.';
@@ -1600,12 +1674,13 @@ function klingFinalPrompt(p) {
   return t.slice(0, 2500);
 }
 async function startKlingServer(p) {
+  const motion = await motionFor(p).catch(e => { toast('프롬프트 변환 실패 → 입력한 글 그대로 영상화합니다: ' + e.message, 6000); return null; });
   const img = await uploadBlob(await bakePanel(p, 'image/jpeg', 0.9), 'kling-in.jpg');
   let tail;
   if (p.klingTail) { const nx = P.panels[P.panels.indexOf(p) + 1]; if (nx && curAsset(nx)) tail = await uploadBlob(await bakePanel(nx, 'image/jpeg', 0.9), 'kling-tail.jpg'); }
   const d = await srvJSON('/api/kling', {
     image: img, tail, model: S.klModel, mode: p.klingMode, duration: String(p.klingLen), audio: !!p.klingAudio,
-    prompt: klingFinalPrompt(p), negative: (p.klingNeg || DEFAULT_NEG).slice(0, 2500),
+    prompt: klingFinalPrompt(p, motion), negative: (p.klingNeg || DEFAULT_NEG).slice(0, 2500),
     elements: klingElements(p).map(c => ({ id: c.kEl.id })),
   });
   return d.taskId;
@@ -2673,6 +2748,7 @@ function tabImg(p) {
       </div></div>` : ''}</div>
   <label class="grp"><span class="lbl">이 컷의 엔진</span><select data-f="prov">
     <option value="">설정 따름 (${provLbl[S.provider]})</option>${opts(provLbl, null)}</select></label>
+  ${convUI(p, 'scene')}
   <div class="row">
     <button type="button" class="b" id="genBtn" ${p._busy ? 'disabled' : ''}>${p._busy ? '생성 중…' : '이미지 생성'}</button>
     ${p.versions.length ? '<button type="button" class="b ghost" id="regenBtn" ' + (p._busy ? 'disabled' : '') + '>↻ 재생성</button>' : ''}
@@ -2691,7 +2767,8 @@ function tabImg(p) {
 function bindImg(p, el) {
   const upd = () => {
     const plan = [...refPlan(p.chars), ...dirItems(p)];
-    $('#pp', el).textContent = buildPrompt(p, plan);
+    $('#pp', el).textContent = buildPrompt(p, plan, wantAuto() && isServer() ? convFresh(p)?.text : null);
+    const cb = $('.convbox', el); if (cb && !convFresh(p)) cb.remove(); // 초안을 바꾸면 이전 변환 결과는 접는다
     const cost = providerOrder(p.prov || S.provider)[0] === 'openai' ? S.cOa : S.cGm;
     $('#refNote', el).textContent = `레퍼런스 ${plan.length}장 · 1장당 약 $${(+cost).toFixed(3)}`;
   };
@@ -2707,6 +2784,7 @@ function bindImg(p, el) {
     const id = b.dataset.char; p.chars = p.chars.includes(id) ? p.chars.filter(x => x !== id) : [...p.chars, id];
     b.setAttribute('aria-pressed', String(p.chars.includes(id))); save(); upd();
   }));
+  bindConv(el, p, 'scene');
   $('#genBtn', el).onclick = () => genPanel(p);
   const rg = $('#regenBtn', el); if (rg) rg.onclick = () => regenPanel(p);
   $('#extraEdit', el).onclick = () => aiEdit(p, p.extra || '');
@@ -4071,6 +4149,7 @@ function tabVideo(p) {
   <div class="grp"><span class="lbl">움직임 프롬프트</span>
     <textarea data-f="klingPrompt" rows="4" placeholder="${esc(DEFAULT_MOTION)}"></textarea>
     <div class="chips">${MOTION_PRESETS.map(([n, t]) => `<button type="button" class="chip" data-mp="${esc(t)}">${n}</button>`).join('')}</div></div>
+  ${convUI(p, 'motion')}
   <div class="grp"><label class="chk"><input type="checkbox" data-f="klingAudio"> 소리·대사 넣기 (클링 3.0 오디오)</label>
     ${p.klingAudio ? `<span class="lbl">대사 — 한 줄에 하나, 말하는 순서대로 (누가 말하는지 적으면 더 정확합니다)</span>
       <textarea data-f="klingDialogue" rows="3" placeholder="소녀: 기다려요!&#10;남자: …이제 와서 무슨 소리지?"></textarea>
@@ -4097,6 +4176,7 @@ function tabVideo(p) {
   <p class="note">‘후보정’ 탭의 보정·크롭이 반영된 화면이 전송됩니다. 말풍선은 전송하지 않고 영상 위에 따로 합성합니다.</p>`;
 }
 function bindVideo(p, el) {
+  bindConv(el, p, 'motion');
   bind(el, p, f => {
     if (f === 'klingMode' || f === 'klingLen') $('#klEst', el).textContent = `추정 $${(p.klingLen * (p.klingMode === 'pro' ? +S.cKlPro : +S.cKlStd)).toFixed(2)} · 모델 ${S.klModel}`;
     if (f === 'useVideo') renderPanels();
