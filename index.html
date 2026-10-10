@@ -3694,7 +3694,7 @@ function drawItem(ctx, it, rx, ry, rw, rh, k, getCut, kind) {
   if (type === 'cut') src = getCut(it.cut); else if (assets.has(it.assetId)) { src = getImg(it.assetId); if (!src) prWaitImg(it.assetId); }
   ctx.save(); ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
   if (src) {
-    const iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height, s = it.fit === 'contain' ? Math.min(rw / iw, rh / ih) : Math.max(rw / iw, rh / ih), dw = iw * s, dh = ih * s;
+    const iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height, s = it.fit === 'contain' ? Math.min(rw / iw, rh / ih) : Math.max(rw / iw, rh / ih), z = clamp(+it.zoom || 1, 0.2, 6), dw = iw * s * z, dh = ih * s * z;
     ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, rx + (rw - dw) * (it.fx ?? 0.5), ry + (rh - dh) * (it.fy ?? 0.5), dw, dh);
   } else { ctx.fillStyle = '#d8d4c8'; ctx.fillRect(rx, ry, rw, rh); ctx.fillStyle = '#8A8575'; ctx.font = (4 * k) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(type === 'cut' ? prCutName(it.cut) : '이미지', rx + rw / 2, ry + rh / 2); }
   ctx.restore();
@@ -3824,7 +3824,7 @@ function renderPrintSide() {
       return '<div class="ll ' + (x.id === prSel ? 'on' : '') + '" data-lid="' + x.id + '"><span class="ico">' + (ty === 'text' ? 'T' : ty === 'image' ? '🖼' : '컷') + '</span><span class="nm">' + esc(itemName(x)) + '</span>' +
         '<button type="button" class="ib" data-la="vis" title="보이기/숨기기">' + (x.vis === false ? '—' : '👁') + '</button><button type="button" class="ib" data-la="up" title="앞으로" ' + (i === arr.length - 1 ? 'disabled' : '') + '>▲</button><button type="button" class="ib" data-la="down" title="뒤로" ' + (i === 0 ? 'disabled' : '') + '>▼</button><button type="button" class="ib" data-la="del" title="' + (ty === 'cut' ? '배치에서 빼기' : '삭제') + '">✕</button></div>';
     }).join('') || '<span class="note">아직 없습니다.</span>') + '</div></section>';
-  if (it) R += itemPanel(it, cov, tw, th); else R += '<section class="sec"><p class="note">레이어를 고르거나 화면에서 누르면 편집할 수 있습니다. 끌어서 옮기고, 모서리 네모를 끌어 크기를 바꾸며, Delete 키로 지웁니다. Ctrl+C / Ctrl+V 로 복사·붙여넣기, Ctrl+Z / Ctrl+Shift+Z 로 되돌리기·다시 하기를 합니다. 가장자리는 여백·구역 경계·다른 요소에 자석처럼 붙습니다.</p></section>';
+  if (it) R += itemPanel(it, cov, tw, th); else R += '<section class="sec"><p class="note">레이어를 고르거나 화면에서 누르면 편집할 수 있습니다. 끌어서 옮기고, 모서리 네모를 끌어 크기를 바꾸며, 선택한 칸 위에서 마우스 휠로 그림을 확대·축소하고, Delete 키로 지웁니다. Ctrl+C / Ctrl+V 로 복사·붙여넣기, Ctrl+Z / Ctrl+Shift+Z 로 되돌리기·다시 하기를 합니다. 가장자리는 여백·구역 경계·다른 요소에 자석처럼 붙습니다.</p></section>';
   R += '<section class="sec"><h3>컷·이미지 테두리 (전체)</h3><div class="row" style="align-items:center"><label class="chk"><input type="checkbox" id="prBorderOn" ' + (cfg.borderOn !== false ? 'checked' : '') + '> 테두리 넣기</label><label class="chk">색 <input type="color" id="prBorderColor" value="' + (cfg.borderColor || '#000000') + '"></label></div>' +
     '<label><span class="lbl">굵기(mm)</span><input type="number" id="prBorder" min="0" max="3" step="0.1" value="' + cfg.border + '"></label>' +
     '<div class="row"><button type="button" class="b ghost sm" id="prBorderReset">칸마다 따로 지정한 값 지우기</button></div>' +
@@ -3859,6 +3859,7 @@ function itemPanel(it, cov, tw, th) {
       '<label class="sl"><span>배경 불투명도</span><input type="range" id="txBgOp" min="0" max="1" step="0.05" value="' + (it.bgOp || 0) + '"></label>';
   } else {
     h += '<label><span class="lbl">그림 맞춤</span><select id="imFit"><option value="cover"' + (it.fit !== 'contain' ? ' selected' : '') + '>칸을 가득 채움 (넘치는 부분 잘림)</option><option value="contain"' + (it.fit === 'contain' ? ' selected' : '') + '>그림 전체 보이기</option></select></label>' +
+      '<label class="sl"><span>그림 확대·축소 <b id="imZoomV">' + Math.round((+it.zoom || 1) * 100) + '%</b></span><input type="range" id="imZoom" min="0.2" max="4" step="0.01" value="' + (+it.zoom || 1) + '"></label>' +
       '<label class="sl"><span>그림 가로 위치</span><input type="range" id="imFx" min="0" max="1" step="0.01" value="' + (it.fx ?? 0.5) + '"></label><label class="sl"><span>그림 세로 위치</span><input type="range" id="imFy" min="0" max="1" step="0.01" value="' + (it.fy ?? 0.5) + '"></label>' +
       (ty === 'image' ? '<label class="chk"><input type="checkbox" id="imLock" ' + (it.lock !== false ? 'checked' : '') + '> 크기 조절 시 비율 유지</label>' : '');
     const bm = borderMode(it), cfg = PR();
@@ -3957,6 +3958,7 @@ function bindPrint() {
     on('#txMode', 'onchange', el => { it.mode = el.value; prRefresh(); }); on('#txAlign', 'onchange', el => { it.align = el.value; prRefresh(); });
     on('#txBold', 'onchange', el => { it.bold = el.checked; prRefresh(); }); on('#txColor', 'oninput', el => { it.color = el.value; prRefresh(); });
     on('#txBg', 'oninput', el => { it.bg = el.value; if (!(+it.bgOp > 0)) { it.bgOp = 1; const s = q('#txBgOp'); if (s) s.value = 1; } prRefresh(); }); on('#txBgOp', 'oninput', el => { it.bgOp = +el.value; prRefresh(); });
+    on('#imZoom', 'oninput', el => { it.zoom = +el.value; const v = $('#imZoomV'); if (v) v.textContent = Math.round(it.zoom * 100) + '%'; prRefresh(); });
     on('#imFit', 'onchange', el => { it.fit = el.value; prRefresh(); }); on('#imFx', 'oninput', el => { it.fx = +el.value; prRefresh(); }); on('#imFy', 'oninput', el => { it.fy = +el.value; prRefresh(); });
     on('#imBorder', 'oninput', el => { const v = parseFloat(el.value); if (!Number.isNaN(v)) { it.border = clamp(v, 0, 5); it.borderOn = true; prRefresh(); } }); on('#imLock', 'onchange', el => { it.lock = el.checked; save(); });
     on('#imBColor', 'oninput', el => { it.borderColor = el.value; it.borderOn = true; prRefresh(); });
@@ -4120,6 +4122,13 @@ function addPrintText() {
     }
     drawPrintPage();
   });
+  c.addEventListener('wheel', e => { // 선택한 컷·이미지 위에서 휠: 칸 안의 그림 확대·축소
+    const it = tItems().find(x => x.id === prSel); if (!it || (it.type || 'cut') === 'text' || it.vis === false) return;
+    const p = pt(e), f = itemFrac(it); if (p.x < f.x || p.x > f.x + f.w || p.y < f.y || p.y > f.y + f.h) return;
+    e.preventDefault(); it.zoom = clamp((+it.zoom || 1) * Math.pow(1.0015, -e.deltaY), 0.2, 4);
+    const s = $('#imZoom'), v = $('#imZoomV'); if (s) s.value = it.zoom; if (v) v.textContent = Math.round(it.zoom * 100) + '%';
+    save(); drawPrintPage(); drawPageThumbs();
+  }, { passive: false });
   const end = () => { if (prDrag) { prDrag = null; save(); renderPrintSide(); drawPrintPage(); drawPageThumbs(); } };
   c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
   window.addEventListener('keydown', e => { // Delete: 선택한 요소 지우기(컷은 배치에서 빼기)
