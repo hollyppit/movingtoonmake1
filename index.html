@@ -1594,22 +1594,35 @@ async function aiMix(p) {
 }
 
 /* ---- 웹툰풍 변환: 구도·피사체·색은 그대로, 그림 방식만 고퀄리티 웹툰 일러스트로 ---- */
+/* 웹툰풍 변환: 완성도(고퀄리티 / 적당한 웹툰풍 / 가볍고 단순하게) × 변환 강도(원본에 충실 / 보통 / 강하게) */
+const TOON_Q = {
+  high: ['고퀄리티',
+    'Convert the FIRST attached image into a high-quality, professional Korean webtoon (manhwa) illustration.',
+    'Redraw it fully as hand-drawn digital art: clean confident ink line art with consistent line weight, smooth cel shading, polished detailed painted backgrounds, vivid but harmonious colors and a crisp professional finish, like a top-tier webtoon panel. No photographic texture or photo look anywhere.'],
+  mid: ['적당한 웹툰풍',
+    'Convert the FIRST attached image into an ordinary, everyday-quality Korean webtoon illustration — the kind of clean but modest artwork seen in a typical weekly webtoon series, NOT a showpiece.',
+    'Redraw it as hand-drawn digital art with clear, even ink outlines, simple cel shading with only two or three tone steps, simplified backgrounds with moderate detail, clean readable shapes and harmonious colors. Keep the level of detail modest: simplify small details and textures, and do NOT make it hyper-detailed, glossy, painterly, cinematic or heavily rendered. No photographic texture or photo look anywhere.'],
+  light: ['가볍고 단순하게',
+    'Convert the FIRST attached image into a light, simple cartoon-style webtoon illustration.',
+    'Redraw it with bold clean outlines, mostly flat color fills with minimal shading, strongly simplified shapes and backgrounds (leave out small details, textures and fine ornament), and a bright simple palette that reads clearly even at a small size. No photographic texture or photo look anywhere.'],
+};
 const TOON_LVL = {
-  keep: ['원본에 충실', 'Stay very faithful to the original shapes, proportions and colors; add only clean line art and gentle cel shading.'],
-  mid: ['보통', 'Use clean ink line art and smooth cel shading with soft gradients.'],
-  strong: ['강하게', 'Stylize boldly: confident, varied-weight ink lines, dramatic cel shading, rich contrast and atmospheric effects — while keeping exactly the same composition and content.'],
+  keep: ['원본에 충실', 'Stay very faithful to the original shapes, proportions and colors.'],
+  mid: ['보통', ''],
+  strong: ['강하게', 'Stylize clearly: make the outlines and tone steps distinct so the look is unmistakably illustrated, while keeping exactly the same composition and content.'],
 };
 async function aiToon(p) {
   if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
   if (p._ebusy) return toast('이미 수정 중입니다');
-  const lv = TOON_LVL[p.toonLvl] ? p.toonLvl : 'mid', label = '웹툰풍 변환 (' + TOON_LVL[lv][0] + ')';
+  const q = TOON_Q[p.toonQ] ? p.toonQ : 'mid', lv = TOON_LVL[p.toonLvl] ? p.toonLvl : 'mid';
+  const label = '웹툰풍 변환 (' + TOON_Q[q][0] + ' · ' + TOON_LVL[lv][0] + ')';
   p._ebusy = true; p._est = label + ' 중…'; refreshPanel(p);
   try {
     const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
     const plan = refPlan(p.chars);
     const prompt = [
-      'Convert the FIRST attached image into a high-quality, professional Korean webtoon (manhwa) illustration.',
-      'Redraw it fully as hand-drawn digital art: clean confident ink line art with consistent line weight, smooth cel shading, polished detailed painted backgrounds, vivid but harmonious colors and a crisp professional finish, like a top-tier webtoon panel. No photographic texture or photo look anywhere. ' + TOON_LVL[lv][1],
+      TOON_Q[q][1],
+      TOON_Q[q][2] + (TOON_LVL[lv][1] ? ' ' + TOON_LVL[lv][1] : ''),
       'Keep exactly the same composition, framing, camera angle, subjects, poses, expressions, layout of objects and buildings, and the overall color palette and lighting. Do not add or remove anything.',
       P.style.prompt.trim() ? 'Art style: ' + P.style.prompt.trim() : '',
       plan.length ? refLines(plan, 1) + '\n(Character sheets: keep those characters consistent. Art-style references: match their line, color and rendering style, not their content.)' : '',
@@ -1619,7 +1632,7 @@ async function aiToon(p) {
     const id = await addResult(r);
     p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label, edit: true });
     p.cur = p.versions.length - 1; resetFraming(p);
-    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 변환` : `✓ ${PROV[r.provider]}로 웹툰풍 변환 — 이전 이미지는 버전에 남아 있습니다`;
+    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 변환` : `✓ ${PROV[r.provider]}로 웹툰풍 변환 (${TOON_Q[q][0]}) — 이전 이미지는 버전에 남아 있습니다`;
   } catch (e) { p._est = '실패:\n' + e.message; }
   p._ebusy = false; save(); refreshPanel(p);
 }
@@ -2905,8 +2918,12 @@ function tabFix(p) {
     <div class="row"><button type="button" class="b" id="editBtn" ${dis}>${p._ebusy ? '수정 중…' : 'AI로 수정'}</button></div></div>
   <div class="isecs">
   ${isec('toon', '🎨 웹툰풍 변환', '사진·거친 그림 → 웹툰', `
-    <p class="note">구도·피사체는 그대로 두고 고퀄리티 웹툰 일러스트로 다시 그립니다. 화풍·캐릭터 레퍼런스가 있으면 그 그림체에 맞춥니다.</p>
-    <select data-f="toonLvl"><option value="keep">원본에 충실 — 모양·색을 거의 그대로</option><option value="mid">보통 — 깔끔한 선과 셀 명암</option><option value="strong">강하게 — 선·명암·분위기를 뚜렷하게</option></select>
+    <p class="note">구도·피사체는 그대로 두고 웹툰 일러스트로 다시 그립니다. 화풍·캐릭터 레퍼런스가 있으면 그 그림체에 맞춥니다.</p>
+    <div class="g2">
+      <label><span class="lbl">완성도</span><select data-f="toonQ"><option value="high">고퀄리티</option><option value="mid">적당한 웹툰풍</option><option value="light">가볍고 단순하게</option></select></label>
+      <label><span class="lbl">변환 강도</span><select data-f="toonLvl"><option value="keep">원본에 충실</option><option value="mid">보통</option><option value="strong">강하게</option></select></label>
+    </div>
+    <p class="note">고퀄리티 = 정교한 선·배경 묘사 / 적당한 웹툰풍 = 연재 웹툰 수준의 깔끔하고 단순한 그림 / 가볍고 단순하게 = 굵은 선·평면 색</p>
     <div class="row"><button type="button" class="b sm" id="toonBtn" ${dis}>🎨 웹툰풍으로 변환</button></div>`)}
   ${isec('inp', '🖌 부분 수정', '칠한 곳만 바꾸기', `
     <p class="note">바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다.</p>
@@ -2944,6 +2961,7 @@ function tabFix(p) {
 function bindFix(p, el) {
   p.face = p.face || { yaw: 0, pitch: 0, roll: 0 };
   p.toonLvl = p.toonLvl || 'mid';
+  p.toonQ = p.toonQ || 'mid';
   bind(el, p, f => { if (f.startsWith('face.')) drawFaceWidget(fw, p.face); });
   const fw = $('#faceW', el); drawFaceWidget(fw, p.face);
   const setFace = (k, v) => { const s = $(`[data-f="face.${k}"]`, el); s.value = clamp(Math.round(v), +s.min, +s.max); s.dispatchEvent(new Event('input')); };
