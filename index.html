@@ -3505,7 +3505,7 @@ async function saveCutImage(p) { // 컷 하나를 완성 상태 PNG 로 바로 �
    본문 페이지·표지 모두 칸(컷)·이미지·글상자를 레이어로 쌓고, 끌어 옮기고 크기를 바꾸고 지울 수 있다.
    표지 요소는 구역(뒷표지/중간연결부/앞표지) 기준 mm 좌표라서, 본문이 늘어 중간연결부가 넓어져도 앞표지 요소가 같이 밀려난다.
    ========================================================= */
-const PAPERS = { A4: [210, 297, 'A4 (210×297mm)'], B5: [182, 257, 'B5 (182×257mm)'], B4: [257, 364, 'B4 (257×364mm)'], SINGUK: [152, 225, '신국판 (152×225mm)'], A5: [148, 210, 'A5 (148×210mm)'] };
+const PAPERS = { A4: [210, 297, 'A4 (210×297mm)'], B5: [182, 257, 'B5 (182×257mm)'], B4: [257, 364, 'B4 (257×364mm)'], SINGUK: [152, 225, '신국판 (152×225mm)'], A5: [148, 210, 'A5 (148×210mm)'], B6: [128, 182, 'B6 (128×182mm)'], A6: [105, 148, 'A6 (105×148mm)'] };
 const coverDefault = () => ({ items: [], thickness: 0.1, extra: 0.4, bodyPages: 0, spineMode: 'auto', spineManual: 8, bg: '#ffffff' });
 const printDefault = () => ({ paper: 'B5', orient: 'portrait', margin: 10, gutter: 4, border: 0.5, borderOn: true, borderColor: '#000000', bg: '#ffffff', dir: 'ltr', pageNums: true, pages: [], note: '', cover: coverDefault() });
 const PR = () => { const c = (P.print = P.print || printDefault()); c.cover = c.cover || coverDefault(); return c; };
