@@ -776,7 +776,7 @@ const DB = {
   req(store, mode, fn) {
     if (!this.db) return Promise.resolve(undefined);
     return new Promise((res, rej) => {
-      try { const t = this.db.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); }
+      try { const t = this.db.transaction(store, mode); const r = fn(t.objectStore(store)); t.oncomplete = () => res(r && r.result); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('로컬 저장이 중단되었습니다')); }
       catch (e) { rej(e); }
     });
   },
@@ -943,7 +943,7 @@ function histGo(d) {
   if (!P.panels.some(p => p.id === sel)) sel = P.panels[0].id;
   if (!selPanel().overlays.some(o => o.id === selOv)) selOv = null;
   selLayer = null; prSel = null; thumbSig = '';
-  clearTimeout(saveT); DB.put('kv', 'project', HIST.stack[to]).catch(() => toast('프로젝트 저장 실패 — 백업 파일로 저장하세요')); cloudSaveSoon();
+  clearTimeout(saveT); persistProject(HIST.stack[to]).catch(() => toast('프로젝트 저장 실패 — 백업 파일로 저장하세요')); cloudSaveSoon();
   renderAll(); HIST.stack[to] = projJSON(); toast(d < 0 ? '되돌렸습니다' : '다시 했습니다'); // 화면을 그리며 생긴 자잘한 보정도 같은 기록으로 본다
 }
 document.addEventListener('keydown', e => {
@@ -952,14 +952,46 @@ document.addEventListener('keydown', e => {
   if (k === 'z') { e.preventDefault(); histGo(e.shiftKey ? 1 : -1); } else if (k === 'y') { e.preventDefault(); histGo(1); }
 });
 
+const RECOVERY_KEY = 'mms-project-recovery';
+const WORKSPACE_KEY = 'mms-workspace';
+let localReady = false, recoveryWarned = false;
+function recoverySnapshot(json = projJSON()) {
+  try { localStorage.setItem(RECOVERY_KEY, json); }
+  catch (e) {
+    if (!recoveryWarned) { recoveryWarned = true; toast('즉시 복구용 저장 공간이 부족합니다. 로컬 자동저장 완료 후 닫거나 백업 파일로 저장하세요.', 5000); }
+  }
+}
+function persistProject(json) {
+  recoverySnapshot(json);
+  if (!DB.db) return Promise.reject(new Error('로컬 저장소를 사용할 수 없습니다'));
+  return DB.put('kv', 'project', json).then(() => {
+    // 더 최신 편집의 복구 사본은 이전 저장 완료 시 지우지 않는다.
+    try { if (localStorage.getItem(RECOVERY_KEY) === json) localStorage.removeItem(RECOVERY_KEY); } catch (e) {}
+  });
+}
+function saveWorkspace() {
+  if (!localReady) return;
+  try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify({ sel, selOv, selLayer, tab, scrubT, view, prPage, prSel, prTarget, prZone })); } catch (e) {}
+}
 let saveT = null;
+function flushLocal() {
+  if (!localReady) return;
+  clearTimeout(saveT);
+  const json = projJSON(); histSnap(json); HIST.dirty = false;
+  saveWorkspace();
+  persistProject(json).catch(() => toast('프로젝트 로컬 저장 실패 — 백업 파일로 저장하세요'));
+}
 function save() {
   clearTimeout(saveT); HIST.dirty = true;
-  saveT = setTimeout(() => {
-    const json = projJSON(); histSnap(json); HIST.dirty = false;
-    DB.put('kv', 'project', json).catch(() => toast('프로젝트 저장 실패 — 백업 파일로 저장하세요'));
-    cloudSaveSoon();
-  }, 350);
+  if (localReady) { recoverySnapshot(); saveWorkspace(); }
+  saveT = setTimeout(() => { flushLocal(); cloudSaveSoon(); }, 350);
+}
+// 종료 시 비동기 저장이 중단되어도 동기 복구 사본으로 마지막 변경을 복원한다.
+window.addEventListener('pagehide', flushLocal);
+window.addEventListener('beforeunload', flushLocal);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushLocal(); });
+for (const event of ['click', 'input', 'change', 'pointerup', 'keyup']) {
+  document.addEventListener(event, () => queueMicrotask(saveWorkspace), true);
 }
 
 /* =========================================================
@@ -5549,12 +5581,36 @@ function renderAll() { applyAspect(); if (typeof view !== 'undefined' && view ==
     const keys = (await DB.keys('assets')) || [];
     for (const k of keys) { const blob = await DB.get('assets', k); if (blob) assets.set(k, { blob, url: URL.createObjectURL(blob) }); }
     const json = await DB.get('kv', 'project');
-    if (json) P = migrate(JSON.parse(json));
+    let recovery = null;
+    try { recovery = localStorage.getItem(RECOVERY_KEY); } catch (e) {}
+    if (recovery) {
+      try { P = migrate(JSON.parse(recovery)); }
+      catch (e) { if (json) P = migrate(JSON.parse(json)); else throw e; }
+    } else if (json) P = migrate(JSON.parse(json));
   } catch (e) { toast('저장된 작업을 불러오지 못했습니다: ' + e.message, 5000); }
   sel = P.panels[0].id;
   scrubT = panelDur(P.panels[0]);
+  try {
+    const ws = JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null');
+    if (ws) {
+      if (P.panels.some(p => p.id === ws.sel)) sel = ws.sel;
+      selOv = selPanel().overlays.some(o => o.id === ws.selOv) ? ws.selOv : null;
+      selLayer = (selPanel().layers || []).some(l => l.id === ws.selLayer) ? ws.selLayer : null;
+      if (['img', 'fix', 'text', 'layer', 'video', 'audio', 'cut'].includes(ws.tab)) tab = ws.tab;
+      if (Number.isFinite(ws.scrubT)) scrubT = clamp(ws.scrubT, 0, panelDur(selPanel()));
+      prPage = Number.isInteger(ws.prPage) ? clamp(ws.prPage, 0, Math.max(0, (P.print?.pages?.length || 1) - 1)) : 0;
+      prSel = ws.prSel || null; prTarget = ws.prTarget === 'cover' ? 'cover' : 'body';
+      prZone = ['front', 'back', 'spine'].includes(ws.prZone) ? ws.prZone : 'front';
+      view = ws.view === 'print' ? 'print' : 'make';
+    }
+  } catch (e) {}
+  localReady = true;
+  // 브라우저가 지원하면 로컬 파일이 저장 공간 정리로 제거되지 않도록 요청한다.
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   histSnap(); // 되돌리기 기준점
   renderAll();
+  setView(view);
+  flushLocal();
   initAuth();
   document.fonts.ready.then(requestDraw);
   if (P.panels.some(p => p.job?.status === 'processing')) ensurePolling();
