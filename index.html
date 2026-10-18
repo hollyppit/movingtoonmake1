@@ -598,6 +598,8 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 <input type="file" id="bgmFile" accept="audio/*" multiple hidden>
 <div id="toast" class="toast" role="status" hidden></div>
 
+<script src="psd-text-engine.js"></script>
+<script src="psd-export.js"></script>
 <script>
 'use strict';
 /* =========================================================
@@ -3519,13 +3521,14 @@ function openCutExport(onlyPanel) {
     '<div style="max-height:36vh;overflow:auto;border:1px solid var(--line-2);border-radius:3px;padding:6px 10px">' + items + '</div>' +
     '<div class="g2" style="margin-top:10px">' +
     '<label><span class="lbl">내용</span><select id="ceText"><option value="1">완성 컷 (말풍선·글자·레이어 포함)</option><option value="0">그림만 (말풍선·글자 제외)</option><option value="ov">말풍선·자막만 — 컷마다 한 장 (투명 PNG)</option><option value="ovEach">말풍선·자막만 — 하나씩 따로 (투명 PNG)</option></select></label>' +
-    '<label><span class="lbl">형식</span><select id="ceFmt"><option value="png">PNG (무손실)</option><option value="jpg">JPG (용량 작음)</option></select></label>' +
+    '<label><span class="lbl">형식</span><select id="ceFmt"><option value="png">PNG (무손실)</option><option value="jpg">JPG (용량 작음)</option><option value="psd">PSD (그림·말풍선·편집 가능한 텍스트)</option></select></label>' +
     '<label><span class="lbl">크기</span><select id="ceSize"><option value="1">원본 크기</option><option value="0.5">절반</option></select></label></div>' +
     '<p class="note" id="ceSt" style="margin-top:8px">대사가 나중에 사라지게 설정했어도, 내보내는 그림에는 모든 말풍선·글자가 보이는 상태로 들어갑니다. “말풍선·자막만”은 컷과 같은 크기의 투명 PNG라서 영상 편집 프로그램에서 그림 위에 그대로 겹쳐 쓸 수 있습니다(하나씩 따로 저장하면 파일 이름에 등장 시각이 붙습니다).</p>' +
     '<div class="row" style="margin-top:10px;justify-content:flex-end"><button type="button" class="b ghost sm" id="ceEach">한 장씩 저장</button><button type="button" class="b sm" id="ceZip">ZIP으로 한꺼번에 저장</button><button class="b ghost sm" value="x">닫기</button></div></form>';
   document.body.append(dlg);
   const q = s => dlg.querySelector(s), boxes = () => [...dlg.querySelectorAll('.ce-i')];
   q('#ceAll').onclick = () => boxes().forEach(b => (b.checked = true)); q('#ceNone').onclick = () => boxes().forEach(b => (b.checked = false));
+  q('#ceFmt').onchange = () => { const psd = q('#ceFmt').value === 'psd'; if (psd) { q('#ceText').value = '1'; q('#ceSize').value = '1'; } q('#ceText').disabled = q('#ceSize').disabled = psd; q('#ceSt').textContent = psd ? 'PSD는 그림·말풍선·문자 레이어를 분리합니다. Noto 글꼴과 굵기를 유지하며, 포토샵에서 텍스트를 수정할 수 있습니다. 같은 글꼴을 PC에 설치해 주세요.' : '내보낼 컷과 형식을 선택하세요.'; };
   q('#ceText').onchange = () => { const ov = /^ov/.test(q('#ceText').value); if (ov) q('#ceFmt').value = 'png'; q('#ceFmt').disabled = ov; }; // 투명 배경은 PNG 만 가능
   const run = async zip => {
     const list = boxes().filter(b => b.checked).map(b => P.panels.find(p => p.id === b.value)).filter(Boolean);
@@ -3547,10 +3550,10 @@ function openCutExport(onlyPanel) {
             const o = p.overlays[j];
             await put(await renderOverlaysCanvas([o], maxSide), base + '_' + (KINDS[o.kind] || '글') + String(j + 1).padStart(2, '0') + '_' + (+o.start || 0).toFixed(1) + 's.png'); n++;
           }
-        } else { await put(await renderCutCanvas(p, { text, maxSide }), cutFileName(p, fmt)); n++; }
+        } else if (fmt === 'psd') { const blob = await exportCutPsd(p); const name = cutFileName(p, 'psd'); if (zip) out.push({ name, blob }); else download(blob, name); n++; } else { await put(await renderCutCanvas(p, { text, maxSide }), cutFileName(p, fmt)); n++; }
       }
       if (!n) { st.textContent = '내보낼 말풍선·자막이 없습니다'; q('#ceZip').disabled = q('#ceEach').disabled = false; return; }
-      if (zip) { st.textContent = 'ZIP 만드는 중…'; download(await makeZip(out), safeName(P.title) + (ovOnly ? '_말풍선자막.zip' : '_컷이미지.zip')); }
+      if (zip) { st.textContent = 'ZIP 만드는 중…'; download(await makeZip(out), safeName(P.title) + (ovOnly ? '_말풍선자막.zip' : fmt === 'psd' ? '_컷PSD.zip' : '_컷이미지.zip')); }
       st.textContent = '✓ ' + n + '장을 저장했습니다' + (skipped ? ' (말풍선·자막이 없는 ' + skipped + '컷은 건너뜀)' : '');
     } catch (e) { st.textContent = '실패: ' + e.message; }
     q('#ceZip').disabled = q('#ceEach').disabled = false;
@@ -4083,7 +4086,7 @@ function renderPrintSide() {
     '<section class="sec"><h3>내보내기</h3><div class="g2"><label><span class="lbl">범위</span><select id="prRange"><option value="all">표지 + 본문</option><option value="body">본문만</option><option value="cover">표지만</option></select></label>' +
     '<label><span class="lbl">해상도</span><select id="prDpi"><option value="150">150dpi (미리보기·웹)</option><option value="300" selected>300dpi (인쇄)</option></select></label></div>' +
     '<label class="chk"><input type="checkbox" id="prNums" ' + (cfg.pageNums ? 'checked' : '') + '> 본문에 쪽 번호 넣기 (PNG·PDF 내보내기에 반영)</label>' +
-    '<div class="row"><button type="button" class="b" id="prPdf">PDF 한 파일</button><button type="button" class="b ghost" id="prPng">페이지 PNG (ZIP)</button></div><div class="st" id="prExSt"></div>' +
+    '<div class="row"><button type="button" class="b" id="prPdf">PDF 한 파일</button><button type="button" class="b ghost" id="prPng">페이지 PNG (ZIP)</button></div><button type="button" class="b ghost" id="prPsd">페이지 PSD (ZIP)</button><p class="note">PSD: 그림·말풍선·문자 레이어를 분리합니다. 줄별·세로쓰기 글자별로 텍스트를 편집할 수 있습니다. Noto 글꼴과 굵기를 유지하며, 포토샵에서 텍스트를 수정할 수 있습니다. 같은 글꼴을 PC에 설치해 주세요.</p><div class="st" id="prExSt"></div>' +
     '<p class="note">표지는 책등 폭까지 포함한 펼침면 1장으로 나옵니다. 재단선·도련은 위의 “재단선·도련”에서 켜고 mm 를 정합니다. 인쇄소 규격에 맞춰 도련 폭을 조정하세요.</p></section>';
   $('#prRight').innerHTML = R;
   bindPrint(); drawPageThumbs();
@@ -4340,7 +4343,7 @@ function bindPrint() {
   q('#prBorderOn').onchange = e => { cfg.borderOn = e.target.checked; prRefresh(); };
   q('#prBorderColor').oninput = e => { cfg.borderColor = e.target.value; prRefresh(); };
   q('#prBorderReset').onclick = () => { clearBorderOverrides(); prRerender(); toast('칸마다 따로 지정한 테두리를 지웠습니다'); };
-  q('#prPng').onclick = () => exportPrint('png'); q('#prPdf').onclick = () => exportPrint('pdf');
+  q('#prPsd').onclick = exportPrintPsd; q('#prPng').onclick = () => exportPrint('png'); q('#prPdf').onclick = () => exportPrint('pdf');
 }
 /* 요소를 다른 쪽·표지로 보내기 / 복사·붙여넣기. 본문은 페이지 비율, 표지는 구역 기준 mm 라서 오갈 때 크기를 mm 로 환산해 맞춘다 */
 const cloneItem = it => ({ ...JSON.parse(JSON.stringify(it)), id: uid() });
@@ -5617,5 +5620,6 @@ function renderAll() { applyAspect(); if (typeof view !== 'undefined' && view ==
   else if (!isServer() && !S.oaKey && !S.gmKey) setTimeout(() => toast('먼저 ‘설정’에서 OpenAI 또는 Gemini 키를 넣으세요 (또는 서버 모드)', 4200), 600);
 })();
 </script>
+
 </body>
 </html>
