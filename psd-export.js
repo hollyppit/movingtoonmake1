@@ -136,7 +136,7 @@ function psdOverlay(b, o, name) {
 }
 function psdCut(b, p, name) {
   b.raster(name + ' 그림', g => drawPanel(g, { ...p, layers: [], overlays: [] }, 0, { still: true, overlays: false }));
-  (p.layers || []).forEach((l, i) => { if (l.vis) b.raster(name + ' 이미지 ' + (l.name || i + 1), g => drawLayer(g, l, 0, { still: true })); });
+  (p.layers || []).forEach((l, i) => { if (l.vis) b.raster(name + (l.ink ? ' 효과음 ' : ' 이미지 ') + (l.name || i + 1), g => drawLayer(g, l, 0, { still: true })); });
 }
 async function exportCutPsd(p) {
   await psdPrepare(p); const b = psdBuilder(W, H); psdCut(b, p, '컷');
@@ -167,7 +167,7 @@ async function exportPrintPsd() {
           b.letters('글상자', c => drawTextItem(c, { ...it, bgOp: 0 }, rx, ry, rw, rh, k));
         } else if (it.type === 'image') {
           if (assets.has(it.assetId)) await waitImg(it.assetId);
-          b.raster('배치 이미지', c => drawItem(c, it, rx, ry, rw, rh, k, () => null, job.kind));
+          b.raster(it.ink ? '효과음 · ' + (it.name || '') : '배치 이미지', c => drawItem(c, it, rx, ry, rw, rh, k, () => null, job.kind));
         } else {
           const p = cutOf(it); if (p) {
             await psdPrepare(p); const xf = cutXform(it, rx, ry, rw, rh), name = prCutName(it.cut);

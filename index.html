@@ -314,6 +314,9 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 /* 이미지 합성: 첨부 번호 표시 */
 .ref .nx { position: absolute; left: 2px; bottom: 2px; font-size: .6rem; background: rgba(0, 0, 0, .72); color: #fff; padding: 0 4px; border-radius: 2px; pointer-events: none; }
 #imgEdit[aria-pressed=true] { border-color: var(--gold); background: rgba(154, 122, 46, .18); color: var(--gold-l); }
+/* Effect-lettering pen */
+#inkDialog{width:96vw;max-width:1500px;height:94dvh;max-height:94dvh;padding:14px;box-sizing:border-box;overflow:hidden;background:var(--panel,#f5f2e9);color:var(--ink,#222);border:1px solid var(--line-2,#ccc);border-radius:8px}
+#inkDialog[open]{display:flex;flex-direction:column;gap:8px}#inkDialog::backdrop{background:#0009}.ink-head{display:flex;align-items:center;gap:8px}.ink-head strong{flex:1}.ink-tools{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap}.ink-tools label{display:flex;align-items:center;gap:5px;font-size:13px}.ink-tools input[type=range]{width:95px}.ink-tools input[type=color]{width:36px;height:30px;padding:1px}.ink-tools output{min-width:24px}.ink-tools button[aria-pressed=true]{background:var(--gold,#927c3e);color:white}.ink-note{margin:0!important;font-size:12px!important}#inkViewport{flex:1;min-height:120px;overflow:auto;background:#d4d1c8;display:grid;place-items:start center;padding:10px;box-sizing:border-box}#inkStage{position:relative;flex:none;background-color:#fff;background-image:linear-gradient(45deg,#ddd 25%,transparent 25%),linear-gradient(-45deg,#ddd 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd 75%),linear-gradient(-45deg,transparent 75%,#ddd 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}#inkStage canvas{position:absolute;inset:0;width:100%;height:100%}#inkCanvas{touch-action:none;cursor:crosshair}#inkCursor{position:absolute;pointer-events:none;border:1px solid #fff;outline:1px solid #222;border-radius:50%;transform:translate(-50%,-50%)}#inkStatus{min-height:18px;margin:0}@media(max-width:700px){#inkDialog{width:99vw;height:98dvh;max-height:98dvh;padding:8px}.ink-head{flex-wrap:wrap}.ink-tools{gap:6px 10px;max-height:31vh;overflow:auto}.ink-tools input[type=range]{width:70px}}
 </style>
 </head>
 <body>
@@ -390,6 +393,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
       <input type="range" id="scrub" min="0" max="1000" value="1000" aria-label="컷 내 시간">
       <span id="tc" class="tc">0.0 / 4.0s</span>
       <button type="button" class="b ghost sm" id="imgEdit" aria-pressed="false" title="컷 안에서 이미지를 끌어 옮기고 크기를 바꿉니다 (Esc로 끝내기)">🖼 이동·크기</button>
+      <button type="button" class="b ghost sm" id="makeInkOpen">✏ 효과음 펜</button>
       <label class="chk"><input type="checkbox" id="guides"> 쇼츠 안전영역</label>
     </div>
   </main>
@@ -600,6 +604,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 
 <script src="psd-text-engine.js"></script>
 <script src="psd-export.js"></script>
+<script src="ink-editor.js"></script>
 <script>
 'use strict';
 /* =========================================================
@@ -2778,9 +2783,12 @@ function refreshPanel(p) { renderPanels(); if (p.id === sel) { refreshInspector(
 $('#insp').addEventListener('toggle', e => { const dt = e.target; if (dt.dataset && dt.dataset.sec) { S.secOpen = { ...(S.secOpen || {}), [dt.dataset.sec]: dt.open }; saveSettings(); } }, true);
 function renderInspector() {
   const p = selPanel(), el = $('#insp'); if (!p) return;
-  el.innerHTML = ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
+  const inkTarget = (p.layers || []).find(l => l.id === selLayer && l.ink);
+  el.innerHTML = '<div class="row" style="padding:8px 0"><button type="button" class="b ghost sm" id="makeInkNew">✏ 효과음 펜</button>' + (inkTarget ? '<button type="button" class="b ghost sm" id="makeInkEdit">선택 효과음 다시 그리기</button>' : '') + '</div>' + ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
   const after = ({ img: bindImg, fix: bindFix, layer: bindLayer, text: bindText, video: bindVideo, audio: bindAudio, cut: bindCut })[tab];
   after(p, el);
+  $('#makeInkNew', el).onclick = () => openInkEditor('make');
+  if (inkTarget) $('#makeInkEdit', el).onclick = () => openInkEditor('make', inkTarget);
 }
 
 /* ---- 이미지 탭 ---- */
@@ -3899,7 +3907,7 @@ function clearBorderOverrides() { const c = PR(); [...c.pages.flatMap(pg => pg.p
 /* kind: 'body'(opt.page 필요) | 'cover' */
 function drawTarget(ctx, kind, k, getCut, opt = {}) {
   const cfg = PR(), cov = kind === 'cover', g = cov ? coverGeom() : null, [tw, th] = cov ? [g.total, g.ph] : prPageMM(), Wp = tw * k, Hp = th * k;
-  const items = cov ? cfg.cover.items : (opt.page ? opt.page.panels : []);
+  const items = opt.items || (cov ? cfg.cover.items : (opt.page ? opt.page.panels : []));
   const bl = (opt.bleed || 0) * k;
   ctx.save(); ctx.fillStyle = cov ? cfg.cover.bg : cfg.bg; ctx.fillRect(-bl, -bl, Wp + 2 * bl, Hp + 2 * bl); // 종이색만 도련까지, 내용은 재단선 안쪽에만
   if (opt.clip) { ctx.beginPath(); ctx.rect(0, 0, Wp, Hp); ctx.clip(); }
@@ -4023,7 +4031,7 @@ function renderPrint() {
   prPage = clamp(prPage, 0, Math.max(0, cfg.pages.length - 1));
   renderPrintSide(); drawPrintPage(); prLoadCuts();
 }
-const itemName = it => ((it.type || 'cut') === 'text' ? '글 · ' + String(it.text || '').replace(/\n/g, ' ').slice(0, 14) : (it.type || 'cut') === 'image' ? '이미지 · ' + (it.name || '') : prCutName(it.cut));
+const itemName = it => it.ink ? '✏ ' + (it.name || '효과음') : ((it.type || 'cut') === 'text' ? '글 · ' + String(it.text || '').replace(/\n/g, ' ').slice(0, 14) : (it.type || 'cut') === 'image' ? '이미지 · ' + (it.name || '') : prCutName(it.cut));
 function renderPrintSide() {
   const cfg = PR(), cov = prIsCover(), items = tItems(), it = items.find(x => x.id === prSel), [tw, th] = targetMM(prKind());
   const placed = new Set(); cfg.pages.forEach(pg => pg.panels.forEach(x => (x.type || 'cut') === 'cut' && placed.add(x.cut)));
@@ -4061,7 +4069,7 @@ function renderPrintSide() {
     '<div class="st" id="prAiSt">' + esc(cfg.note || '') + '</div><p class="note">컷 순서는 유지하고, AI가 장면 중요도·컷 비율·대사량을 보고 칸 크기와 줄 구성을 정합니다. 다시 배치하면 컷 칸 배치는 사라지고, 직접 넣은 이미지·글상자는 같은 쪽 번호에 남습니다.</p></section>';
   R += '<section class="sec"><h3>' + (cov ? '표지' : '이 페이지') + ' 레이어 ' + items.length + '개</h3>' +
     (cov ? '<label><span class="lbl">넣을 구역</span><select id="prZone">' + Object.entries(ZONES).map(([k, v]) => '<option value="' + k + '"' + (k === prZone ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' : '') +
-    '<div class="row"><label class="b sm">+ 이미지<input type="file" id="prImgFile" accept="image/*" multiple hidden></label><button type="button" class="b sm" id="prAddText">+ 글상자</button></div>' +
+    '<div class="row"><label class="b sm">+ 이미지<input type="file" id="prImgFile" accept="image/*" multiple hidden></label><button type="button" class="b sm" id="prAddText">+ 글상자</button><button type="button" class="b sm" id="prInkNew">✏ 효과음 펜</button></div>' + (it && it.ink ? '<div class="row"><button type="button" class="b ghost sm" id="prInkEdit">선택 효과음 다시 그리기</button></div>' : '') +
     '<div class="llist">' + ([...items].reverse().map(x => {
       const arr = arrOf(x) || items, i = arr.indexOf(x), ty = x.type || 'cut';
       return '<div class="ll ' + (x.id === prSel ? 'on' : '') + '" data-lid="' + x.id + '"><span class="ico">' + (ty === 'text' ? 'T' : ty === 'image' ? '🖼' : '컷') + '</span><span class="nm">' + esc(itemName(x)) + '</span>' +
@@ -4266,6 +4274,8 @@ function bindPrint() {
     if (files.length) prRerender();
   };
   q('#prAddText').onclick = () => { addPrintText(); prRerender(); };
+  q('#prInkNew').onclick = () => openInkEditor('print');
+  if (q('#prInkEdit')) q('#prInkEdit').onclick = () => openInkEditor('print', it);
   /* 용지·여백 */
   /* 용지·방향·읽는 방향을 바꿔도 컷 배치는 지우지 않는다 (칸은 페이지 비율 좌표라 그대로 따라 늘어나고, 글자 크기·표지 요소는 mm 로 환산해 맞춘다) */
   const keep = (what, fn) => { prKeepLayout(fn); save(); renderPrint(); toast(what + '을(를) 바꿨습니다 — 컷 배치는 그대로 두었습니다. 칸 모양이 어색하면 "기본 알고리즘"으로 다시 배치하세요.', 4200); };
@@ -5422,6 +5432,7 @@ $('#playPanel').onclick = () => (player.playing && player.mode === 'panel' ? sto
 $('#playAll').onclick = () => (player.playing && player.mode === 'all' ? stop() : play('all'));
 $('#scrub').oninput = e => { stop(); scrubT = (+e.target.value / 1000) * panelDur(selPanel()); requestDraw(); };
 $('#guides').onchange = requestDraw;
+$('#makeInkOpen').onclick = () => openInkEditor('make');
 $('#exportBtn').onclick = exportVideo;
 $('#costBadge').onclick = () => { renderLog(); $('#dlgLog').showModal(); };
 $('#logClear').onclick = () => { if (confirm('생성 기록을 지울까요? (비용 합계도 초기화됩니다)')) { P.log = []; save(); updateCost(); renderLog(); } };
