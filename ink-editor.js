@@ -84,6 +84,7 @@ async function inkOpen(mode, requestedTarget) {
   <label>브러시 크기 <input id="inkSize" type="range" min="2" max="100" value="${settings.size}"><output id="inkSizeValue">${settings.size}</output></label><label>색상 <input id="inkColor" type="color" value="${settings.color}"></label>
   <label><input id="inkOutline" type="checkbox" ${settings.outline ? 'checked' : ''}> 테두리</label><label>테두리 굵기 <input id="inkBorder" type="range" min="0" max="30" value="${settings.border}"><output id="inkBorderValue">${settings.border}</output></label><label>테두리 색 <input id="inkBorderColor" type="color" value="${settings.borderColor}"></label>
   <label>불투명도 <input id="inkOpacity" type="range" min="10" max="100" value="${settings.opacity * 100}"><output id="inkOpacityValue">${Math.round(settings.opacity * 100)}%</output></label><label><input id="inkPressure" type="checkbox" ${settings.pressure ? 'checked' : ''}> 펜 필압</label><label><input id="inkScene" type="checkbox" checked> 장면 보이기</label><label>확대 <input id="inkZoom" type="range" min="50" max="250" value="100"></label><button type="button" class="b ghost sm" id="inkApply">그린 선에 현재 설정 적용</button></div>
+  ${mode === 'make' ? '<div class="ink-tools" id="inkAnimation"><strong>효과음 애니메이션</strong><label>등장 효과 <select id="inkAnim">' + opts(LAYER_ANIMS, target?.anim || 'none') + '</select></label><label>퇴장 효과 <select id="inkOut">' + opts(LAYER_OUTS, target?.out || 'fade') + '</select></label><label>등장(초) <input id="inkStart" type="number" min="0" max="' + Math.max(0, panelDur(owner) - .1) + '" step="0.1" value="' + (+target?.start || 0) + '" style="width:80px"></label><label>사라짐(초, 0=컷 끝) <input id="inkEnd" type="number" min="0" max="' + panelDur(owner) + '" step="0.1" value="' + (target?.dur > 0 ? +((+target.start || 0) + target.dur).toFixed(2) : 0) + '" style="width:80px"></label><span class="note">저장 후 ‘▶ 이 컷’으로 재생해 확인하세요. 영상에도 적용됩니다.</span></div>' : ''}
   <p class="note ink-note">마우스·펜·터치로 그립니다. 지우개는 효과음만 지웁니다. Ctrl+Z / Ctrl+Shift+Z · 저장 후 레이어를 이동·크기 조절할 수 있습니다. PSD에는 별도 효과음 레이어로 저장됩니다.</p>
   <div id="inkViewport"><div id="inkStage"><canvas id="inkReference"></canvas><canvas id="inkCanvas" tabindex="0" aria-label="효과음 그리기 캔버스"></canvas><i id="inkCursor" hidden></i></div></div><div class="st" id="inkStatus" aria-live="polite">장면을 불러오는 중…</div>`;
   document.body.append(dialog); dialog.showModal();
@@ -111,6 +112,7 @@ async function inkOpen(mode, requestedTarget) {
   q('inkClear').onclick = () => { finish(true); if (strokes.length) { previous.push(strokes); strokes = [...strokes, { tool: 'eraser', size: Math.hypot(w, h) * 2 / w + 1, pressure: false, points: [{ x: .5, y: .5, p: 1 }] }]; undone = []; dirty = true; schedule(); } };
   q('inkApply').onclick = () => { finish(true); readSettings(); if (!strokes.some(s => s.tool === 'pen')) return; previous.push(strokes); strokes = strokes.map(s => s.tool === 'pen' ? { ...s, ...settings, size: settings.size / 1000, border: settings.border / 1000 } : s); undone = []; dirty = true; schedule(); };
   dialog.querySelectorAll('.ink-tools input').forEach(input => input.addEventListener('input', readSettings));
+  dialog.querySelectorAll('#inkAnimation input, #inkAnimation select').forEach(el => el.addEventListener('input', () => dirty = true));
   q('inkScene').onchange = () => reference.hidden = !q('inkScene').checked; q('inkZoom').oninput = fit;
   function close() { if (busy) return; finish(true); if (!dirty || confirm('저장하지 않은 효과음 변경을 버릴까요?')) dialog.close(); }
   q('inkClose').onclick = close; dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
@@ -119,7 +121,7 @@ async function inkOpen(mode, requestedTarget) {
   q('inkSave').onclick = async () => {
     finish(true); if (busy) return;
     if (P !== project) return toast('프로젝트가 바뀌었습니다. 효과음 편집기를 다시 열어 주세요');
-    busy = true; dialog.querySelectorAll('button,input').forEach(el => el.disabled = true); q('inkStatus').className = 'st'; q('inkStatus').textContent = '효과음 레이어를 저장하는 중…';
+    busy = true; dialog.querySelectorAll('button,input,select').forEach(el => el.disabled = true); q('inkStatus').className = 'st'; q('inkStatus').textContent = '효과음 레이어를 저장하는 중…';
     let assetId;
     try {
       const maxPixels = 24000000, factor = Math.min(1, Math.sqrt(maxPixels / (outputW * outputH))), rendered = inkPaint(strokes, Math.round(outputW * factor), Math.round(outputH * factor)), crop = inkCrop(rendered); rendered.width = rendered.height = 1;
@@ -129,6 +131,8 @@ async function inkOpen(mode, requestedTarget) {
       if (mode === 'make') {
         const layer = target || newLayer(assetId, '효과음 ' + ((owner.layers || []).filter(l => l.ink).length + 1));
         Object.assign(layer, { assetId, ink, x: r.x + r.w / 2, y: r.y + r.h / 2, w: r.w, rot: 0, flip: false });
+        const start = clamp(+q('inkStart').value || 0, 0, Math.max(0, panelDur(owner) - .1)), end = clamp(+q('inkEnd').value || 0, 0, panelDur(owner));
+        Object.assign(layer, { anim: q('inkAnim').value, out: q('inkOut').value, start, dur: end > 0 ? Math.max(.1, end - start) : 0 });
         if (!target) owner.layers.push(layer); selLayer = layer.id; selOv = null; tab = 'layer';
       } else {
         if (draftPage) { PR().pages.push(owner); prPage = PR().pages.length - 1; }
@@ -141,7 +145,7 @@ async function inkOpen(mode, requestedTarget) {
       if (mode === 'make') { renderTabs(); renderInspector(); renderPanels(); requestDraw(); } else renderPrint();
       dialog.close(); toast('효과음을 별도 레이어로 저장했습니다');
     } catch (error) { if (assetId) dropAssetIfUnused(assetId); q('inkStatus').className = 'st err'; q('inkStatus').textContent = '저장 실패: ' + error.message; }
-    finally { busy = false; if (dialog.isConnected) { dialog.querySelectorAll('button,input').forEach(el => el.disabled = false); paint(); } }
+    finally { busy = false; if (dialog.isConnected) { dialog.querySelectorAll('button,input,select').forEach(el => el.disabled = false); paint(); } }
   };
   fit(); paint();
   try { const bg = await inkBackground(mode, owner, target, kind, w, h); if (dialog.isConnected && !busy) { reference.getContext('2d').drawImage(bg, 0, 0, w, h); q('inkStatus').textContent = '테두리가 있는 펜이 기본값입니다. 설정은 다음 획부터 적용됩니다.'; } }

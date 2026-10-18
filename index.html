@@ -51,13 +51,26 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .ib:hover { color: var(--gold); border-color: var(--line); }
 
 /* 레이아웃 */
-.app { display: grid; grid-template-columns: 290px minmax(0, 1fr) 370px; height: calc(100vh - 56px); }
-.col { overflow: auto; min-width: 0; }
+.app { display: grid; grid-template-columns: 290px minmax(0, 1fr) 370px; height: calc(100vh - 56px); grid-template-rows: minmax(0, 1fr) clamp(150px, 23vh, 230px); }
+.col { overflow: auto; min-width: 0; min-height: 0; }
 .left { border-right: 1px solid var(--line-2); background: var(--bg-2); }
 .right { border-left: 1px solid var(--line-2); background: var(--bg-2); }
 .sec { padding: 16px; border-bottom: 1px solid var(--line-2); display: grid; gap: 8px; }
 .sec-h { display: flex; align-items: center; justify-content: space-between; }
 .sec-h h3 { margin: 0; }
+
+
+.timeline-dock { grid-column: 1 / -1; min-width: 0; min-height: 0; padding: 10px 20px 12px; border-top: 2px solid var(--gold); background: var(--bg-2); display: flex; flex-direction: column; gap: 8px; }
+.timeline-dock .timeline-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.timeline-dock h3, .timeline-dock .note { margin: 0; }
+#timelineBody { flex: 1; min-height: 0; }
+.timeline-dock .otl { height: 100%; max-height: none; padding: 28px 10px 8px; }
+.timeline-dock .otl .ruler { left: 10px; right: 10px; height: 24px; font-size: .75rem; }
+.timeline-dock .otl .row-t { height: 36px; }
+.timeline-dock .otl .bar-t { height: 32px; font-size: .82rem; }
+.timeline-dock .otl .grip { width: 14px; }
+.timeline-empty { padding: 8px; color: var(--ink-3); font-size: .82rem; }
+@media (max-width: 980px) { .timeline-dock { order: 1; height: 200px; flex: none; padding: 10px 12px; } }
 
 /* 입력 */
 .lbl { display: block; font-size: .74rem; letter-spacing: .05em; color: var(--ink-3); margin-bottom: 4px; }
@@ -324,7 +337,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
   <div class="brand">MANTRA<b>무빙툰 스튜디오</b></div>
   <nav class="views" aria-label="작업 화면"><button type="button" data-view="make" aria-pressed="true">제작</button><button type="button" data-view="print" aria-pressed="false">인쇄 배치</button></nav>
   <input id="title" class="title-in" aria-label="프로젝트 제목" placeholder="프로젝트 제목">
-  <select id="aspectSel" aria-label="화면 비율" title="화면 비율" style="width:auto;min-height:30px;padding:3px 8px;font-size:.8rem"><option value="9:16">세로 9:16 (쇼츠·릴스)</option><option value="16:9">가로 16:9 (유튜브)</option><option value="1:1">정사각 1:1</option></select>
+  <select id="aspectSel" aria-label="화면 비율" title="화면 비율" style="width:auto;min-height:30px;padding:3px 8px;font-size:.8rem"><option value="9:16">세로 9:16 (쇼츠·릴스)</option><option value="16:9">가로 16:9 (유튜브)</option><option value="1:1">정사각 1:1</option><option value="custom">직접 설정 (px)</option></select><button type="button" class="b ghost sm" id="canvasSizeBtn">크기 설정</button>
   <div class="bar-r">
     <span id="authBox" style="display:flex;align-items:center;gap:6px"></span>
     <button type="button" class="b ghost sm" id="projBtn" title="프로젝트별 저장·불러오기">내 프로젝트</button>
@@ -410,6 +423,7 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
     </nav>
     <div id="insp"></div>
   </aside>
+  <section class="timeline-dock" aria-label="컷 타임라인"><div class="timeline-head"><h3>타임라인</h3><span class="note">막대를 끌어 이동 · 양 끝을 끌어 등장·사라짐 조절 · 눈금자를 눌러 재생 위치 이동</span></div><div id="timelineBody"><div class="otl" id="otl"></div></div></section>
 </div>
 
 <!-- 설정 -->
@@ -1296,8 +1310,8 @@ function buildPrompt(p, plan, scene) { // scene: AI가 변환한 장면 프롬�
   if (chars.length) L.push('Characters in this panel — match their reference sheets exactly (same face, hairstyle, outfit, colors, proportions):\n' + chars.map(c => `- ${c.name || 'character'}: ${c.desc || ''}`).join('\n'));
   L.push('Scene: ' + (scene || p.prompt.trim() || '(describe the scene)'));
   if (!scene && (p.extra || '').trim()) L.push('Additional request (apply on top of the scene): ' + p.extra.trim());
-  const ar = P.aspect || '9:16';
-  L.push('Format: one ' + (ar === '16:9' ? 'horizontal 16:9 widescreen' : ar === '1:1' ? 'square 1:1' : 'vertical 9:16') + ' webtoon / motion-comic frame, full-bleed illustration, keep the main subject away from the edges, leave calm empty areas where speech balloons can be placed later.');
+  const ar = P.aspect === 'custom' ? W + ':' + H : P.aspect || '9:16';
+  L.push('Format: one ' + (ar === '16:9' ? 'horizontal 16:9 widescreen' : ar === '1:1' ? 'square 1:1' : ar === '9:16' ? 'vertical 9:16' : ar + ' aspect ratio') + ' webtoon / motion-comic frame, full-bleed illustration, keep the main subject away from the edges, leave calm empty areas where speech balloons can be placed later.');
   L.push(NO_EXTRA);
   const r = refLines(plan); if (r) L.push(r);
   L.push(NO_TEXT);
@@ -1347,12 +1361,12 @@ const wantAuto = () => S.autoPrompt !== false;
 const charCtx = p => p.chars.map(id => P.chars.find(c => c.id === id)).filter(Boolean).map(c => ({ name: c.name || '', desc: c.desc || '' }));
 async function convertDraft(mode, body) {
   try {
-    const d = await srvJSON('/api/prompt', { mode, aspect: P.aspect || '9:16', ...body });
+    const d = await srvJSON('/api/prompt', { mode, aspect: P.aspect === 'custom' ? W + ':' + H : P.aspect || '9:16', ...body });
     logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: true, cost: 0.004 });
     return { text: d.prompt, note: d.note || '' };
   } catch (e) { logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: false, err: e.kind || 'bad', msg: e.message }); throw e; }
 }
-const sceneSig = p => JSON.stringify([p.prompt.trim(), (p.extra || '').trim(), charCtx(p), P.aspect]);
+const sceneSig = p => JSON.stringify([p.prompt.trim(), (p.extra || '').trim(), charCtx(p), P.aspect, P.canvasSize]);
 const convFresh = p => (p.conv && p.conv.sig === sceneSig(p) ? p.conv : null);
 async function sceneFor(p, force) {
   if (!isServer() || (!force && !wantAuto())) return null;
@@ -2504,6 +2518,7 @@ function drawEditing() {
   if ($('#guides').checked) drawGuides(cx);
   $('#tc').textContent = `컷 ${P.panels.indexOf(p) + 1} · ${lt.toFixed(1)} / ${panelDur(p).toFixed(1)}s`;
   $('#scrub').value = Math.round(lt / panelDur(p) * 1000);
+  updateTimelineHead(p, lt);
 }
 
 /* =========================================================
@@ -2541,6 +2556,8 @@ function tick(now) {
     else { renderAt(player.to - 0.001); const cb = player.onEnd; player.onEnd = null; if (cb) cb(); stop(); return; }
   }
   player.t = t; syncVideos(t); renderAt(t);
+  const timelineSegment = player.segs.find(segment => segment.p.id === sel);
+  if (timelineSegment) updateTimelineHead(timelineSegment.p, t - timelineSegment.start);
   const s = player.segs;
   $('#tc').textContent = player.mode === 'all' ? `전체 ${t.toFixed(1)} / ${player.to.toFixed(1)}s` : `컷 ${s.findIndex(x => x.p.id === sel) + 1} · ${(t - player.from).toFixed(1)}s`;
   player.raf = requestAnimationFrame(tick);
@@ -2787,6 +2804,10 @@ function renderInspector() {
   el.innerHTML = '<div class="row" style="padding:8px 0"><button type="button" class="b ghost sm" id="makeInkNew">✏ 효과음 펜</button>' + (inkTarget ? '<button type="button" class="b ghost sm" id="makeInkEdit">선택 효과음 다시 그리기</button>' : '') + '</div>' + ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
   const after = ({ img: bindImg, fix: bindFix, layer: bindLayer, text: bindText, video: bindVideo, audio: bindAudio, cut: bindCut })[tab];
   after(p, el);
+  const timelineScroll = $('#otl')?.scrollTop || 0;
+  $('#timelineBody').innerHTML = '<div class="otl" id="otl"></div>';
+  bindTimeline(p, $('#timelineBody'));
+  $('#otl').scrollTop = timelineScroll;
   $('#makeInkNew', el).onclick = () => openInkEditor('make');
   if (inkTarget) $('#makeInkEdit', el).onclick = () => openInkEditor('make', inkTarget);
 }
@@ -2929,7 +2950,7 @@ function padRedraw() {
   PAD.strokes.forEach(s => padStroke(ctx, s));
 }
 async function openPad(p) {
-  const [a, b] = (P.aspect || '9:16').split(':').map(Number), k = 1280 / Math.max(a, b);
+  const [a, b] = canvasDimensions(P), k = 1280 / Math.max(a, b);
   PAD.p = p; PAD.W = Math.round(a * k); PAD.H = Math.round(b * k); PAD.strokes = []; PAD.redo = []; PAD.cur = null; PAD.base = null;
   const cv = $('#padCv'); cv.width = PAD.W; cv.height = PAD.H;
   const maxH = Math.min(innerHeight * 0.58, 720), maxW = Math.min(innerWidth - 80, 560), sc = Math.min(maxW / PAD.W, maxH / PAD.H);
@@ -3084,7 +3105,6 @@ function tabText(p) {
     <div class="row"><select id="bulkKind" style="flex:1"><option value="auto">모양 자동 선택</option><option value="speech">동그란 말풍선</option><option value="shout">소리치는 말풍선</option><option value="thought">생각 말풍선</option><option value="narration">나레이션 박스</option><option value="caption">자막</option></select><button type="button" class="b sm" id="bulkAdd">+ 대사 추가</button></div>
     <p class="note">자동 선택: 끝이 ‘!’면 소리치는 말풍선, ( ) 안은 생각, ‘나레이션:’ ‘자막:’으로 시작하면 해당 모양, 나머지는 동그란 말풍선. 넣은 뒤 아래에서 하나씩 바꿀 수 있습니다.</p></div>
   <div class="grp"><span class="lbl">추가</span><div class="row">${Object.entries(KINDS).map(([k, v]) => `<button type="button" class="b ghost sm" data-add="${k}">+ ${v}</button>`).join('')}</div></div>
-  <div class="grp"><span class="lbl">타임라인 — 막대를 끌어 옮기고, 양 끝을 끌어 등장·사라지는 시각을 맞춥니다</span><div class="otl" id="otl"></div></div>
   <div class="grp"><span class="lbl">이 컷의 텍스트 ${p.overlays.length}개 · 등장 순서</span>
     ${list.length ? `<div class="olist">${list.map(x => `<button type="button" class="oi ${x.id === selOv ? 'on' : ''}" data-ov="${x.id}"><b>${KINDS[x.kind]}${x.voice ? (voiceStale(x) ? ' ⚠' : ' 🔊') : ''}</b><span>${esc(x.text || '(빈 텍스트)')}</span><small>${(+x.start).toFixed(1)}s</small></button>`).join('')}</div>` : '<span class="note">아직 없습니다.</span>'}</div>
   ${o ? `
@@ -3127,6 +3147,8 @@ function tabText(p) {
 /* ---- 컷 안 타임라인: 대사마다 한 줄, 끌어서 등장·사라지는 시각을 맞춘다 ---- */
 function ovEnd(p, o) { return +o.dur > 0 ? Math.min(panelDur(p), (+o.start || 0) + (+o.dur)) : panelDur(p); }
 const KIND_COLOR = { layer: '47,127,107', speech: '154,122,46', thought: '90,120,170', shout: '192,69,47', narration: '60,60,60', caption: '47,127,107' };
+function timelinePosition(t, d) { const fraction = clamp(t / d, 0, 1); return 'calc(' + (fraction * 100).toFixed(3) + '% + ' + (10 - fraction * 20).toFixed(3) + 'px)'; }
+function updateTimelineHead(p, t) { const ph = $('#otl .ph'); if (ph) { ph.hidden = t < 0 || t > panelDur(p); ph.style.left = timelinePosition(t, panelDur(p)); } }
 function drawTimeline(p) {
   const box = $('#otl'); if (!box) return;
   const D = panelDur(p), pct = t => (t / D * 100).toFixed(3) + '%';
@@ -3137,15 +3159,16 @@ function drawTimeline(p) {
     list.map(o => {
       const c = KIND_COLOR[o.kind] || KIND_COLOR.speech, st = +o.start || 0, en = ovEnd(p, o), open = !(+o.dur > 0);
       return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc(o.text || '') + '">' +
-        '<span class="grip l"></span><span class="lab">' + esc(o.kind === 'layer' ? '이미지 ' + (o.name || '') : KINDS[o.kind] + ' ' + (o.text || '')) + '</span><span class="grip r"></span></div></div>';
+        '<span class="grip l"></span><span class="lab">' + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + ' ' + (o.text || '')) + '</span><span class="grip r"></span></div></div>';
     }).join('') +
-    '<div class="ph" style="left:' + pct(clamp(scrubT, 0, D)) + '"><b></b></div><div class="tip" hidden></div>';
+    (list.length ? '' : '<div class="timeline-empty">레이어나 말풍선을 추가하면 여기에 표시됩니다.</div>') +
+    '<div class="ph" style="left:' + timelinePosition(scrubT, D) + '"><b></b></div><div class="tip" hidden></div>';
 }
 function bindTimeline(p, el) {
   drawTimeline(p);
   const box = $('#otl', el); if (!box) return;
   const D = () => panelDur(p), snap = v => Math.round(v * 10) / 10;
-  const scrubTo = ev => { const rect = box.getBoundingClientRect(); scrubT = clamp((ev.clientX - rect.left) / rect.width * D(), 0, D() - 0.001); requestDraw(); const ph = $('.ph', box); if (ph) ph.style.left = (scrubT / D() * 100).toFixed(3) + '%'; };
+  const scrubTo = ev => { const rect = box.getBoundingClientRect(); scrubT = clamp((ev.clientX - rect.left - 10) / (rect.width - 20) * D(), 0, D() - 0.001); requestDraw(); const ph = $('.ph', box); if (ph) ph.style.left = timelinePosition(scrubT, D()); };
   /* 자석: 재생 위치·다른 막대의 시작/끝에 0.15초 안으로 다가가면 달라붙는다 */
   const magnets = skip => { const m = [0, D(), scrubT]; tlItems(p).forEach(x => { if (x !== skip) { m.push(+x.start || 0, ovEnd(p, x)); } }); return m; };
   const magnet = (v, ms) => { let best = v, d = 0.15; ms.forEach(m => { if (Math.abs(m - v) < d) { d = Math.abs(m - v); best = m; } }); return best; };
@@ -3167,7 +3190,7 @@ function bindTimeline(p, el) {
     try { bar.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
     const tip = $('.tip', box);
     const move = e => {
-      const dt = (e.clientX - x0) / rect.width * D();
+      const dt = (e.clientX - x0) / (rect.width - 20) * D();
       if (Math.abs(e.clientX - x0) > 2) moved = true;
       let s = s0, en = e0, open = open0;
       if (mode === 'm') {
@@ -3259,7 +3282,7 @@ async function genBubble(p, o) {
    레이어: 컷 안에 이미지를 여러 장 쌓는다 (아래→위 순서, 말풍선·글자는 항상 맨 위)
    위치(x,y)·크기(w=화면 너비 비율)·회전·투명도·등장/퇴장 시각과 효과를 레이어마다 정한다
    ========================================================= */
-const LAYER_ANIMS = { none: '없음', fade: '페이드', pop: '팝', slideUp: '아래에서 올라옴', slideDown: '위에서 내려옴', slideLeft: '오른쪽에서 들어옴', slideRight: '왼쪽에서 들어옴' };
+const LAYER_ANIMS = { none: '없음', fade: '페이드', pop: '팝', slideUp: '아래에서 올라옴', slideDown: '위에서 내려옴', slideLeft: '오른쪽에서 들어옴', slideRight: '왼쪽에서 들어옴', shake: '흔들림(충격)', pulse: '두근거림' };
 const LAYER_OUTS = { fade: '페이드', pop: '작아지며', none: '즉시' };
 let selLayer = null;
 const selLayerObj = () => (selOverlay() ? null : (selPanel()?.layers || []).find(l => l.id === selLayer) || null);
@@ -3284,6 +3307,8 @@ function layerState(l, lt, forced) {
   if (lt < st || lt >= en) return null;
   const p = clamp((lt - st) / 0.5, 0, 1);
   switch (l.anim) {
+    case 'shake': { const t = lt - st; s.dx = Math.sin(t * 70) * 12; s.dy = Math.sin(t * 93) * 7; s.alpha = clamp(p * 3, 0, 1); break; }
+    case 'pulse': s.scale = (0.4 + 0.6 * easeOutBack(p)) * (1 + .09 * Math.sin((lt - st) * Math.PI * 5)); s.alpha = clamp(p * 2.5, 0, 1); break;
     case 'fade': s.alpha = p; break;
     case 'pop': s.scale = 0.4 + 0.6 * easeOutBack(p); s.alpha = clamp(p * 2.5, 0, 1); break;
     case 'slideUp': s.dy = (1 - easeOutCubic(p)) * 140; s.alpha = p; break;
@@ -3362,8 +3387,7 @@ function tabLayer(p) {
       '<label><span class="lbl">사라지는 시각(초, 0 = 컷 끝까지)</span><input type="number" id="lyEnd" step="0.1" min="0" max="' + panelDur(p) + '"></label>' +
       '<label><span class="lbl">등장 효과</span><select data-f="anim">' + opts(LAYER_ANIMS, l.anim) + '</select></label>' +
       '<label><span class="lbl">사라지는 효과</span><select data-f="out">' + opts(LAYER_OUTS, l.out || 'fade') + '</select></label></div>' +
-      '<div class="row"><button type="button" class="b ghost sm" id="lyCenter">가운데로</button><button type="button" class="b ghost sm" id="lyFit">화면 너비에 맞춤</button><button type="button" class="b ghost sm" id="lyDup">복제</button></div></div>' : '<p class="note">레이어를 고르거나 미리보기에서 이미지를 누르면 편집할 수 있습니다.</p>') +
-    '<div class="grp"><span class="lbl">타임라인 — 막대를 끌어 옮기고, 양 끝을 끌어 등장·사라지는 시각을 맞춥니다</span><div class="otl" id="otl"></div></div>';
+      '<div class="row"><button type="button" class="b ghost sm" id="lyCenter">가운데로</button><button type="button" class="b ghost sm" id="lyFit">화면 너비에 맞춤</button><button type="button" class="b ghost sm" id="lyDup">복제</button></div></div>' : '<p class="note">레이어를 고르거나 미리보기에서 이미지를 누르면 편집할 수 있습니다.</p>');
 }
 async function addLayerFromBlob(p, blob, name) {
   const id = await addAsset(blob);
@@ -3374,7 +3398,6 @@ async function addLayerFromBlob(p, blob, name) {
   return l;
 }
 function bindLayer(p, el) {
-  bindTimeline(p, el);
   $('#lyFile', el).onchange = async e => {
     const files = [...e.target.files]; e.target.value = '';
     for (const f of files) { try { await addLayerFromBlob(p, f, f.name.replace(/\.[^.]+$/, '')); } catch (err) { toast('이미지를 읽지 못했습니다: ' + f.name, 3500); } }
@@ -3588,7 +3611,8 @@ let prOv = null, prOvT = null; // 선택한 컷 칸 안의 말풍선 { item: 칸
 const prCache = new Map(); // 컷 id → { sig, canvas }
 const PX_MM = 3; // 편집 화면 해상도 (mm 당 px)
 const ZONES = { back: '뒷표지', spine: '중간연결부(책등)', front: '앞표지', all: '표지 전체(걸쳐서)' };
-const prPageMM = () => { const [w, h] = PAPERS[PR().paper] || PAPERS.B5; return PR().orient === 'landscape' ? [h, w] : [w, h]; };
+const paperDimensions = c => c.paper === 'custom' && Array.isArray(c.paperSize) && c.paperSize.every(v => Number.isFinite(v) && v >= 20 && v <= 600) ? c.paperSize : (PAPERS[c.paper] || PAPERS.B5);
+const prPageMM = () => { const [w, h] = paperDimensions(PR()); return PR().orient === 'landscape' ? [h, w] : [w, h]; };
 const prCutName = cutId => { const i = P.panels.findIndex(p => p.id === cutId); return i < 0 ? '?' : '컷 ' + (i + 1); };
 const prIsCover = () => prTarget === 'cover';
 /* 보기: 'body'(한 쪽) | 'spread'(두 쪽 펼침) | 'cover'(표지). 펼침은 책처럼 첫 쪽이 오른쪽 낱장이고, 그다음부터 2쪽씩 짝을 짓는다 */
@@ -4081,7 +4105,8 @@ function renderPrintSide() {
     '<div class="row"><button type="button" class="b ghost sm" id="prBorderReset">칸마다 따로 지정한 값 지우기</button></div>' +
     '<p class="note">새로 올리는 이미지에도 이 테두리가 자동으로 들어갑니다. 칸을 눌러 선택하면 그 칸만 따로 바꿀 수 있습니다.</p></section>';
   R += '<section class="sec"><h3>용지·여백</h3><div class="g2">' +
-    '<label><span class="lbl">용지</span><select id="prPaper">' + Object.entries(PAPERS).map(([k, v]) => '<option value="' + k + '"' + (k === cfg.paper ? ' selected' : '') + '>' + v[2] + '</option>').join('') + '</select></label>' +
+    '<label><span class="lbl">용지</span><select id="prPaper">' + Object.entries(PAPERS).map(([k, v]) => '<option value="' + k + '"' + (k === cfg.paper ? ' selected' : '') + '>' + v[2] + '</option>').join('') + '<option value="custom"' + (cfg.paper === 'custom' ? ' selected' : '') + '>직접 설정 (mm)</option>' + '</select></label>' +
+    (cfg.paper === 'custom' ? '<label><span class="lbl">용지 가로(mm)</span><input type="number" id="prWidth" min="20" max="600" step="0.1" value="' + paperDimensions(cfg)[0] + '"></label><label><span class="lbl">용지 세로(mm)</span><input type="number" id="prHeight" min="20" max="600" step="0.1" value="' + paperDimensions(cfg)[1] + '"></label><button type="button" class="b ghost sm" id="prSizeApply">용지 크기 적용</button><p class="note">20~600mm. 가로 방향을 선택하면 가로·세로가 서로 바뀝니다.</p>' : '') +
     '<label><span class="lbl">방향</span><select id="prOrient"><option value="portrait"' + (cfg.orient === 'portrait' ? ' selected' : '') + '>세로</option><option value="landscape"' + (cfg.orient === 'landscape' ? ' selected' : '') + '>가로</option></select></label>' +
     '<label><span class="lbl">바깥 여백(mm)</span><input type="number" id="prMargin" min="0" max="40" step="0.5" value="' + cfg.margin + '"></label><label><span class="lbl">칸 사이(mm)</span><input type="number" id="prGutter" min="0" max="20" step="0.5" value="' + cfg.gutter + '"></label>' +
     '<label><span class="lbl">읽는 방향</span><select id="prDir"><option value="ltr"' + (cfg.dir === 'ltr' ? ' selected' : '') + '>왼쪽 → 오른쪽</option><option value="rtl"' + (cfg.dir === 'rtl' ? ' selected' : '') + '>오른쪽 → 왼쪽</option></select></label></div>' +
@@ -4279,7 +4304,8 @@ function bindPrint() {
   /* 용지·여백 */
   /* 용지·방향·읽는 방향을 바꿔도 컷 배치는 지우지 않는다 (칸은 페이지 비율 좌표라 그대로 따라 늘어나고, 글자 크기·표지 요소는 mm 로 환산해 맞춘다) */
   const keep = (what, fn) => { prKeepLayout(fn); save(); renderPrint(); toast(what + '을(를) 바꿨습니다 — 컷 배치는 그대로 두었습니다. 칸 모양이 어색하면 "기본 알고리즘"으로 다시 배치하세요.', 4200); };
-  q('#prPaper').onchange = e => keep('용지', () => { cfg.paper = e.target.value; });
+  q('#prPaper').onchange = e => keep('용지', () => { if (e.target.value === 'custom' && !cfg.paperSize) cfg.paperSize = [...paperDimensions(cfg)].slice(0,2); cfg.paper = e.target.value; });
+  if (q('#prSizeApply')) q('#prSizeApply').onclick = () => { const w = +q('#prWidth').value, h = +q('#prHeight').value; if (![w,h].every(v => Number.isFinite(v) && v >= 20 && v <= 600)) return toast('용지 가로·세로를 20~600mm로 입력해 주세요'); keep('용지 크기', () => { cfg.paperSize = [w,h]; }); };
   q('#prOrient').onchange = e => keep('방향', () => { cfg.orient = e.target.value; });
   q('#prDir').onchange = e => keep('읽는 방향', () => { cfg.dir = e.target.value; });
   const live = (id, key, fn) => (q(id).oninput = e => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; cfg[key] = fn ? fn(v) : v; prRefresh(); });
@@ -4625,11 +4651,11 @@ $('#prNext').onclick = () => prStep(1);
    다른 프로젝트(내 프로젝트 목록 · 백업 파일)에서 인쇄 페이지 가져오기
    컷 칸은 그 프로젝트의 말풍선·글자까지 합친 이미지로 들어온다 (가져온 뒤에는 이 프로젝트의 이미지 칸처럼 다룬다).
    ========================================================= */
-const srcPageMM = c => { const [w, h] = PAPERS[c.paper] || PAPERS.B5; return c.orient === 'landscape' ? [h, w] : [w, h]; };
+const srcPageMM = c => { const [w, h] = paperDimensions(c); return c.orient === 'landscape' ? [h, w] : [w, h]; };
 const srcCutAssetIds = p => [curAsset(p), ...(p.layers || []).map(l => l.assetId), ...p.overlays.map(o => o.shapeImg)].filter(Boolean);
 /* 가져올 프로젝트(sp)의 컷 하나를 그 프로젝트의 화면 비율로 그린다. 말풍선 이동·크기·숨김(ov)도 반영. 이미지는 미리 불러와 둘 것 */
 function drawSrcCut(sp, p, ov, maxSide) {
-  const [sw, sh] = ASPECTS[sp.aspect] || ASPECTS['9:16'], oW = W, oH = H;
+  const [sw, sh] = canvasDimensions(sp), oW = W, oH = H;
   W = sw; H = sh; // 그리기 함수들이 전역 W·H 를 쓰므로 그리는 동안만 바꾼다 (동기 처리)
   try {
     const k = maxSide && Math.max(sw, sh) > maxSide ? maxSide / Math.max(sw, sh) : 1, c = document.createElement('canvas');
@@ -4694,7 +4720,7 @@ async function openPageImport() {
     const sc = src.pr.print, pages = (sc && sc.pages) || [], body = q('#piBody');
     if (!pages.length) { body.innerHTML = '<p class="note" style="margin-top:10px">‘' + esc(src.title) + '’ 에는 인쇄 배치 페이지가 없습니다. 그 프로젝트에서 “인쇄 배치”를 한 번 열어 배치를 만든 뒤 다시 시도하세요.</p>'; st(''); return; }
     const cnt = pg => { const c = { cut: 0, image: 0, text: 0 }; pg.panels.forEach(x => { c[x.type || 'cut'] = (c[x.type || 'cut'] || 0) + 1; }); return c; };
-    body.innerHTML = '<div class="sec-h" style="margin-top:12px"><h3>‘' + esc(src.title) + '’ · ' + pages.length + '쪽 (' + (PAPERS[sc.paper] || PAPERS.B5)[2] + ')</h3><span class="row" style="gap:4px"><button type="button" class="b ghost sm" id="piAll">전체 선택</button><button type="button" class="b ghost sm" id="piNone">선택 해제</button></span></div>' +
+    body.innerHTML = '<div class="sec-h" style="margin-top:12px"><h3>‘' + esc(src.title) + '’ · ' + pages.length + '쪽 (' + srcPageMM(sc).join('×') + 'mm' + ')</h3><span class="row" style="gap:4px"><button type="button" class="b ghost sm" id="piAll">전체 선택</button><button type="button" class="b ghost sm" id="piNone">선택 해제</button></span></div>' +
       '<div class="pgi" id="piGrid">' + pages.map((pg, i) => { const c = cnt(pg); return '<label class="on"><canvas data-i="' + i + '" width="10" height="14"></canvas><span><input type="checkbox" data-i="' + i + '" checked> ' + (i + 1) + '쪽</span><span>컷 ' + c.cut + (c.image ? ' · 이미지 ' + c.image : '') + (c.text ? ' · 글 ' + c.text : '') + '</span></label>'; }).join('') + '</div>' +
       '<div class="row" style="margin-top:10px;align-items:center"><select id="piWhere"><option value="end">지금 본문 맨 뒤에 붙이기</option><option value="after">지금 보는 쪽 바로 뒤에 끼워 넣기</option></select><span style="flex:1"></span><button type="button" class="b" id="piGo">선택한 쪽 가져오기</button></div>';
     const boxes = () => [...body.querySelectorAll('#piGrid input[type=checkbox]')];
@@ -4832,7 +4858,6 @@ function bindText(p, el) {
     setTimeout(() => { const t = $('#ovText'); if (t) { t.focus(); t.select(); } }, 0);
   }));
   $$('[data-ov]', el).forEach(b => (b.onclick = () => { selOv = b.dataset.ov; const o = selOverlay(); scrubT = Math.min(panelDur(p), (+o.start || 0) + 0.8); renderInspector(); requestDraw(); }));
-  bindTimeline(p, el);
   const o = selOverlay(); if (!o) return;
   const endIn = $('#ovEnd', el);
   let endAbs = +o.dur > 0 ? (+o.start || 0) + (+o.dur) : 0;
@@ -5562,23 +5587,41 @@ document.addEventListener('keydown', e => {
 
 /* 화면 비율 → 캔버스 크기, 미리보기 맞춤, 이미지 생성 크기 */
 const ASPECTS = { '9:16': [1080, 1920], '16:9': [1920, 1080], '1:1': [1080, 1080] };
-const genSize = () => ({ '9:16': S.oaSize, '16:9': '1536x1024', '1:1': '1024x1024' })[P.aspect || '9:16'] || S.oaSize;
-const genAspect = () => ({ '9:16': S.gmAspect, '16:9': '16:9', '1:1': '1:1' })[P.aspect || '9:16'] || S.gmAspect;
+const generationPreset = () => P.aspect === 'custom' ? (W / H > 1.2 ? '16:9' : W / H < .8 ? '9:16' : '1:1') : P.aspect || '9:16';
+const genSize = () => ({ '9:16': S.oaSize, '16:9': '1536x1024', '1:1': '1024x1024' })[generationPreset()] || S.oaSize;
+const genAspect = () => ({ '9:16': S.gmAspect, '16:9': '16:9', '1:1': '1:1' })[generationPreset()] || S.gmAspect;
 function fitStage() {
   const wr = $('#stageWrap'), bw = wr.clientWidth, bh = wr.clientHeight; if (!bw || !bh) return;
   const k = Math.min(bw / W, bh / H); cv.style.width = Math.floor(W * k) + 'px'; cv.style.height = Math.floor(H * k) + 'px';
 }
+function canvasDimensions(project) {
+  const size = project.canvasSize;
+  return project.aspect === 'custom' && Array.isArray(size) && size.length === 2 && size.every(v => Number.isInteger(v) && v >= 64 && v <= 8192) && size[0] * size[1] <= 32000000 ? size : (ASPECTS[project.aspect] || ASPECTS['9:16']);
+}
 function applyAspect() {
-  const a = ASPECTS[P.aspect] ? P.aspect : '9:16'; P.aspect = a;
-  const [w, h] = ASPECTS[a]; W = w; H = h;
+  const a = P.aspect === 'custom' || ASPECTS[P.aspect] ? P.aspect : '9:16'; P.aspect = a;
+  const [w, h] = canvasDimensions(P); W = w; H = h;
   if (cv.width !== w) cv.width = w; if (cv.height !== h) cv.height = h;
-  const sel = $('#aspectSel'); if (sel) sel.value = a;
+  const selector = $('#aspectSel'); if (selector) selector.value = a;
+  $('#canvasSizeBtn').textContent = w + '×' + h + ' px';
   const rs = $('#expRes'); if (rs) rs.textContent = w + '×' + h;
   fitStage(); requestDraw();
 }
+function openCanvasSize() {
+  stop(); const dialog = document.createElement('dialog'); dialog.id = 'canvasSizeDialog';
+  dialog.innerHTML = '<form><div class="dlg-h"><h3>제작 캔버스 크기</h3></div><div class="dlg-b grp"><div class="g2"><label>가로(px)<input id="canvasWidth" type="number" min="64" max="8192" step="1" required value="' + W + '"></label><label>세로(px)<input id="canvasHeight" type="number" min="64" max="8192" step="1" required value="' + H + '"></label></div><p class="note">64~8192px, 전체 3,200만 픽셀까지. 기존 요소의 상대 위치는 유지되며 배경은 새 비율에 맞춰집니다. PNG·PSD·영상에 적용됩니다.</p><div class="st err" id="canvasSizeError" role="alert"></div><div class="row"><button type="button" class="b ghost" id="canvasSizeCancel">취소</button><button type="submit" class="b" id="canvasSizeApply">적용</button></div></div></form>';
+  document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); $('#canvasSizeCancel', dialog).onclick = () => dialog.close();
+  $('form', dialog).onsubmit = event => { event.preventDefault(); const w = +$('#canvasWidth', dialog).value, h = +$('#canvasHeight', dialog).value;
+    if (![w,h].every(v => Number.isInteger(v) && v >= 64 && v <= 8192) || w*h > 32000000) { $('#canvasSizeError', dialog).textContent = '가로·세로 범위와 전체 픽셀 수를 확인해 주세요.'; return; }
+    histSnap(); P.aspect = 'custom'; P.canvasSize = [w,h]; applyAspect(); save(); histSnap(); renderAll(); dialog.close(); toast('제작 크기: ' + w + '×' + h + 'px');
+  };
+  dialog.showModal();
+}
 new ResizeObserver(fitStage).observe($('#stageWrap')); window.addEventListener('resize', fitStage);
 $('#projBtn').onclick = () => openProjectManager();
+$('#canvasSizeBtn').onclick = openCanvasSize;
 $('#aspectSel').onchange = e => {
+  if (e.target.value === 'custom') { e.target.value = P.aspect; openCanvasSize(); return; }
   if (P.panels.some(p => curAsset(p)) && !confirm('화면 비율을 바꾸면 기존 이미지는 새 비율에 맞춰 잘려서 보입니다. 이미지는 새 비율로 다시 만드는 것을 권합니다. 바꿀까요?')) { e.target.value = P.aspect || '9:16'; return; }
   P.aspect = e.target.value; applyAspect(); save(); renderAll(); toast('화면 비율: ' + e.target.value);
 };
