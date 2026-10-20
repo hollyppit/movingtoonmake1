@@ -5228,6 +5228,9 @@ function tabCut(p) {
     <select data-f="motion">${opts(MOTIONS, p.motion)}</select>${sl('모션 강도', 'motionAmt', 0, 0.4, 0.01)}</div>
   <div class="row">
     <button type="button" class="b ghost sm" id="transAll">이 전환을 모든 컷에</button>
+    <button type="button" class="b ghost sm" id="durAll">이 길이를 모든 컷에</button>
+    <button type="button" class="b ghost sm" id="motionAll">이 모션을 모든 컷에</button>
+    <button type="button" class="b ghost sm" id="cutAll">길이·전환·모션 전부 모든 컷에</button>
     <button type="button" class="b ghost sm" id="dupPanel">컷 복제</button>
     <button type="button" class="b ghost sm" id="pngBtn">현재 프레임 PNG</button>
     <button type="button" class="b ghost sm" id="cutImgBtn">이 컷 이미지 저장 (완성)</button>
@@ -5242,6 +5245,16 @@ function tabCut(p) {
 function bindCut(p, el) {
   bind(el, p, f => { if (f === 'dur') { renderPanels(); requestDraw(); } });
   $('#transAll', el).onclick = () => { P.panels.forEach(x => (x.trans = p.trans)); save(); toast('모든 컷에 적용했습니다'); };
+  const applyAll = (what, fn) => {
+    if (!confirm(`현재 컷의 ${what}을(를) 모든 컷(${P.panels.length}개)에 적용할까요?`)) return;
+    P.panels.forEach(x => { if (x !== p) fn(x); });
+    save(); renderPanels(); requestDraw(); toast('모든 컷에 적용했습니다');
+  };
+  const setDur = x => { x.dur = clamp(+p.dur || 3, DUR_MIN, DUR_MAX); };
+  const setMotion = x => { x.motion = p.motion; x.motionAmt = p.motionAmt; };
+  $('#durAll', el).onclick = () => applyAll('컷 길이', setDur);
+  $('#motionAll', el).onclick = () => applyAll('카메라 모션', setMotion);
+  $('#cutAll', el).onclick = () => applyAll('길이·전환·모션', x => { setDur(x); x.trans = p.trans; setMotion(x); });
   $('#dupPanel', el).onclick = () => duplicatePanel(p);
   $('#pngBtn', el).onclick = savePNG;
   $('#cutImgBtn', el).onclick = () => saveCutImage(p);
