@@ -946,7 +946,7 @@ function newOverlay(kind, p) {
   if (kind === 'rect' || kind === 'rrect') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'whisper') Object.assign(base, { text: '소곤소곤…', anim: 'fade', y: 0.26 + (n % 3) * 0.1, strokeW: 3, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'wavy') Object.assign(base, { text: '으아아…', anim: 'shake', y: 0.28, tail: { x: 0.4, y: 0.4 } });
-  if (kind === 'flash') Object.assign(base, { text: '번쩍!', w: 0.7, anim: 'shake', strokeW: 4, y: 0.3, tail: null });
+  if (kind === 'flash') Object.assign(base, { text: '번쩍!', w: 0.7, anim: 'shake', strokeW: 3, flashLen: 3, flashGap: 1, y: 0.3, tail: null });
   if (kind === 'thought') Object.assign(base, { text: '속마음…', anim: 'fade', y: 0.24, tail: { x: 0.4, y: 0.36 } });
   if (kind === 'shout') Object.assign(base, { text: '멈춰!', w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
   if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
