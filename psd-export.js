@@ -162,25 +162,27 @@ async function exportPrintPsd() {
         if (it.vis === false) continue;
         const f = itemFrac(it, job.kind), rx = f.x * pw, ry = f.y * ph, rw = f.w * pw, rh = f.h * ph;
         g.save(); if (M) { g.beginPath(); g.rect(0, 0, pw, ph); g.clip(); }
+        const ovLayers = (xf, label) => ovList(it).forEach((original, i) => { // 칸 위의 말풍선(옮겨 온 것 포함)을 편집 가능한 레이어로
+          const e = it.ov && it.ov[original.id]; if (e && e.vis === false) return;
+          const o = withText(original, e), s = e && e.s != null ? e.s : 1;
+          g.save(); if (!ovMoved(e)) { g.beginPath(); g.rect(rx, ry, rw, rh); g.clip(); }
+          g.translate(xf.ox + (o.x * W + (e?.dx || 0) * W) * xf.kc, xf.oy + (o.y * H + (e?.dy || 0) * H) * xf.kc);
+          g.scale(xf.kc * s, xf.kc * s); g.translate(-o.x * W, -o.y * H);
+          psdOverlay(b, o, label + ' ' + (i + 1)); g.restore();
+        });
         if (it.type === 'text') {
           b.raster('글상자 배경', c => drawTextItem(c, { ...it, text: '' }, rx, ry, rw, rh, k));
           b.letters('글상자', c => drawTextItem(c, { ...it, bgOp: 0 }, rx, ry, rw, rh, k));
         } else if (it.type === 'image') {
           if (assets.has(it.assetId)) await waitImg(it.assetId);
           b.raster(it.ink ? '효과음 · ' + (it.name || '') : '배치 이미지', c => drawItem(c, it, rx, ry, rw, rh, k, () => null, job.kind));
+          if (hasOv(it)) ovLayers(cutXform(it, rx, ry, rw, rh), '이미지 말풍선');
         } else {
           const p = cutOf(it); if (p) {
             await psdPrepare(p); const xf = cutXform(it, rx, ry, rw, rh), name = prCutName(it.cut);
             g.save(); g.beginPath(); g.rect(rx, ry, rw, rh); g.clip(); g.translate(xf.ox, xf.oy); g.scale(xf.kc, xf.kc); psdCut(b, p, name); g.restore();
             const bs = itemBorderSpec(it); if (bs) b.raster(name + ' 테두리', c => { c.strokeStyle = bs.color; c.lineWidth = bs.w * k; c.strokeRect(rx, ry, rw, rh); });
-            p.overlays.forEach((original, i) => {
-              const e = it.ov && it.ov[original.id]; if (e && e.vis === false) return;
-              const o = withText(original, e), s = e && e.s != null ? e.s : 1;
-              g.save(); if (!ovMoved(e)) { g.beginPath(); g.rect(rx, ry, rw, rh); g.clip(); }
-              g.translate(xf.ox + (o.x * W + (e?.dx || 0) * W) * xf.kc, xf.oy + (o.y * H + (e?.dy || 0) * H) * xf.kc);
-              g.scale(xf.kc * s, xf.kc * s); g.translate(-o.x * W, -o.y * H);
-              psdOverlay(b, o, name + ' ' + (i + 1)); g.restore();
-            });
+            ovLayers(xf, name);
           }
         }
         g.restore();
