@@ -2717,7 +2717,7 @@ function drawShape(ctx, o, L, tip) {
       }
       s.closePath(); return s;
     };
-    const outer = ring(1.16 + 0.1 * band, 0.2 * band, 0.03, 0), inner = ring(0.94, 0.0, 0.1 * band, 7000);
+    const outer = ring(1.07 + 0.04 * band, 0.12 * band, 0.02, 0), inner = ring(0.96, 0.0, 0.07 * band, 7000);
     ctx.fillStyle = o.stroke || '#111'; ctx.fill(outer);
     if (tip) ctx.fill(tailPath(L, tip, 0.08 * (+o.tailW || 1)));
     ctx.fillStyle = fill; ctx.fill(inner);
