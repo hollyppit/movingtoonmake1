@@ -2600,19 +2600,28 @@ function wrap(ctx, text, maxW) {
   });
   return lines;
 }
+function balancedLines(ctx, text, maxW, minW) { // 같은 줄 수를 유지하면서 가장 좁은 너비로 다시 줄바꿈 → 줄 길이가 고르게 되어 둥근 모양에 잘 맞는다
+  const base = wrap(ctx, text, maxW), n = base.length; if (n < 2) return base;
+  let lo = minW, hi = maxW;
+  for (let i = 0; i < 14 && hi - lo > 2; i++) { const mid = (lo + hi) / 2; if (wrap(ctx, text, mid).length <= n) hi = mid; else lo = mid; }
+  return wrap(ctx, text, hi);
+}
 function layoutOv(ctx, o) {
   ctx.font = ovFont(o);
-  const lines = wrap(ctx, o.text, Math.max(80, o.w * W));
+  const round = o.kind === 'speech' || o.kind === 'thought' || o.kind === 'shout';
+  const maxW = Math.max(80, o.w * W), lines = round ? balancedLines(ctx, o.text, maxW, Math.max(o.size * 2, 40)) : wrap(ctx, o.text, maxW);
   const widths = lines.map(l => ctx.measureText(l).width);
   const lh = o.size * 1.38, tw = Math.max(o.size, ...widths), th = lines.length * lh, pad = o.size * 0.9;
   let rx, ry;
   if (o.kind === 'narration') { rx = tw / 2 + pad * 0.85; ry = th / 2 + pad * 0.6; }
   else if (o.kind === 'caption') { rx = tw / 2 + 10; ry = th / 2 + 6; }
   else {
-    const k = o.kind === 'shout' ? 1.0 : 0.8;
-    rx = (tw / 2 + pad * k) * 1.15; ry = (th / 2 + pad * k) * 1.2;
-    if (o.kind === 'thought') { rx *= 1.06; ry *= 1.1; }
-    if (o.shapeImg && assets.has(o.shapeImg)) { const k = +o.imgScale || 1; rx *= 1.2 * k; ry *= 1.25 * k; } // 이미지 말풍선은 안쪽 여백이 있어 더 크게
+    // 글 덩어리의 각 줄 모서리가 모두 들어가는 가장 작은 타원(가로:세로 = k:1)에 여백만 더한다
+    const k = clamp(Math.sqrt(tw / th) * 0.95, 1.05, 1.7), n = lines.length; let s = o.size;
+    lines.forEach((l, i) => { const y = Math.abs(i - (n - 1) / 2) * lh + lh * 0.5; s = Math.max(s, Math.hypot(widths[i] / 2 / k, y)); });
+    const f = o.kind === 'shout' ? 1.12 : o.kind === 'thought' ? 1.12 : 1;
+    s = (s + o.size * (o.kind === 'shout' ? 0.7 : 0.55)) * f; rx = k * s; ry = s;
+    if (o.shapeImg && assets.has(o.shapeImg)) { const k2 = +o.imgScale || 1; rx *= 1.2 * k2; ry *= 1.25 * k2; } // 이미지 말풍선은 안쪽 여백이 있어 더 크게
   }
   return { lines, widths, lh, tw, th, rx, ry };
 }
