@@ -926,12 +926,12 @@ function newPanel() {
 }
 function newOverlay(kind, p) {
   const n = p.overlays.length;
-  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 46, font: 'sans', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
+  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 46, font: 'nanumgothic', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
   if (kind === 'speech') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'thought') Object.assign(base, { text: '속마음…', anim: 'fade', y: 0.24, tail: { x: 0.4, y: 0.36 } });
   if (kind === 'shout') Object.assign(base, { text: '멈춰!', size: 64, w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
-  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'serif', size: 40, w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
-  if (kind === 'caption') Object.assign(base, { text: '자막', size: 46, w: 0.86, y: 0.8, color: '#ffffff', fill: '#000000', fillA: 0, stroke: '#000000', strokeW: 4, anim: 'slideUp' });
+  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', size: 40, w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
+  if (kind === 'caption') Object.assign(base, { text: '자막', font: 'nanummyeongjo', size: 46, w: 0.86, y: 0.8, color: '#ffffff', fill: '#000000', fillA: 0, stroke: '#000000', strokeW: 4, anim: 'slideUp' });
   return base;
 }
 function defaultProject() {
