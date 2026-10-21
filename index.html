@@ -627,12 +627,25 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-h"><h3>직접 그리기 — 현재 화면 위에 그려서 고치기</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
   <div class="dlg-b">
     <div class="padtools">
-      <button type="button" class="b ghost sm" id="dwPen" aria-pressed="true" title="단축키 B">✏ 펜</button>
-      <button type="button" class="b ghost sm" id="dwBlur" aria-pressed="false" title="단축키 R">💧 번짐</button>
-      <button type="button" class="b ghost sm" id="dwEraser" aria-pressed="false" title="단축키 E — 그린 것을 원본으로 되돌립니다">🧹 원본 복원</button>
-      <button type="button" class="b ghost sm" id="dwPick" aria-pressed="false" title="단축키 I (Alt+클릭도 됨)">💉 스포이드</button>
+      <button type="button" class="b ghost sm" data-tool="pen" aria-pressed="true" title="단축키 B">✏ 펜</button>
+      <button type="button" class="b ghost sm" data-tool="air" aria-pressed="false" title="단축키 A — 부드럽게 번지는 스프레이. 누르고 있으면 계속 진해집니다">💨 에어브러시</button>
+      <button type="button" class="b ghost sm" data-tool="hl" aria-pressed="false" title="단축키 H — 반투명 굵은 형광펜">🖍 형광펜</button>
+      <button type="button" class="b ghost sm" data-tool="eraser" aria-pressed="false" title="단축키 E — 그린 것을 원본으로 되돌립니다">🧹 원본 복원</button>
+      <button type="button" class="b ghost sm" data-tool="fill" aria-pressed="false" title="단축키 G — 같은 색으로 이어진 영역 채우기">🪣 채우기</button>
+      <button type="button" class="b ghost sm" data-tool="blur" aria-pressed="false" title="단축키 R">💧 번짐</button>
+      <button type="button" class="b ghost sm" data-tool="smudge" aria-pressed="false" title="단축키 U — 문질러서 밀어 일그러뜨립니다">👆 유동화</button>
+      <button type="button" class="b ghost sm" data-tool="line" aria-pressed="false" title="단축키 L">／ 직선</button>
+      <button type="button" class="b ghost sm" data-tool="rect" aria-pressed="false" title="단축키 M">▭ 사각형</button>
+      <button type="button" class="b ghost sm" data-tool="ell" aria-pressed="false" title="단축키 O">◯ 원</button>
+      <button type="button" class="b ghost sm" data-tool="pick" aria-pressed="false" title="단축키 I (Alt+클릭도 됨)">💉 스포이드</button>
+    </div>
+    <div class="padtools">
       <input type="color" id="dwColor" value="#111111" aria-label="색">
       <span id="dwSwatches" class="padtools"></span>
+      <button type="button" class="b ghost sm" id="dwSymH" aria-pressed="false" title="가운데 세로선 기준으로 좌우 대칭으로 그립니다">↔ 좌우대칭</button>
+      <button type="button" class="b ghost sm" id="dwSymV" aria-pressed="false" title="가운데 가로선 기준으로 상하 대칭으로 그립니다">↕ 상하대칭</button>
+      <label class="chk"><input type="checkbox" id="dwShapeFill"> 도형 채움</label>
+      <button type="button" class="b ghost sm" id="dwBlurAll" title="굵기에 비례해 화면 전체를 흐리게">전체 흐림</button>
     </div>
     <div class="padtools">
       <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="dwSize" min="1" max="200" value="12"> <b id="dwSizeV">12</b></label>
@@ -643,7 +656,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <button type="button" class="b ghost sm" id="dwReset">처음으로</button>
     </div>
     <div class="padwrap" id="dwWrap"><canvas id="dwCv"></canvas><div class="brush-cursor" id="dwCursor"></div></div>
-    <p class="note">펜 = 색을 그립니다 · 번짐 = 그린 곳을 부드럽게 · 원본 복원 = 그리기 전 모습으로 되돌림. 저장하면 보정·크롭이 반영된 그림이 새 버전으로 추가되고 이전 이미지는 버전에 남습니다. 단축키 — 펜 B · 번짐 R · 복원 E · 스포이드 I · 굵기 [ ] · 되돌리기 Ctrl+Z.</p>
+    <p class="note">에어브러시 = 스프레이처럼 부드럽게(누르고 있으면 진해짐) · 형광펜 = 반투명 굵은 선 · 채우기 = 이어진 영역 칠하기 · 번짐/유동화 = 뭉개기·밀기 · 도형은 끌어서 그리고 '도형 채움'으로 속을 칠합니다 · 대칭을 켜면 가운데 선 기준으로 같이 그려집니다. 저장하면 보정·크롭이 반영된 그림이 새 버전으로 추가되고 이전 이미지는 버전에 남습니다. 단축키 — 펜 B · 에어 A · 형광펜 H · 복원 E · 채우기 G · 번짐 R · 유동화 U · 직선 L · 사각형 M · 원 O · 스포이드 I · 굵기 [ ] · 되돌리기 Ctrl+Z.</p>
   </div>
   <div class="dlg-f"><button type="button" class="b sm" id="dwSave">새 버전으로 저장</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
@@ -926,12 +939,12 @@ function newPanel() {
 }
 function newOverlay(kind, p) {
   const n = p.overlays.length;
-  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 46, font: 'nanumgothic', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
+  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 60, font: 'nanumgothic', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
   if (kind === 'speech') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'thought') Object.assign(base, { text: '속마음…', anim: 'fade', y: 0.24, tail: { x: 0.4, y: 0.36 } });
-  if (kind === 'shout') Object.assign(base, { text: '멈춰!', size: 64, w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
-  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', size: 40, w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
-  if (kind === 'caption') Object.assign(base, { text: '자막', font: 'nanummyeongjo', size: 46, w: 0.86, y: 0.8, color: '#ffffff', fill: '#000000', fillA: 0, stroke: '#000000', strokeW: 4, anim: 'slideUp' });
+  if (kind === 'shout') Object.assign(base, { text: '멈춰!', w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
+  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
+  if (kind === 'caption') Object.assign(base, { text: '자막', font: 'nanummyeongjo', w: 0.86, y: 0.8, color: '#ffffff', fill: '#000000', fillA: 0, stroke: '#000000', strokeW: 4, anim: 'slideUp' });
   return base;
 }
 function defaultProject() {
@@ -1725,38 +1738,91 @@ async function maskApply() {
 }
 initMask();
 
-/* ---- 직접 그리기(후보정): 작업 캔버스에 직접 그린다. 펜/복원은 획 레이어에 모았다가 불투명도로 합성하고, 번짐은 바로 칠한다. 되돌리기는 스냅샷 ---- */
-const DW = { p: null, tool: 'pen', color: '#111111', size: 12, alpha: 1, press: true, W: 0, H: 0, work: null, orig: null, snap: null, stroke: null, undo: [], redo: [], cur: false, last: null, raf: 0, busy: false };
+/* ---- 직접 그리기(후보정): 작업 캔버스에 직접 그린다. 펜·형광펜·복원·도형은 획 레이어에 모았다가 불투명도로 합성하고, 에어브러시·번짐·유동화는 바로 칠한다. 되돌리기는 스냅샷 ---- */
+const DW = { p: null, tool: 'pen', color: '#111111', size: 12, alpha: 1, press: true, symH: false, symV: false, W: 0, H: 0, work: null, orig: null, snap: null, stroke: null, start: null, undo: [], redo: [], cur: false, last: null, raf: 0, air: 0, busy: false };
 const DW_COLORS = ['#111111', '#ffffff', '#e03131', '#f08c00', '#fcc419', '#2f9e44', '#1c7ed6', '#9c36b5'];
+const DW_DIRECT = ['air', 'blur', 'smudge'], DW_SHAPE = ['line', 'rect', 'ell'];
 const dwClone = c => { const n = document.createElement('canvas'); n.width = c.width; n.height = c.height; n.getContext('2d').drawImage(c, 0, 0); return n; };
+const dwRgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+const dwEff = () => DW.alpha * (DW.tool === 'hl' ? 0.4 : 1);
 function dwShow() { $('#dwCv').getContext('2d').drawImage(DW.work, 0, 0); }
+function dwVariants(a) { // 대칭이 켜져 있으면 같은 점의 거울 위치들
+  const v = [a];
+  if (DW.symH) v.push({ ...a, x: DW.W - a.x });
+  if (DW.symV) v.push({ ...a, y: DW.H - a.y });
+  if (DW.symH && DW.symV) v.push({ ...a, x: DW.W - a.x, y: DW.H - a.y });
+  return v;
+}
+function dwEach(a, b, fn) { const va = dwVariants(a), vb = b ? dwVariants(b) : []; va.forEach((p, i) => fn(p, vb[i])); }
 function dwCompose() { // 시작 스냅샷 + 획 레이어(불투명도 적용)
   const g = DW.work.getContext('2d'); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
   g.clearRect(0, 0, DW.W, DW.H); g.drawImage(DW.snap, 0, 0);
-  const layer = DW.stroke;
-  if (DW.tool === 'eraser') { const t = dwClone(DW.orig), tg = t.getContext('2d'); tg.globalCompositeOperation = 'destination-in'; tg.drawImage(layer, 0, 0); g.globalAlpha = DW.alpha; g.drawImage(t, 0, 0); }
-  else { g.globalAlpha = DW.alpha; g.drawImage(layer, 0, 0); }
-  g.globalAlpha = 1; dwShow();
+  let layer = DW.stroke;
+  if (DW.tool === 'eraser') { layer = dwClone(DW.orig); const tg = layer.getContext('2d'); tg.globalCompositeOperation = 'destination-in'; tg.drawImage(DW.stroke, 0, 0); }
+  g.globalAlpha = dwEff(); g.drawImage(layer, 0, 0); g.globalAlpha = 1; dwShow();
 }
 function dwSeg(g, a, b) {
-  const w = q => Math.max(0.5, DW.size * (DW.press && a.pen ? 0.25 + 0.9 * q : 1));
+  const base = DW.tool === 'hl' ? DW.size * 1.6 : DW.size, pr = DW.press && a.pen && DW.tool !== 'hl';
+  const w = q => Math.max(0.5, base * (pr ? 0.25 + 0.9 * q : 1));
   g.lineCap = g.lineJoin = 'round'; g.strokeStyle = g.fillStyle = DW.tool === 'eraser' ? '#000' : DW.color;
   if (!b) { g.beginPath(); g.arc(a.x, a.y, w(a.q) / 2, 0, 7); g.fill(); return; }
   g.lineWidth = w((a.q + b.q) / 2); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
 }
-function dwBlurDab(x, y) {
+function dwShape(a, b) { // 시작점 a ~ 현재점 b 도형을 획 레이어에 새로 그린다
+  const g = DW.stroke.getContext('2d'); g.clearRect(0, 0, DW.W, DW.H);
+  g.lineCap = g.lineJoin = 'round'; g.lineWidth = DW.size; g.strokeStyle = g.fillStyle = DW.color; const fill = $('#dwShapeFill').checked;
+  dwEach(a, b, (p, q) => {
+    g.beginPath();
+    if (DW.tool === 'line') { g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); }
+    else if (DW.tool === 'rect') g.rect(Math.min(p.x, q.x), Math.min(p.y, q.y), Math.abs(q.x - p.x), Math.abs(q.y - p.y));
+    else g.ellipse((p.x + q.x) / 2, (p.y + q.y) / 2, Math.abs(q.x - p.x) / 2 || 0.5, Math.abs(q.y - p.y) / 2 || 0.5, 0, 0, Math.PI * 2);
+    if (fill && DW.tool !== 'line') g.fill(); else g.stroke();
+  });
+}
+function dwAirDab(p) {
+  const r = Math.max(3, DW.size), g = DW.work.getContext('2d'), [R, G, B] = dwRgb(DW.color), a = 0.1 * DW.alpha * (DW.press && p.pen ? 0.3 + 0.9 * p.q : 1);
+  const rg = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+  rg.addColorStop(0, `rgba(${R},${G},${B},${a})`); rg.addColorStop(0.5, `rgba(${R},${G},${B},${a * 0.45})`); rg.addColorStop(1, `rgba(${R},${G},${B},0)`);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1; g.fillStyle = rg; g.fillRect(p.x - r, p.y - r, r * 2, r * 2);
+}
+function dwBlurDab(p) {
   const r = Math.max(4, DW.size * 0.9), g = DW.work.getContext('2d'), s = Math.ceil(r * 2 + 8);
-  const sx = Math.round(x - s / 2), sy = Math.round(y - s / 2), t = document.createElement('canvas'); t.width = t.height = s;
+  const sx = Math.round(p.x - s / 2), sy = Math.round(p.y - s / 2), t = document.createElement('canvas'); t.width = t.height = s;
   const tg = t.getContext('2d'); if ('filter' in tg) tg.filter = 'blur(' + Math.max(1.5, r / 4) + 'px)';
   tg.drawImage(DW.work, sx, sy, s, s, 0, 0, s, s); tg.filter = 'none';
   tg.globalCompositeOperation = 'destination-in'; const rg = tg.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, r);
   rg.addColorStop(0, 'rgba(0,0,0,' + (0.6 * DW.alpha) + ')'); rg.addColorStop(1, 'rgba(0,0,0,0)'); tg.fillStyle = rg; tg.fillRect(0, 0, s, s);
   g.drawImage(t, sx, sy);
 }
-function dwSetTool(t) {
-  DW.tool = t;
-  for (const [k, id] of [['pen', 'dwPen'], ['blur', 'dwBlur'], ['eraser', 'dwEraser'], ['pick', 'dwPick']]) $('#' + id).setAttribute('aria-pressed', String(k === t));
+function dwSmudgeDab(p, q) { // p 자리의 그림을 집어 q 자리에 얹는다 (밀어서 일그러뜨림)
+  const r = Math.max(4, DW.size * 0.9), g = DW.work.getContext('2d'), s = Math.ceil(r * 2 + 4);
+  const t = document.createElement('canvas'); t.width = t.height = s; const tg = t.getContext('2d');
+  tg.drawImage(DW.work, Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s, 0, 0, s, s);
+  tg.globalCompositeOperation = 'destination-in'; const rg = tg.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, r);
+  rg.addColorStop(0, 'rgba(0,0,0,' + (0.85 * Math.max(0.2, DW.alpha)) + ')'); rg.addColorStop(1, 'rgba(0,0,0,0)'); tg.fillStyle = rg; tg.fillRect(0, 0, s, s);
+  g.drawImage(t, Math.round(q.x - s / 2), Math.round(q.y - s / 2));
 }
+function dwFill(a) { // 같은 색으로 이어진 영역을 칠한다 (가장자리 1px 확장)
+  const g = DW.work.getContext('2d'), W = DW.W, H = DW.H, img = g.getImageData(0, 0, W, H), d = img.data;
+  const x0 = clamp(Math.round(a.x), 0, W - 1), y0 = clamp(Math.round(a.y), 0, H - 1), i0 = (y0 * W + x0) * 4, tr = d[i0], tg = d[i0 + 1], tb = d[i0 + 2], ta = d[i0 + 3], TOL = 40;
+  const diff = i => Math.max(Math.abs(d[i] - tr), Math.abs(d[i + 1] - tg), Math.abs(d[i + 2] - tb), Math.abs(d[i + 3] - ta));
+  const mark = new Uint8Array(W * H), q = new Int32Array(W * H); let h = 0, t = 0; q[t++] = y0 * W + x0; mark[y0 * W + x0] = 1;
+  while (h < t) {
+    const c = q[h++], x = c % W, y = (c / W) | 0;
+    for (const n of [x > 0 ? c - 1 : -1, x < W - 1 ? c + 1 : -1, y > 0 ? c - W : -1, y < H - 1 ? c + W : -1]) if (n >= 0 && !mark[n] && diff(n * 4) <= TOL) { mark[n] = 1; q[t++] = n; }
+  }
+  const grow = new Uint8Array(mark);
+  for (let c = 0; c < W * H; c++) if (!mark[c]) { const x = c % W, y = (c / W) | 0; if ((x > 0 && mark[c - 1]) || (x < W - 1 && mark[c + 1]) || (y > 0 && mark[c - W]) || (y < H - 1 && mark[c + W])) if (diff(c * 4) <= TOL * 3) grow[c] = 1; }
+  const [R, G, B] = dwRgb(DW.color), al = DW.alpha;
+  for (let c = 0; c < W * H; c++) if (grow[c]) { const i = c * 4; d[i] += (R - d[i]) * al; d[i + 1] += (G - d[i + 1]) * al; d[i + 2] += (B - d[i + 2]) * al; d[i + 3] = Math.min(255, d[i + 3] + (255 - d[i + 3]) * al); }
+  g.putImageData(img, 0, 0); dwShow();
+}
+function dwBlurAll() {
+  dwPush(); const t = document.createElement('canvas'); t.width = DW.W; t.height = DW.H; const tg = t.getContext('2d');
+  if ('filter' in tg) tg.filter = 'blur(' + Math.max(1, DW.size / 6) + 'px)'; tg.drawImage(DW.work, 0, 0); tg.filter = 'none';
+  const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(t, 0, 0); dwShow();
+}
+function dwSetTool(t) { DW.tool = t; $$('#dlgDraw [data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t))); }
 function dwSetColor(c) { DW.color = c; $('#dwColor').value = c; $$('#dwSwatches .sw').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c === c))); }
 function dwPush() { DW.undo.push(dwClone(DW.work)); if (DW.undo.length > 12) DW.undo.shift(); DW.redo = []; }
 function dwRestore(c) { const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(c, 0, 0); dwShow(); }
@@ -1768,7 +1834,7 @@ async function openDraw(p) {
     DW.orig = document.createElement('canvas'); DW.orig.width = W; DW.orig.height = H; DW.orig.getContext('2d').drawImage(img, 0, 0, W, H);
     DW.work = dwClone(DW.orig);
     const cv = $('#dwCv'); cv.width = W; cv.height = H;
-    const sc = Math.min(Math.min(innerWidth - 80, 560) / W, Math.min(innerHeight * 0.58, 760) / H), wrap = $('#dwWrap');
+    const sc = Math.min(Math.min(innerWidth - 80, 560) / W, Math.min(innerHeight * 0.5, 760) / H), wrap = $('#dwWrap');
     wrap.style.width = Math.round(W * sc) + 'px'; wrap.style.height = Math.round(H * sc) + 'px';
     dwShow(); dwSetTool('pen'); $('#dwSave').disabled = false; $('#dlgDraw').showModal();
   } catch (e) { toast(e.message); }
@@ -1776,62 +1842,76 @@ async function openDraw(p) {
 function initDraw() {
   const cv = $('#dwCv'), wrap = $('#dwWrap'), cur = $('#dwCursor');
   $('#dwSwatches').innerHTML = DW_COLORS.map(c => `<button type="button" class="sw" data-c="${c}" style="background:${c}" aria-pressed="false" aria-label="${c}"></button>`).join('');
-  $$('#dwSwatches .sw').forEach(b => (b.onclick = () => { dwSetColor(b.dataset.c); if (DW.tool === 'pick') dwSetTool('pen'); }));
+  $$('#dwSwatches .sw').forEach(b => (b.onclick = () => { dwSetColor(b.dataset.c); if (DW.tool === 'pick' || DW.tool === 'eraser') dwSetTool('pen'); }));
   dwSetColor(DW.color);
   const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height, q: e.pointerType === 'pen' ? (e.pressure || 0.5) : 1, pen: e.pointerType === 'pen' }; };
   const pick = a => { const d = cv.getContext('2d').getImageData(clamp(Math.round(a.x), 0, DW.W - 1), clamp(Math.round(a.y), 0, DW.H - 1), 1, 1).data; dwSetColor('#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')); };
   const moveCursor = e => {
-    const r = wrap.getBoundingClientRect(), d = DW.size * r.width / DW.W * (DW.tool === 'blur' ? 1.8 : 1);
-    if (DW.tool === 'pick' || e.pointerType === 'touch') { cur.style.display = 'none'; return; }
+    const r = wrap.getBoundingClientRect(), k = { blur: 1.8, smudge: 1.8, air: 2, hl: 1.6 }[DW.tool] || 1, d = DW.size * r.width / DW.W * k;
+    if (!['pen', 'hl', 'eraser', 'air', 'blur', 'smudge'].includes(DW.tool) || e.pointerType === 'touch') { cur.style.display = 'none'; return; }
     cur.style.display = 'block'; cur.style.width = cur.style.height = Math.max(4, d) + 'px';
     cur.style.transform = `translate(${e.clientX - r.left - d / 2}px,${e.clientY - r.top - d / 2}px)`;
   };
+  const direct = (a, b) => { // 에어브러시·번짐·유동화: a→b 사이를 일정 간격으로 훑는다
+    const step = Math.max(2, DW.size / (DW.tool === 'air' ? 5 : 4)), dx = b.x - a.x, dy = b.y - a.y, n = Math.max(1, Math.floor(Math.hypot(dx, dy) / step));
+    for (let i = 1; i <= n; i++) {
+      const p = { ...b, x: a.x + dx * (i - 1) / n, y: a.y + dy * (i - 1) / n }, q = { ...b, x: a.x + dx * i / n, y: a.y + dy * i / n };
+      dwEach(p, q, (pp, qq) => (DW.tool === 'air' ? dwAirDab(qq) : DW.tool === 'blur' ? dwBlurDab(qq) : dwSmudgeDab(pp, qq)));
+    }
+  };
+  const stopAir = () => { clearInterval(DW.air); DW.air = 0; };
   cv.addEventListener('pointerdown', e => {
     if (e.button > 0) return; e.preventDefault(); const a = pos(e);
     if (DW.tool === 'pick' || e.altKey) { pick(a); if (DW.tool === 'pick') dwSetTool('pen'); return; }
-    cv.setPointerCapture(e.pointerId); dwPush(); DW.cur = true; DW.last = a;
-    if (DW.tool === 'blur') { dwBlurDab(a.x, a.y); dwShow(); return; }
+    cv.setPointerCapture(e.pointerId); dwPush();
+    if (DW.tool === 'fill') { dwFill(a); return; }
+    DW.cur = true; DW.last = a; DW.start = a;
+    if (DW.tool === 'air') { dwEach(a, null, dwAirDab); dwShow(); stopAir(); DW.air = setInterval(() => { if (DW.cur && DW.last) { dwEach(DW.last, null, dwAirDab); dwShow(); } }, 50); return; }
+    if (DW.tool === 'blur') { dwEach(a, null, dwBlurDab); dwShow(); return; }
+    if (DW.tool === 'smudge') return;
     DW.snap = dwClone(DW.work); DW.stroke = document.createElement('canvas'); DW.stroke.width = DW.W; DW.stroke.height = DW.H;
-    dwSeg(DW.stroke.getContext('2d'), a); dwCompose();
+    if (DW_SHAPE.includes(DW.tool)) dwShape(a, a); else dwEach(a, null, p => dwSeg(DW.stroke.getContext('2d'), p));
+    dwCompose();
   });
   cv.addEventListener('pointermove', e => {
     moveCursor(e); if (!DW.cur) return;
     const co = e.getCoalescedEvents ? e.getCoalescedEvents() : [], list = co.length ? co : [e];
     for (const ev of list) {
       const b = pos(ev);
-      if (DW.tool === 'blur') { const dx = b.x - DW.last.x, dy = b.y - DW.last.y, n = Math.max(1, Math.floor(Math.hypot(dx, dy) / Math.max(2, DW.size / 4))); for (let i = 1; i <= n; i++) dwBlurDab(DW.last.x + dx * i / n, DW.last.y + dy * i / n); }
-      else dwSeg(DW.stroke.getContext('2d'), DW.last, b);
+      if (DW_DIRECT.includes(DW.tool)) direct(DW.last, b);
+      else if (DW_SHAPE.includes(DW.tool)) dwShape(DW.start, b);
+      else dwEach(DW.last, b, (p, q) => dwSeg(DW.stroke.getContext('2d'), p, q));
       DW.last = b;
     }
-    cancelAnimationFrame(DW.raf); DW.raf = requestAnimationFrame(() => (DW.tool === 'blur' ? dwShow() : dwCompose()));
+    cancelAnimationFrame(DW.raf); DW.raf = requestAnimationFrame(() => (DW_DIRECT.includes(DW.tool) ? dwShow() : dwCompose()));
   });
-  const end = () => { if (!DW.cur) return; DW.cur = false; cancelAnimationFrame(DW.raf); if (DW.tool === 'blur') dwShow(); else dwCompose(); DW.stroke = DW.snap = null; };
+  const end = () => { if (!DW.cur) return; DW.cur = false; stopAir(); cancelAnimationFrame(DW.raf); if (DW_DIRECT.includes(DW.tool)) dwShow(); else dwCompose(); DW.stroke = DW.snap = null; };
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   cv.addEventListener('pointerleave', () => { cur.style.display = 'none'; });
   const setSize = v => { DW.size = clamp(v, 1, 200); $('#dwSize').value = DW.size; $('#dwSizeV').textContent = DW.size; };
   const undo = () => { const c = DW.undo.pop(); if (c) { DW.redo.push(dwClone(DW.work)); dwRestore(c); } };
   const redo = () => { const c = DW.redo.pop(); if (c) { DW.undo.push(dwClone(DW.work)); dwRestore(c); } };
-  $('#dwPen').onclick = () => dwSetTool('pen'); $('#dwBlur').onclick = () => dwSetTool('blur');
-  $('#dwEraser').onclick = () => dwSetTool('eraser'); $('#dwPick').onclick = () => dwSetTool('pick');
+  $$('#dlgDraw [data-tool]').forEach(b => (b.onclick = () => dwSetTool(b.dataset.tool)));
+  const tog = (id, k) => { $(id).onclick = () => { DW[k] = !DW[k]; $(id).setAttribute('aria-pressed', String(DW[k])); }; };
+  tog('#dwSymH', 'symH'); tog('#dwSymV', 'symV');
+  $('#dwBlurAll').onclick = dwBlurAll;
   $('#dwColor').oninput = e => { dwSetColor(e.target.value); if (DW.tool === 'pick' || DW.tool === 'eraser') dwSetTool('pen'); };
   $('#dwSize').oninput = e => setSize(+e.target.value);
   $('#dwAlpha').oninput = e => { DW.alpha = clamp(+e.target.value, 5, 100) / 100; $('#dwAlphaV').textContent = Math.round(DW.alpha * 100); };
   $('#dwPress').onchange = e => { DW.press = e.target.checked; };
   $('#dwUndo').onclick = undo; $('#dwRedo').onclick = redo;
   $('#dwReset').onclick = () => { if (DW.undo.length && !confirm('그린 것을 모두 지우고 처음 상태로 돌릴까요?')) return; dwPush(); dwRestore(DW.orig); };
+  const keys = { KeyB: 'pen', KeyA: 'air', KeyH: 'hl', KeyE: 'eraser', KeyG: 'fill', KeyR: 'blur', KeyU: 'smudge', KeyL: 'line', KeyM: 'rect', KeyO: 'ell', KeyI: 'pick' };
   $('#dlgDraw').addEventListener('keydown', e => {
     if (e.altKey) return; const mod = e.ctrlKey || e.metaKey;
     if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
     else if (mod) return;
-    else if (e.code === 'KeyB') { e.preventDefault(); dwSetTool('pen'); }
-    else if (e.code === 'KeyR') { e.preventDefault(); dwSetTool('blur'); }
-    else if (e.code === 'KeyE') { e.preventDefault(); dwSetTool('eraser'); }
-    else if (e.code === 'KeyI') { e.preventDefault(); dwSetTool('pick'); }
+    else if (keys[e.code]) { e.preventDefault(); dwSetTool(keys[e.code]); }
     else if (e.code === 'BracketRight') { e.preventDefault(); setSize(DW.size + (e.shiftKey ? 10 : 2)); }
     else if (e.code === 'BracketLeft') { e.preventDefault(); setSize(DW.size - (e.shiftKey ? 10 : 2)); }
   });
-  $('#dlgDraw').addEventListener('close', () => { DW.undo = []; DW.redo = []; DW.orig = DW.work = DW.snap = DW.stroke = null; });
+  $('#dlgDraw').addEventListener('close', () => { stopAir(); DW.undo = []; DW.redo = []; DW.orig = DW.work = DW.snap = DW.stroke = null; });
   $('#dwSave').onclick = async () => {
     const p = DW.p; if (!p || DW.busy) return;
     if (!DW.undo.length) return toast('아직 그린 것이 없습니다');
