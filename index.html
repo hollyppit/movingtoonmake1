@@ -4283,6 +4283,17 @@ function prOvPut(dst, clip, cx, cy) { // clip 을 dst 칸에 놓는다(cx·cy: �
   prPlaceOv(dst, prFrameView(dst), n, cx, cy, 1); ovTidy(dst);
   return n;
 }
+function prAutoSpot(dst, n) { // 방금 붙인 말풍선 n 을 칸 안의 빈 자리(다른 말풍선과 덜 겹치고 읽는 순서상 앞쪽)로 옮긴다
+  const v = prFrameView(dst), others = prOvEntries(dst, cutOf(dst)).filter(x => x.o !== n), b = ovBody(n, null), hw = b.rx, hh = b.ry;
+  const rtl = PR().dir === 'rtl', xs = rtl ? [0.72, 0.28] : [0.28, 0.72], spots = [[xs[0], 0.2], [xs[1], 0.2], [0.5, 0.2], [xs[0], 0.5], [xs[1], 0.5], [0.5, 0.5], [xs[0], 0.8], [xs[1], 0.8], [0.5, 0.8]];
+  let best = null;
+  spots.forEach(([fx, fy], i) => {
+    const cx = v.x0 + fx * v.vw, cy = v.y0 + fy * v.vh; let ov = 0;
+    others.forEach(x => { const w = Math.max(0, Math.min(cx + hw, x.cx + x.b.rx * x.s) - Math.max(cx - hw, x.cx - x.b.rx * x.s)), h = Math.max(0, Math.min(cy + hh, x.cy + x.b.ry * x.s) - Math.max(cy - hh, x.cy - x.b.ry * x.s)); ov += w * h; });
+    const score = ov / (4 * hw * hh) * 10 + i * 0.01; if (!best || score < best.score) best = { score, cx, cy };
+  });
+  if (best) { prPlaceOv(dst, v, n, best.cx, best.cy, 1); ovTidy(dst); }
+}
 function prOvTake(src, o) { // 원래 칸에서 말풍선 빼기: 컷 자체의 말풍선은 숨기고, 옮겨 온 것은 지운다
   if (isExtraOv(src, o)) { src.xo.splice(src.xo.indexOf(o), 1); if (!src.xo.length) delete src.xo; if (src.ov) delete src.ov[o.id]; }
   else { src.ov = src.ov || {}; src.ov[o.id] = { vis: false }; }
@@ -4860,6 +4871,7 @@ function sendItem(it, to, copy) { // to: 쪽 번호(0부터) | 'cover'. 새 위�
   if (!copy) src.splice(src.indexOf(it), 1);
   dest.push(item); return item;
 }
+let prLastCut = null; // 마지막으로 누른 컷 칸 id (이미지 등을 골라 둔 상태에서도 말풍선을 붙여넣을 칸)
 let prClip = null, prOvClip = null; // 복사한 컷 칸·이미지·글상자 / 복사한 말풍선(둘 중 마지막에 복사한 것만 유효)
 (function () {
   const typing = () => { const a = document.activeElement; return !!a && (['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) || a.isContentEditable); };
@@ -4878,11 +4890,11 @@ let prClip = null, prOvClip = null; // 복사한 컷 칸·이미지·글상자 /
     if (!files.length && !prClip && !prOvClip) return;
     e.preventDefault(); const cfg = PR();
     if (!files.length && prOvClip) { // 말풍선 붙여넣기: 지금 고른 컷 칸의 가운데에 (같은 칸이면 조금씩 비껴서)
-      const dst = tItems().find(x => x.id === prSel && (x.type || 'cut') === 'cut' && cutOf(x));
-      if (!dst) return toast('말풍선을 붙여넣을 컷 칸을 먼저 누르세요');
-      const v = prFrameView(dst); let cx = v.x0 + v.vw / 2, cy = v.y0 + v.vh / 2;
-      if (dst.id === prOvClip.src) { prOvClip.n++; cx += v.vw * 0.04 * prOvClip.n; cy += v.vh * 0.04 * prOvClip.n; }
-      const n = prOvPut(dst, prOvClip, cx, cy); prOv = { item: dst.id, id: n.id }; save(); prRerender(); prLoadCuts(); toast('말풍선을 붙여넣었습니다'); return;
+      const isCut = x => x && (x.type || 'cut') === 'cut' && x.vis !== false && cutOf(x), items = tItems();
+      const dst = [items.find(x => x.id === prSel), items.find(x => x.id === prLastCut), items.find(x => x.id === prOvClip.src), items.find(isCut)].find(isCut);
+      if (!dst) return toast('이 쪽에 말풍선을 붙여넣을 컷 칸이 없습니다');
+      const v = prFrameView(dst), n = prOvPut(dst, prOvClip, v.x0 + v.vw / 2, v.y0 + v.vh / 2);
+      prAutoSpot(dst, n); prSel = dst.id; // 칸 안에서 다른 말풍선과 겹치지 않는 자리로 자동 배치 prOv = { item: dst.id, id: n.id }; save(); prRerender(); prLoadCuts(); toast('말풍선을 붙여넣었습니다'); return;
     }
     if (!prIsCover() && !cfg.pages[prPage]) { cfg.pages.push({ id: uid(), panels: [] }); prPage = cfg.pages.length - 1; }
     if (files.length) { // 다른 프로그램에서 복사한 이미지(스크린샷 등)
@@ -4979,7 +4991,7 @@ function addPrintText() {
     }
     if (!hit) { if (prSel) { prSel = null; prOv = null; renderPrintSide(); drawPrintPage(); } return; }
     const prevOv = co ? co.o.id : null, changed = prSel !== hit.id || (h.ov ? prevOv !== h.ov.id : prevOv !== null);
-    prSel = hit.id; prOv = h.ov ? { item: hit.id, id: h.ov.id } : null;
+    prSel = hit.id; prOv = h.ov ? { item: hit.id, id: h.ov.id } : null; if ((hit.type || 'cut') === 'cut') prLastCut = hit.id;
     if (h.ov) {
       const e0 = hit.ov && hit.ov[h.ov.id], b = ovFrameBox(hit, h.ov, rectOf(hit));
       prDrag = { mode: 'ovmove', it: hit, oid: h.ov.id, sx: p.px, sy: p.py, dx0: (e0 && e0.dx) || 0, dy0: (e0 && e0.dy) || 0, kc: b.xf.kc, started: false };
