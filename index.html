@@ -4127,6 +4127,64 @@ async function autoAI() {
   renderPrint();
 }
 
+/* ---- 말풍선·글 자동 배치: 칸에 보이는 그림을 AI가 보고 말풍선 자리·크기를 정한다 (서버가 아니면 칸 안으로 들이기만 함) ---- */
+function prFrameView(it) { // 칸 안에 보이는 컷 영역(컷 픽셀)과 칸 크기
+  const [pw, ph] = prPageMM(), f = itemFrac(it, 'body'), rw = f.w * pw * 10, rh = f.h * ph * 10, xf = cutXform(it, 0, 0, rw, rh);
+  const x0 = clamp(-xf.ox / xf.kc, 0, W), x1 = clamp((rw - xf.ox) / xf.kc, 0, W), y0 = clamp(-xf.oy / xf.kc, 0, H), y1 = clamp((rh - xf.oy) / xf.kc, 0, H);
+  return { x0, y0, vw: Math.max(1, x1 - x0), vh: Math.max(1, y1 - y0), rw, rh };
+}
+function prOvEntries(it, p) { // 보이는 말풍선마다 { o, e, b(몸통), s, cx, cy }
+  return p.overlays.filter(o => !(it.ov && it.ov[o.id] && it.ov[o.id].vis === false)).map(o => {
+    const e = it.ov && it.ov[o.id], b = ovBody(o, e), s = e && e.s != null ? e.s : 1;
+    return { o, e, b, s, cx: b.cx + (e && e.dx ? e.dx * W : 0), cy: b.cy + (e && e.dy ? e.dy * H : 0) };
+  });
+}
+function prPlaceOv(it, v, o, cx, cy, s) { // 칸 안에 통째로 들어오게 크기·중심을 맞춰 저장
+  const b = ovBody(o, it.ov && it.ov[o.id]), m = 0.03, sMax = Math.min(0.94 * v.vw / (2 * b.rx), 0.94 * v.vh / (2 * b.ry));
+  s = clamp(Math.min(s, sMax), 0.25, 6);
+  const hw = b.rx * s, hh = b.ry * s, mx = m * v.vw, my = m * v.vh;
+  cx = clamp(cx, v.x0 + hw + mx, Math.max(v.x0 + hw + mx, v.x0 + v.vw - hw - mx)); cy = clamp(cy, v.y0 + hh + my, Math.max(v.y0 + hh + my, v.y0 + v.vh - hh - my));
+  const en = ovEnt(it, o.id); en.dx = (cx - o.x * W) / W; en.dy = (cy - o.y * H) / H; en.s = s;
+}
+async function autoOverlays() {
+  const cfg = PR(), st = $('#prOvSt'), setSt = t => { if (st) st.textContent = t; };
+  const jobs = cfg.pages.flatMap(pg => pg.panels).filter(it => (it.type || 'cut') === 'cut' && it.vis !== false).map(it => ({ it, p: cutOf(it) })).filter(j => j.p && j.p.overlays.length);
+  if (!jobs.length) return toast('배치할 말풍선·글이 있는 컷 칸이 없습니다');
+  const ai = isServer();
+  if (!confirm(ai ? jobs.length + '개 컷 칸의 말풍선·글을 AI가 그림을 보고 다시 배치합니다. 인쇄 배치에서 손본 말풍선 위치·크기는 덮어씁니다. 계속할까요?' : '서버 모드가 아니라 AI 없이, 칸 밖으로 잘리거나 넘치는 말풍선만 칸 안으로 들입니다. 계속할까요?')) return;
+  const btn = $('#prOvAi'); if (btn) btn.disabled = true;
+  let done = 0, fail = 0, reason = '';
+  const run = async j => {
+    const { it, p } = j, v = prFrameView(it), ents = prOvEntries(it, p);
+    let placed = null;
+    if (ai) {
+      try {
+        const base = await renderCutCanvas(p, { text: false, maxSide: 640 }), k = base.width / W, c = document.createElement('canvas');
+        c.width = Math.max(8, Math.round(v.vw * k)); c.height = Math.max(8, Math.round(v.vh * k));
+        const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(base, v.x0 * k, v.y0 * k, v.vw * k, v.vh * k, 0, 0, c.width, c.height);
+        const d = await srvJSON('/api/ovlayout', {
+          image: c.toDataURL('image/jpeg', 0.8), aspect: v.vw / v.vh, dir: cfg.dir,
+          bubbles: ents.map(x => ({ id: x.o.id, kind: x.o.kind, text: x.o.text, w: 2 * x.b.rx * x.s / v.vw, h: 2 * x.b.ry * x.s / v.vh, cx: (x.cx - v.x0) / v.vw, cy: (x.cy - v.y0) / v.vh, tail: !!x.o.tail })).slice(0, 12),
+        });
+        placed = new Map((d.placements || []).map(q => [q.id, q])); reason = d.reason || reason;
+        logCall({ kind: '말풍선 배치', provider: 'anthropic', ok: true, cost: 0.01 });
+      } catch (e) { fail++; }
+    }
+    ents.forEach(x => {
+      const q = placed && placed.get(x.o.id);
+      if (q) prPlaceOv(it, v, x.o, v.x0 + q.cx * v.vw, v.y0 + q.cy * v.vh, x.s * q.scale);
+      else prPlaceOv(it, v, x.o, x.cx, x.cy, x.s); // AI 없음·실패: 자리는 그대로 두고 칸 안으로만 들인다
+    });
+    ovTidy(it); done++; setSt('말풍선 배치 중… ' + done + '/' + jobs.length);
+  };
+  setSt('말풍선 배치 중… 0/' + jobs.length);
+  try {
+    let next = 0; await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, async () => { while (next < jobs.length) await run(jobs[next++]); }));
+  } finally { if (btn) btn.disabled = false; }
+  PR().ovNote = (ai ? 'AI가 ' : '') + done + '개 컷 칸의 말풍선·글을 배치했습니다' + (fail ? ' (AI 실패 ' + fail + '칸은 칸 안으로만 들임)' : '') + '.' + (reason ? ' ' + reason : '');
+  save(); renderPrint(); prLoadCuts();
+}
+
 /* ---- 컷 안 말풍선·자막을 인쇄 배치에서 따로 편집 ----
    컷 칸(it)마다 it.ov = { [말풍선 id]: { dx, dy, s, vis, text } } 를 두고, 하나라도 있으면 "그림"과 "말풍선 한 개씩"을 따로 그려 합친다.
    dx·dy: 컷 가로·세로 대비 이동량, s: 배율(말풍선 중심 기준), vis: false 면 숨김, text: 인쇄용으로 바꾼 문구.
@@ -4443,7 +4501,9 @@ function renderPrintSide() {
   /* 오른쪽 */
   let R = '';
   if (!cov) R += '<section class="sec"><h3>자동 배치</h3><div class="row"><button type="button" class="b" id="prAi">✨ AI가 검토해 배치</button><button type="button" class="b ghost sm" id="prLocal">기본 알고리즘</button></div>' +
-    '<div class="st" id="prAiSt">' + esc(cfg.note || '') + '</div><p class="note">컷 순서는 유지하고, AI가 장면 중요도·컷 비율·대사량을 보고 칸 크기와 줄 구성을 정합니다. 다시 배치하면 컷 칸 배치는 사라지고, 직접 넣은 이미지·글상자는 같은 쪽 번호에 남습니다.</p></section>';
+    '<div class="st" id="prAiSt">' + esc(cfg.note || '') + '</div>' +
+    '<div class="row"><button type="button" class="b" id="prOvAi">💬 말풍선·글 자동 배치</button></div><div class="st" id="prOvSt">' + esc(cfg.ovNote || '') + '</div>' +
+    '<p class="note">제작 탭에서 넣은 말풍선·글이 칸 크기에 맞게 얼굴·주요 인물을 피해 자리 잡고, 칸 밖으로 잘리지 않게 크기를 조절합니다. 칸 배치를 바꾼 뒤에 누르세요.</p><p class="note">컷 순서는 유지하고, AI가 장면 중요도·컷 비율·대사량을 보고 칸 크기와 줄 구성을 정합니다. 다시 배치하면 컷 칸 배치는 사라지고, 직접 넣은 이미지·글상자는 같은 쪽 번호에 남습니다.</p></section>';
   R += '<section class="sec"><h3>' + (cov ? '표지' : '이 페이지') + ' 레이어 ' + items.length + '개</h3>' +
     (cov ? '<label><span class="lbl">넣을 구역</span><select id="prZone">' + Object.entries(ZONES).map(([k, v]) => '<option value="' + k + '"' + (k === prZone ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' : '') +
     '<div class="row"><label class="b sm">+ 이미지<input type="file" id="prImgFile" accept="image/*" multiple hidden></label><button type="button" class="b sm" id="prAddText">+ 글상자</button><button type="button" class="b sm" id="prInkNew">✏ 효과음 펜</button></div>' + (it && it.ink ? '<div class="row"><button type="button" class="b ghost sm" id="prInkEdit">선택 효과음 다시 그리기</button></div>' : '') +
@@ -4619,6 +4679,7 @@ function bindPrint() {
       page().panels.push({ id, type: 'cut', vis: true, cut: b.dataset.prput, x: (1 - w) / 2, y: (1 - h) / 2, w, h, fit: 'cover', fx: 0.5, fy: 0.5 }); prSel = id; save(); renderPrint();
     }));
     q('#prAi').onclick = () => { if (cfg.pages.some(p => p.panels.length) && !confirm('지금 컷 배치를 지우고 AI가 다시 배치할까요? (직접 넣은 이미지·글상자는 남습니다)')) return; autoAI(); };
+    q('#prOvAi').onclick = () => autoOverlays();
     q('#prLocal').onclick = () => { if (cfg.pages.some(p => p.panels.length) && !confirm('지금 컷 배치를 지우고 기본 알고리즘으로 다시 배치할까요? (직접 넣은 이미지·글상자는 남습니다)')) return; autoLocal(); save(); renderPrint(); };
   } else {
     const c = cfg.cover;

@@ -563,6 +563,51 @@ export async function handleLayout(req, env) {
   } catch (e) { return json({ error: e.message }, e.status || 502); }
 }
 
+/* ---------- 출판만화 배치: 한 컷 칸 안의 말풍선·글 자리를 그림을 보고 정한다 ---------- */
+export async function handleOvLayout(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
+  try {
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const b = await readObject(req);
+    const img = String(b.image || '').replace(/^data:image\/jpeg;base64,/, '');
+    if (!img || img.length > 4_000_000 || !/^[A-Za-z0-9+/=]+$/.test(img)) return json({ error: '컷 그림(JPEG base64)이 필요합니다' }, 400);
+    const num = (v, d) => (Number.isFinite(+v) ? +v : d);
+    if (!Array.isArray(b.bubbles) || !b.bubbles.length || b.bubbles.length > 12) return json({ error: '말풍선은 1~12개여야 합니다' }, 400);
+    const bubbles = b.bubbles.map((o, i) => ({
+      id: String(o && o.id || '').slice(0, 40), order: i + 1, kind: String(o.kind || '').slice(0, 12), text: String(o.text || '').slice(0, 80),
+      w: +Math.min(1, Math.max(0.02, num(o.w, 0.3))).toFixed(3), h: +Math.min(1, Math.max(0.02, num(o.h, 0.15))).toFixed(3),
+      cx: +Math.min(1, Math.max(0, num(o.cx, 0.5))).toFixed(3), cy: +Math.min(1, Math.max(0, num(o.cy, 0.3))).toFixed(3), has_tail: !!o.tail,
+    }));
+    if (bubbles.some(o => !o.id)) return json({ error: '말풍선 id 가 필요합니다' }, 400);
+    const system = 'You place speech bubbles, thought bubbles, narration boxes and captions on ONE comic panel for print. You see the panel image exactly as it is cropped in the page (without any text). ' +
+      'Each bubble has a size (w,h = fraction of the panel width/height), a current centre (cx,cy in 0..1 of the panel) and reading order. ' +
+      'Rules: (1) Do not cover faces, eyes, hands doing the action or the main subject; use empty or low-detail areas (sky, walls, background, corners). (2) Keep each whole bubble inside the panel with ~3% margin: centre must satisfy w/2*scale+0.03 <= cx <= 1-w/2*scale-0.03, same for y. ' +
+      '(3) Reading order: ' + (b.dir === 'rtl' ? 'right-to-left, top-to-bottom' : 'left-to-right, top-to-bottom') + ' - earlier bubbles sit higher and nearer the start side; bubbles must not overlap each other. ' +
+      '(4) Narration boxes ("narration") go to the top or bottom edge, captions ("caption") near the bottom, bubbles with has_tail stay reasonably near the speaker if one is visible. ' +
+      '(5) If the bubbles cannot all fit without covering the subject, shrink them with "scale" (0.55-1.0); never enlarge beyond 1.15. Keep the current position when it is already good. ' +
+      '(6) Reply with ONLY JSON, no markdown: {"placements":[{"id":string,"cx":number,"cy":number,"scale":number}],"reason":"1 short sentence in Korean"} - one entry per bubble, same ids.';
+    const user = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: img } },
+      { type: 'text', text: JSON.stringify({ panel_aspect_w_over_h: +num(b.aspect, 0.56).toFixed(3), bubbles }) },
+    ];
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: LAYOUT_MODEL, max_tokens: 1200, system, messages: [{ role: 'user', content: user }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 배치를 읽지 못했습니다' }, 502);
+    let out; try { out = JSON.parse(m[0]); } catch (e) { return json({ error: 'AI 응답 형식 오류' }, 502); }
+    const ids = new Set(bubbles.map(o => o.id));
+    const placements = (Array.isArray(out?.placements) ? out.placements : []).filter(p => p && ids.has(p.id) && Number.isFinite(p.cx) && Number.isFinite(p.cy))
+      .map(p => ({ id: p.id, cx: Math.min(1, Math.max(0, p.cx)), cy: Math.min(1, Math.max(0, p.cy)), scale: Number.isFinite(p.scale) ? Math.min(1.15, Math.max(0.4, p.scale)) : 1 }));
+    if (!placements.length) return json({ error: 'AI 배치에 쓸 수 있는 좌표가 없습니다' }, 502);
+    return json({ placements, reason: String(out.reason || '').slice(0, 200), model: LAYOUT_MODEL });
+  } catch (e) { return json({ error: e.message }, e.status || 502); }
+}
+
 /* ---------- 로그인 확인 / 음성(OpenAI TTS) ---------- */
 export async function handleAdmin(req, env) {
   const who = await authUser(req, env);
@@ -622,6 +667,7 @@ export default {
     if (p === '/api/admin') return handleAdmin(req, env);
     if (p === '/api/polish') return handlePolish(req, env);
     if (p === '/api/layout') return handleLayout(req, env);
+    if (p === '/api/ovlayout') return handleOvLayout(req, env);
     if (p === '/api/prompt') return handlePrompt(req, env);
     if (p === '/api/config') return handleConfig(req, env);
     return json({ error: 'not found' }, 404);
