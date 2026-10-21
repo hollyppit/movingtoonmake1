@@ -4194,14 +4194,16 @@ const hasOv = it => (it.type || 'cut') === 'cut' && ((!!it.ov && Object.keys(it.
 const cutOf = it => P.panels.find(p => p.id === it.cut) || null;
 const ovList = it => { const p = cutOf(it); return p ? [...p.overlays, ...(it.xo || [])] : []; }; // 컷의 말풍선 + 이 칸으로 옮겨 온·붙여넣은 말풍선(it.xo)
 const ovMoved = e => !!e && (!!e.dx || !!e.dy || (e.s != null && e.s !== 1));
-const ovKey = (o, e) => o.id + '|' + (e && e.text != null ? e.text : '');
-const withText = (o, e) => (e && e.text != null ? { ...o, text: e.text } : o);
+const ovKey = (o, e) => o.id + '|' + (e && e.text != null ? e.text : '') + (e && (e.tail !== undefined || e.tailW != null) ? '|' + JSON.stringify([e.tail, e.tailW]) : '');
+/* 인쇄용으로 바꾼 값(문구·말꼬리 위치·꼬리 굵기)을 덮어쓴 말풍선. e.tail: 말풍선 좌표 기준 {x,y}(컷 비율) | null(꼬리 없음) | 없음(원래대로) */
+const withText = (o, e) => (e && (e.text != null || e.tail !== undefined || e.tailW != null) ? { ...o, ...(e.text != null ? { text: e.text } : {}), ...(e.tail !== undefined ? { tail: e.tail } : {}), ...(e.tailW != null ? { tailW: e.tailW } : {}) } : o);
+const ovTail = (o, e) => (e && e.tail !== undefined ? e.tail : o.tail) || null;
 function ovEnt(it, id) { it.ov = it.ov || {}; return (it.ov[id] = it.ov[id] || {}); }
 function ovTidy(it) { // 기본값과 같아진 항목은 지운다
   if (!it.ov) return;
   Object.keys(it.ov).forEach(id => {
     const e = it.ov[id];
-    if (!e.dx) delete e.dx; if (!e.dy) delete e.dy; if (e.s == null || Math.abs(e.s - 1) < 1e-6) delete e.s; if (e.vis !== false) delete e.vis; if (e.text == null) delete e.text;
+    if (!e.dx) delete e.dx; if (!e.dy) delete e.dy; if (e.s == null || Math.abs(e.s - 1) < 1e-6) delete e.s; if (e.vis !== false) delete e.vis; if (e.text == null) delete e.text; if (e.tail === undefined) delete e.tail; if (e.tailW == null) delete e.tailW;
     if (!Object.keys(e).length) delete it.ov[id];
   });
   if (!Object.keys(it.ov).length) delete it.ov;
@@ -4212,7 +4214,7 @@ function ovBody(o, e) { const L = layoutOv(scratch(), withText(o, e)); return { 
 function ovExtent(o, e) { // 꼬리·그림자까지 포함한 그릴 영역(컷 픽셀)
   const b = ovBody(o, e), m = Math.max(b.rx, b.ry) * 0.3 + o.size * 0.6 + 30;
   let x0 = b.cx - b.rx - m, x1 = b.cx + b.rx + m, y0 = b.cy - b.ry - m, y1 = b.cy + b.ry + m;
-  if (o.tail) { const tx = o.tail.x * W, ty = o.tail.y * H, t = o.size; x0 = Math.min(x0, tx - t); x1 = Math.max(x1, tx + t); y0 = Math.min(y0, ty - t); y1 = Math.max(y1, ty + t); }
+  const tl = ovTail(o, e); if (tl) { const tx = tl.x * W, ty = tl.y * H, t = o.size; x0 = Math.min(x0, tx - t); x1 = Math.max(x1, tx + t); y0 = Math.min(y0, ty - t); y1 = Math.max(y1, ty + t); }
   return { x0: Math.floor(x0), y0: Math.floor(y0), w: Math.ceil(x1 - x0), h: Math.ceil(y1 - y0) };
 }
 function renderOvPart(o, e, k) { // 말풍선 하나만 투명 배경에 그린다 (k: 배율)
@@ -4269,7 +4271,7 @@ function prOvNeeds() {
 const isExtraOv = (it, o) => !!it.xo && it.xo.includes(o);
 function prKc(it) { const f = itemFrac(it), [tw, th] = targetMM(prKind()); return cutXform(it, 0, 0, f.w * tw * PX_MM, f.h * th * PX_MM).kc; } // 칸 안 컷 그림의 화면 배율
 function prOvClipOf(it, o) { // 선택한 말풍선을 붙여넣기용으로 복제 (문구·화면상 배율 포함)
-  const e = it.ov && it.ov[o.id], c = JSON.parse(JSON.stringify(o)); if (e && e.text != null) c.text = e.text;
+  const e = it.ov && it.ov[o.id], c = JSON.parse(JSON.stringify(withText(o, e))); // 인쇄용으로 바꾼 문구·말꼬리 포함
   return { o: c, k: (e && e.s != null ? e.s : 1) * prKc(it) };
 }
 function prOvPut(dst, clip, cx, cy) { // clip 을 dst 칸에 놓는다(cx·cy: 컷 픽셀, 칸 안으로 들임). 새 말풍선을 돌려준다
@@ -4284,6 +4286,18 @@ function prOvPut(dst, clip, cx, cy) { // clip 을 dst 칸에 놓는다(cx·cy: �
 function prOvTake(src, o) { // 원래 칸에서 말풍선 빼기: 컷 자체의 말풍선은 숨기고, 옮겨 온 것은 지운다
   if (isExtraOv(src, o)) { src.xo.splice(src.xo.indexOf(o), 1); if (!src.xo.length) delete src.xo; if (src.ov) delete src.ov[o.id]; }
   else { src.ov = src.ov || {}; src.ov[o.id] = { vis: false }; }
+}
+/* 말꼬리: 끝점(꼬리 핸들)의 화면 좌표. 말풍선이 움직이거나 커져도 꼬리는 같이 따라간다 */
+function tailHandle(it, o, r) {
+  const e = it.ov && it.ov[o.id], tl = ROUNDK.includes(o.kind) ? ovTail(o, e) : null; if (!tl) return null;
+  const b = ovFrameBox(it, o, r), s = e && e.s != null ? e.s : 1, kc = b.xf.kc;
+  return { x: b.cx + (tl.x - o.x) * W * s * kc, y: b.cy + (tl.y - o.y) * H * s * kc, xf: b.xf, s };
+}
+function prOvRedrawPart(it, o) { // 말꼬리를 끄는 동안 해당 말풍선 그림만 바로 다시 그린다
+  const ent = prCache.get(it.cut), pp = ent && ent.parts, e = it.ov && it.ov[o.id]; if (!pp) return;
+  const part = renderOvPart(o, e, pp.k), key = ovKey(o, e); // 끄는 중 생긴 이전 그림은 버려 메모리를 아낀다
+  if (pp._tk && pp._tk.id === o.id && pp._tk.key !== key) pp.ovs.delete(pp._tk.key); pp._tk = { id: o.id, key };
+  pp.ovs.set(key, part); pp.last.set(o.id, part);
 }
 function curOvObj() { // 지금 선택한 말풍선 { it, o, e } | null
   if (!prOv || prOv.item !== prSel) return null;
@@ -4458,6 +4472,7 @@ function drawPrintPage() {
     if (co) { // 선택한 말풍선: 주황 점선 + 모서리 크기 조절점
       const b = ovFrameBox(co.it, co.o, { x: rx, y: ry, w: rw, h: rh }), bx = b.cx - b.hw, by = b.cy - b.hh;
       g.strokeStyle = '#C0452F'; g.lineWidth = 3; g.setLineDash([7, 4]); g.strokeRect(bx, by, b.hw * 2, b.hh * 2); g.setLineDash([]);
+      const th = tailHandle(co.it, co.o, { x: rx, y: ry, w: rw, h: rh }); if (th) { g.beginPath(); g.arc(th.x, th.y, 12, 0, Math.PI * 2); g.fillStyle = '#C0452F'; g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 3; g.stroke(); }
       [[bx, by], [bx + b.hw * 2, by], [bx, by + b.hh * 2], [bx + b.hw * 2, by + b.hh * 2]].forEach(([x, y]) => { g.fillStyle = '#fff'; g.fillRect(x - 9, y - 9, 18, 18); g.strokeRect(x - 9, y - 9, 18, 18); });
     }
     g.restore();
@@ -4605,6 +4620,7 @@ function ovPanel(it) { // 컷 안 말풍선·자막 목록과 선택한 말풍�
     const e = co.e || {}, s = e.s != null ? e.s : 1;
     h += '<label><span class="lbl">이 말풍선 문구 (인쇄용으로만 바꿈)</span><textarea id="ovT" rows="2">' + esc(e.text != null ? e.text : co.o.text) + '</textarea></label>' +
       '<label class="sl"><span>크기 <b id="ovSV">' + Math.round(s * 100) + '%</b></span><input type="range" id="ovS" min="0.2" max="4" step="0.01" value="' + s + '"></label>' +
+      (ROUNDK.includes(co.o.kind) ? '<label class="chk"><input type="checkbox" id="ovTail" ' + (ovTail(co.o, co.e) ? 'checked' : '') + '> 말꼬리 표시 <span class="note">(주황 점을 끌어 방향·길이 조절)</span></label>' + (co.o.kind !== 'thought' && ovTail(co.o, co.e) ? '<label class="sl"><span>꼬리 굵기 <b id="ovTWV">' + (+(e.tailW != null ? e.tailW : co.o.tailW) || 1).toFixed(2) + '×</b></span><input type="range" id="ovTW" min="0.3" max="2.5" step="0.05" value="' + ((e.tailW != null ? e.tailW : co.o.tailW) || 1) + '"></label>' : '') : '') +
       '<div class="row"><button type="button" class="b ghost sm" id="ovReset">이 말풍선 원래대로</button><button type="button" class="b ghost sm" id="ovHide">숨기기</button></div>';
   }
   if (edited) h += '<div class="row"><button type="button" class="b ghost sm" id="ovResetAll">이 컷의 말풍선 모두 원래대로</button></div>';
@@ -4808,6 +4824,13 @@ function bindPrint() {
       const ent = () => ovEnt(it, co.o.id);
       on('#ovT', 'oninput', el => { const en = ent(); en.text = el.value === co.o.text ? undefined : el.value; if (en.text === undefined) delete en.text; prRefresh(); clearTimeout(prOvT); prOvT = setTimeout(() => prLoadCuts(), 200); });
       on('#ovS', 'oninput', el => { ent().s = +el.value; const v = $('#ovSV'); if (v) v.textContent = Math.round(+el.value * 100) + '%'; prRefresh(); });
+      on('#ovTail', 'onchange', el => {
+        const en = ent(), b = ovBody(co.o, co.e);
+        if (el.checked) { if (co.o.tail) delete en.tail; else en.tail = { x: co.o.x - b.rx * 0.35 / W, y: co.o.y + b.ry * 1.45 / H }; }
+        else en.tail = co.o.tail ? null : undefined;
+        ovDone();
+      });
+      on('#ovTW', 'oninput', el => { ent().tailW = +el.value; const v = $('#ovTWV'); if (v) v.textContent = (+el.value).toFixed(2) + '×'; prOvRedrawPart(it, co.o); prRefresh(); clearTimeout(prOvT); prOvT = setTimeout(() => prLoadCuts(), 200); });
       q('#ovReset').onclick = () => { if (it.ov) delete it.ov[co.o.id]; ovDone(); };
       q('#ovHide').onclick = () => { ent().vis = false; prOv = null; ovDone(); };
     }
@@ -4939,6 +4962,7 @@ function addPrintText() {
     if (!prIsCover() && !PR().pages[prPage]) return; const p = pt(e), Wp = CW(), Hp = CH();
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur(); // 단축키(Ctrl+C/V/Z)가 입력칸에 먹히지 않게
     const cur = tItems().find(x => x.id === prSel), co = curOvObj();
+    if (co) { const th = tailHandle(co.it, co.o, rectOf(co.it)); if (th && Math.hypot(p.px - th.x, p.py - th.y) < HIT) { grab(e, { mode: 'ovtail', it: co.it, oid: co.o.id }); return; } }
     if (co) { // 선택한 말풍선의 모서리 → 크기 조절
       const b = ovFrameBox(co.it, co.o, rectOf(co.it));
       for (const [x, y] of [[b.cx - b.hw, b.cy - b.hh], [b.cx + b.hw, b.cy - b.hh], [b.cx - b.hw, b.cy + b.hh], [b.cx + b.hw, b.cy + b.hh]]) {
@@ -4968,7 +4992,8 @@ function addPrintText() {
     if (!prIsCover() && !PR().pages[prPage]) return;
     if (!prDrag) { // 커서 모양
       const p = pt(e), cur = tItems().find(x => x.id === prSel), co = curOvObj(); let cursor = '';
-      if (co) { const b = ovFrameBox(co.it, co.o, rectOf(co.it)); [[b.cx - b.hw, b.cy - b.hh, 'nwse-resize'], [b.cx + b.hw, b.cy - b.hh, 'nesw-resize'], [b.cx - b.hw, b.cy + b.hh, 'nesw-resize'], [b.cx + b.hw, b.cy + b.hh, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x, p.py - y) < HIT) cursor = cu; }); }
+      if (co) { const th = tailHandle(co.it, co.o, rectOf(co.it)); if (th && Math.hypot(p.px - th.x, p.py - th.y) < HIT) cursor = 'crosshair'; }
+      if (co && !cursor) { const b = ovFrameBox(co.it, co.o, rectOf(co.it)); [[b.cx - b.hw, b.cy - b.hh, 'nwse-resize'], [b.cx + b.hw, b.cy - b.hh, 'nesw-resize'], [b.cx - b.hw, b.cy + b.hh, 'nesw-resize'], [b.cx + b.hw, b.cy + b.hh, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x, p.py - y) < HIT) cursor = cu; }); }
       else if (cur) { const f = itemFrac(cur); [[f.x, f.y, 'nwse-resize'], [f.x + f.w, f.y, 'nesw-resize'], [f.x, f.y + f.h, 'nesw-resize'], [f.x + f.w, f.y + f.h, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x * CW(), p.py - y * CH()) < HIT) cursor = cu; }); }
       if (!cursor && hitTest(p)) cursor = 'move';
       c.style.cursor = cursor; return;
@@ -4979,6 +5004,12 @@ function addPrintText() {
       if (!d.started && Math.hypot(mx, my) < 3) return; d.started = true;
       const en = ovEnt(it, d.oid); en.dx = d.dx0 + mx / (d.kc * W); en.dy = d.dy0 + my / (d.kc * H);
       drawPrintPage(); return;
+    }
+    if (d.mode === 'ovtail') { // 말꼬리 끝 이동: 말풍선 기준 좌표로 저장
+      const o = ovList(it).find(v => v.id === d.oid); if (!o) return;
+      const th = tailHandle(it, o, rectOf(it)), e0 = it.ov && it.ov[o.id], b = ovFrameBox(it, o, rectOf(it)), s = e0 && e0.s != null ? e0.s : 1;
+      ovEnt(it, o.id).tail = { x: o.x + (p.px - b.cx) / (b.xf.kc * s * W), y: o.y + (p.py - b.cy) / (b.xf.kc * s * H) };
+      prOvRedrawPart(it, o); drawPrintPage(); return;
     }
     if (d.mode === 'ovresize') { // 말풍선 크기: 중심은 그대로
       ovEnt(it, d.oid).s = clamp(d.s0 * Math.hypot(p.px - d.cx, p.py - d.cy) / d.d0, 0.2, 6);
