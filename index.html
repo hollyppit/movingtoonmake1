@@ -3962,7 +3962,7 @@ let view = 'make', prPage = 0, prSel = null, prDrag = null, prTarget = 'body', p
 let prSet = new Set(), prAnchor = null, prDragKind = null; // 여러 쪽 선택(쪽 id) · Shift 범위 선택 기준 · 끌고 있는 것의 종류('page'|'layer')
 let prOv = null, prOvT = null; // 선택한 컷 칸 안의 말풍선 { item: 칸 id, id: 말풍선 id } · 문구 수정 후 다시 그리기 대기
 const prCache = new Map(); // 컷 id → { sig, canvas }
-const PX_MM = 3; // 편집 화면 해상도 (mm 당 px)
+const PX_MM = 5; // 편집 화면 해상도 (mm 당 px)
 const ZONES = { back: '뒷표지', spine: '중간연결부(책등)', front: '앞표지', all: '표지 전체(걸쳐서)' };
 const paperDimensions = c => c.paper === 'custom' && Array.isArray(c.paperSize) && c.paperSize.every(v => Number.isFinite(v) && v >= 20 && v <= 600) ? c.paperSize : (PAPERS[c.paper] || PAPERS.B5);
 const prPageMM = () => { const [w, h] = paperDimensions(PR()); return PR().orient === 'landscape' ? [h, w] : [w, h]; };
@@ -4272,14 +4272,14 @@ function curOvObj() { // 지금 선택한 말풍선 { it, o, e } | null
 const cutSig = p => hash(JSON.stringify(p, (k, v) => (k.startsWith('_') ? undefined : v)) + '|' + (P.aspect || '') + '|' + W + 'x' + H).toString(36);
 async function prLoadCuts() {
   const jobs = P.panels.filter(p => { const c = prCache.get(p.id); return !c || c.sig !== cutSig(p); }).map(async p => {
-    try { prCache.set(p.id, { ...(prCache.get(p.id) || {}), sig: cutSig(p), canvas: await renderCutCanvas(p, { text: true, maxSide: 900 }) }); } catch (e) { /* 이미지 없는 컷은 회색 칸 */ }
+    try { prCache.set(p.id, { ...(prCache.get(p.id) || {}), sig: cutSig(p), canvas: await renderCutCanvas(p, { text: true, maxSide: 1100 }) }); } catch (e) { /* 이미지 없는 컷은 회색 칸 */ }
   });
   const pjobs = [...prOvNeeds()].map(async ([id, keys]) => {
     const p = P.panels.find(x => x.id === id); if (!p) return;
     try {
       const sig = cutSig(p), ent = prCache.get(id), old = ent && ent.parts && ent.parts.sig === sig ? ent.parts : null;
       if (old && [...keys.keys()].every(k => old.ovs.has(k))) return;
-      const np = await renderCutParts(p, [...keys.values()], 900); np.sig = sig;
+      const np = await renderCutParts(p, [...keys.values()], 1100); np.sig = sig;
       if (old) { old.ovs.forEach((v, k) => !np.ovs.has(k) && np.ovs.set(k, v)); old.last.forEach((v, k) => !np.last.has(k) && np.last.set(k, v)); }
       prCache.set(id, { ...(prCache.get(id) || {}), parts: np });
     } catch (e) { /* 이미지 없는 컷은 건너뜀 */ }
