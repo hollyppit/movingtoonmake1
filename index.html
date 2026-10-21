@@ -4097,12 +4097,13 @@ function applyPages(pagesRows, fillAll) {
   const cuts = P.panels.map(p => p.id), cfg = PR(), [pw, ph] = prPageMM(), ih = ph - 2 * cfg.margin;
   const extras = cfg.pages.map(pg => pg.panels.filter(x => (x.type || 'cut') !== 'cut')); // 직접 넣은 이미지·글상자는 같은 쪽 번호로 이어서 둔다
   const keepOv = new Map(); // 컷 안 말풍선 편집(위치·크기·문구)은 다시 배치해도 컷을 따라간다
-  cfg.pages.forEach(pg => pg.panels.forEach(x => { if ((x.type || 'cut') === 'cut' && hasOv(x) && !keepOv.has(x.cut)) keepOv.set(x.cut, x.ov); }));
+  const keepXo = new Map(); // 다른 컷에서 옮겨 온 말풍선도 같은 컷 칸을 따라간다
+  cfg.pages.forEach(pg => pg.panels.forEach(x => { if ((x.type || 'cut') === 'cut' && hasOv(x) && !keepOv.has(x.cut)) { keepOv.set(x.cut, x.ov); keepXo.set(x.cut, x.xo); } }));
   cfg.pages = pagesRows.map(rows => {
     // 기본 알고리즘(mm 높이): 줄이 적어 1.35배 넘게 늘려야 하면 늘리지 않고 위쪽에 붙여 둔다. AI(가중치): 항상 꽉 채움
     const natural = rows.reduce((a, r) => a + r.h, 0) + cfg.gutter * (rows.length - 1);
     const pg = rowsToPage(rows.map(r => ({ h: r.h, cells: r.cells.map(c => ({ cut: cuts[c.cut], w: c.w })) })), fillAll || ih / natural <= 1.35);
-    pg.panels.forEach(x => { const o = keepOv.get(x.cut); if (o) x.ov = JSON.parse(JSON.stringify(o)); });
+    pg.panels.forEach(x => { const o = keepOv.get(x.cut), xo = keepXo.get(x.cut); if (o) x.ov = JSON.parse(JSON.stringify(o)); if (xo) x.xo = JSON.parse(JSON.stringify(xo)); });
     return pg;
   });
   extras.forEach((list, i) => { if (list.length && cfg.pages.length) cfg.pages[Math.min(i, cfg.pages.length - 1)].panels.push(...list); });
@@ -4134,7 +4135,7 @@ function prFrameView(it) { // 칸 안에 보이는 컷 영역(컷 픽셀)과 칸
   return { x0, y0, vw: Math.max(1, x1 - x0), vh: Math.max(1, y1 - y0), rw, rh };
 }
 function prOvEntries(it, p) { // 보이는 말풍선마다 { o, e, b(몸통), s, cx, cy }
-  return p.overlays.filter(o => !(it.ov && it.ov[o.id] && it.ov[o.id].vis === false)).map(o => {
+  return ovList(it).filter(o => !(it.ov && it.ov[o.id] && it.ov[o.id].vis === false)).map(o => {
     const e = it.ov && it.ov[o.id], b = ovBody(o, e), s = e && e.s != null ? e.s : 1;
     return { o, e, b, s, cx: b.cx + (e && e.dx ? e.dx * W : 0), cy: b.cy + (e && e.dy ? e.dy * H : 0) };
   });
@@ -4148,7 +4149,7 @@ function prPlaceOv(it, v, o, cx, cy, s) { // 칸 안에 통째로 들어오게 �
 }
 async function autoOverlays() {
   const cfg = PR(), st = $('#prOvSt'), setSt = t => { if (st) st.textContent = t; };
-  const jobs = cfg.pages.flatMap(pg => pg.panels).filter(it => (it.type || 'cut') === 'cut' && it.vis !== false).map(it => ({ it, p: cutOf(it) })).filter(j => j.p && j.p.overlays.length);
+  const jobs = cfg.pages.flatMap(pg => pg.panels).filter(it => (it.type || 'cut') === 'cut' && it.vis !== false).map(it => ({ it, p: cutOf(it) })).filter(j => j.p && ovList(j.it).length);
   if (!jobs.length) return toast('배치할 말풍선·글이 있는 컷 칸이 없습니다');
   const ai = isServer();
   if (!confirm(ai ? jobs.length + '개 컷 칸의 말풍선·글을 AI가 그림을 보고 다시 배치합니다. 인쇄 배치에서 손본 말풍선 위치·크기는 덮어씁니다. 계속할까요?' : '서버 모드가 아니라 AI 없이, 칸 밖으로 잘리거나 넘치는 말풍선만 칸 안으로 들입니다. 계속할까요?')) return;
@@ -4189,8 +4190,9 @@ async function autoOverlays() {
    컷 칸(it)마다 it.ov = { [말풍선 id]: { dx, dy, s, vis, text } } 를 두고, 하나라도 있으면 "그림"과 "말풍선 한 개씩"을 따로 그려 합친다.
    dx·dy: 컷 가로·세로 대비 이동량, s: 배율(말풍선 중심 기준), vis: false 면 숨김, text: 인쇄용으로 바꾼 문구.
    손대지 않은 말풍선은 예전처럼 칸 밖으로 나간 부분이 잘리고, 옮기거나 키운 말풍선은 칸 밖으로도 나갈 수 있다. */
-const hasOv = it => (it.type || 'cut') === 'cut' && !!it.ov && Object.keys(it.ov).length > 0;
+const hasOv = it => (it.type || 'cut') === 'cut' && ((!!it.ov && Object.keys(it.ov).length > 0) || (!!it.xo && it.xo.length > 0));
 const cutOf = it => P.panels.find(p => p.id === it.cut) || null;
+const ovList = it => { const p = cutOf(it); return p ? [...p.overlays, ...(it.xo || [])] : []; }; // 컷의 말풍선 + 이 칸으로 옮겨 온·붙여넣은 말풍선(it.xo)
 const ovMoved = e => !!e && (!!e.dx || !!e.dy || (e.s != null && e.s !== 1));
 const ovKey = (o, e) => o.id + '|' + (e && e.text != null ? e.text : '');
 const withText = (o, e) => (e && e.text != null ? { ...o, text: e.text } : o);
@@ -4224,7 +4226,7 @@ async function renderCutParts(p, keys, maxSide) {
   const k = maxSide && Math.max(W, H) > maxSide ? maxSide / Math.max(W, H) : 1;
   const base = await renderCutCanvas(p, { text: false, maxSide });
   await loadFontsNow();
-  for (const o of p.overlays) if (o.shapeImg && assets.has(o.shapeImg)) await waitImg(o.shapeImg).catch(() => {});
+  for (const { o } of keys) if (o.shapeImg && assets.has(o.shapeImg)) await waitImg(o.shapeImg).catch(() => {});
   const ovs = new Map(), last = new Map();
   keys.forEach(({ o, e }) => { const part = renderOvPart(o, e, k); ovs.set(ovKey(o, e), part); last.set(o.id, part); });
   return { base, ovs, last, k };
@@ -4239,8 +4241,8 @@ function ovFrameBox(it, o, r) { // 말풍선 몸통의 화면(캔버스) 좌표:
 }
 function drawCutOvs(ctx, it, parts, xf, rx, ry, rw, rh) {
   const p = cutOf(it); if (!p) return;
-  p.overlays.forEach(o => {
-    const e = it.ov[o.id]; if (e && e.vis === false) return;
+  ovList(it).forEach(o => {
+    const e = it.ov && it.ov[o.id]; if (e && e.vis === false) return;
     const part = parts.ovs.get(ovKey(o, e)) || parts.last.get(o.id); if (!part) return;
     const s = e && e.s != null ? e.s : 1, cx = o.x * W + (e && e.dx ? e.dx * W : 0), cy = o.y * H + (e && e.dy ? e.dy * H : 0), kk = xf.kc * s;
     ctx.save();
@@ -4256,15 +4258,37 @@ function prOvNeeds() {
   [...cfg.pages.flatMap(pg => pg.panels), ...cfg.cover.items].forEach(it => {
     if (!(hasOv(it) || (it === sel && (it.type || 'cut') === 'cut'))) return; const p = cutOf(it); if (!p) return;
     const need = m.get(p.id) || m.set(p.id, new Map()).get(p.id);
-    p.overlays.forEach(o => { const e = it.ov && it.ov[o.id]; need.set(ovKey(o, e), { o, e }); });
+    ovList(it).forEach(o => { const e = it.ov && it.ov[o.id]; need.set(ovKey(o, e), { o, e }); });
   });
   return m;
 }
 
+/* ---- 말풍선을 다른 컷 칸으로 옮기기·복사·붙여넣기 ----
+   옮겨 온 말풍선은 받는 칸의 it.xo 에 완성된 말풍선 객체로 들어간다(받는 컷의 제작 탭 내용은 건드리지 않음).
+   화면에 보이던 크기가 그대로 유지되도록 글자 크기·줄 너비·테두리를 두 칸의 그림 배율 비로 환산한다. */
+const isExtraOv = (it, o) => !!it.xo && it.xo.includes(o);
+function prKc(it) { const f = itemFrac(it), [tw, th] = targetMM(prKind()); return cutXform(it, 0, 0, f.w * tw * PX_MM, f.h * th * PX_MM).kc; } // 칸 안 컷 그림의 화면 배율
+function prOvClipOf(it, o) { // 선택한 말풍선을 붙여넣기용으로 복제 (문구·화면상 배율 포함)
+  const e = it.ov && it.ov[o.id], c = JSON.parse(JSON.stringify(o)); if (e && e.text != null) c.text = e.text;
+  return { o: c, k: (e && e.s != null ? e.s : 1) * prKc(it) };
+}
+function prOvPut(dst, clip, cx, cy) { // clip 을 dst 칸에 놓는다(cx·cy: 컷 픽셀, 칸 안으로 들임). 새 말풍선을 돌려준다
+  const o = clip.o, r = clip.k / prKc(dst), n = JSON.parse(JSON.stringify(o)), ox = o.x * W, oy = o.y * H;
+  n.id = uid(); n.size = Math.max(8, o.size * r); n.w = clamp((o.w || 0.6) * r, 0.08, 0.95); n.strokeW = (+o.strokeW || 0) * r;
+  n.x = cx / W; n.y = cy / H;
+  if (o.tail) n.tail = { x: (cx + (o.tail.x * W - ox) * r) / W, y: (cy + (o.tail.y * H - oy) * r) / H };
+  (dst.xo = dst.xo || []).push(n);
+  prPlaceOv(dst, prFrameView(dst), n, cx, cy, 1); ovTidy(dst);
+  return n;
+}
+function prOvTake(src, o) { // 원래 칸에서 말풍선 빼기: 컷 자체의 말풍선은 숨기고, 옮겨 온 것은 지운다
+  if (isExtraOv(src, o)) { src.xo.splice(src.xo.indexOf(o), 1); if (!src.xo.length) delete src.xo; if (src.ov) delete src.ov[o.id]; }
+  else { src.ov = src.ov || {}; src.ov[o.id] = { vis: false }; }
+}
 function curOvObj() { // 지금 선택한 말풍선 { it, o, e } | null
   if (!prOv || prOv.item !== prSel) return null;
   const it = tItems().find(x => x.id === prSel); if (!it || (it.type || 'cut') !== 'cut') return null;
-  const p = cutOf(it), o = p && p.overlays.find(v => v.id === prOv.id);
+  const o = ovList(it).find(v => v.id === prOv.id);
   return o ? { it, o, e: it.ov && it.ov[o.id] } : null;
 }
 
@@ -4570,9 +4594,9 @@ function itemPanel(it, cov, tw, th) {
 }
 const OV_SHORT = { speech: '대사', thought: '생각', shout: '외침', narration: '나레', caption: '자막' };
 function ovPanel(it) { // 컷 안 말풍선·자막 목록과 선택한 말풍선의 설정
-  const p = cutOf(it); if (!p || !p.overlays.length) return '';
+  const ol = ovList(it); if (!ol.length) return '';
   const co = curOvObj(), edited = !!(it.ov && Object.keys(it.ov).length);
-  let h = '<section class="sec"><h3>컷 안 말풍선·자막 ' + p.overlays.length + '개</h3><div class="llist">' + p.overlays.map(o => {
+  let h = '<section class="sec"><h3>컷 안 말풍선·자막 ' + ol.length + '개</h3><div class="llist">' + ol.map(o => {
     const e = it.ov && it.ov[o.id], hid = e && e.vis === false;
     return '<div class="ll ' + (co && co.o.id === o.id ? 'on' : '') + '" data-ovid="' + o.id + '"><span class="ico">' + (OV_SHORT[o.kind] || '글') + '</span><span class="nm">' + esc(String((e && e.text != null ? e.text : o.text) || '').replace(/\n/g, ' ').slice(0, 18) || '(빈 문구)') + (e && (ovMoved(e) || e.text != null) ? ' ·수정' : '') + '</span>' +
       '<button type="button" class="ib" data-oa="vis" title="보이기/숨기기">' + (hid ? '—' : '👁') + '</button><button type="button" class="ib" data-oa="reset" title="원래 위치·크기·문구로" ' + (e ? '' : 'disabled') + '>↺</button></div>';
@@ -4813,20 +4837,30 @@ function sendItem(it, to, copy) { // to: 쪽 번호(0부터) | 'cover'. 새 위�
   if (!copy) src.splice(src.indexOf(it), 1);
   dest.push(item); return item;
 }
-let prClip = null;
+let prClip = null, prOvClip = null; // 복사한 컷 칸·이미지·글상자 / 복사한 말풍선(둘 중 마지막에 복사한 것만 유효)
 (function () {
   const typing = () => { const a = document.activeElement; return !!a && (['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName) || a.isContentEditable); };
   document.addEventListener('copy', e => {
     if (view !== 'print' || typing() || !prSel || String(getSelection() || '')) return;
     const it = tItems().find(x => x.id === prSel); if (!it) return;
+    const co = curOvObj(); // 말풍선을 골라 둔 상태면 그 말풍선만 복사
+    if (co) { prOvClip = prOvClipOf(co.it, co.o); prOvClip.src = co.it.id; prOvClip.n = 0; prClip = null; e.clipboardData.setData('text/plain', 'mantra-print-bubble'); e.preventDefault(); toast('말풍선을 복사했습니다 — 붙여넣을 컷 칸을 누르고 Ctrl+V'); return; }
+    prOvClip = null;
     prClip = { item: JSON.parse(JSON.stringify(it)), from: arrOf(it) === PR().cover.items ? 'cover' : 'body', arr: arrOf(it), n: 0 };
     e.clipboardData.setData('text/plain', 'mantra-print-item'); e.preventDefault(); toast('복사했습니다 — Ctrl+V 로 붙여넣기');
   });
   document.addEventListener('paste', async e => {
     if (view !== 'print' || typing()) return;
     const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
-    if (!files.length && !prClip) return;
+    if (!files.length && !prClip && !prOvClip) return;
     e.preventDefault(); const cfg = PR();
+    if (!files.length && prOvClip) { // 말풍선 붙여넣기: 지금 고른 컷 칸의 가운데에 (같은 칸이면 조금씩 비껴서)
+      const dst = tItems().find(x => x.id === prSel && (x.type || 'cut') === 'cut' && cutOf(x));
+      if (!dst) return toast('말풍선을 붙여넣을 컷 칸을 먼저 누르세요');
+      const v = prFrameView(dst); let cx = v.x0 + v.vw / 2, cy = v.y0 + v.vh / 2;
+      if (dst.id === prOvClip.src) { prOvClip.n++; cx += v.vw * 0.04 * prOvClip.n; cy += v.vh * 0.04 * prOvClip.n; }
+      const n = prOvPut(dst, prOvClip, cx, cy); prOv = { item: dst.id, id: n.id }; save(); prRerender(); prLoadCuts(); toast('말풍선을 붙여넣었습니다'); return;
+    }
     if (!prIsCover() && !cfg.pages[prPage]) { cfg.pages.push({ id: uid(), panels: [] }); prPage = cfg.pages.length - 1; }
     if (files.length) { // 다른 프로그램에서 복사한 이미지(스크린샷 등)
       for (const f of files) { try { await addPrintImage(f); } catch (err) { toast('이미지를 읽지 못했습니다', 3000); } }
@@ -4890,7 +4924,7 @@ function addPrintText() {
       const f = itemFrac(x), inFrame = p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h, pc = (x.type || 'cut') === 'cut' ? cutOf(x) : null;
       if (pc) {
         const r = rectOf(x);
-        for (const o of [...pc.overlays].reverse()) {
+        for (const o of ovList(x).reverse()) {
           const e = x.ov && x.ov[o.id]; if (e && e.vis === false) continue;
           if (!ovMoved(e) && !inFrame) continue; // 칸 밖으로 잘려 보이지 않는 말풍선
           const b = ovFrameBox(x, o, r); if (Math.abs(p.px - b.cx) <= b.hw && Math.abs(p.py - b.cy) <= b.hh) return { it: x, ov: o };
@@ -4986,13 +5020,26 @@ function addPrintText() {
     const s = $('#imZoom'), v = $('#imZoomV'); if (s) s.value = it.zoom; if (v) v.textContent = Math.round(it.zoom * 100) + '%';
     save(); drawPrintPage(); drawPageThumbs();
   }, { passive: false });
-  const end = () => { if (prDrag) { const d = prDrag; prDrag = null; if (d.it && d.it.ov) ovTidy(d.it); save(); renderPrintSide(); drawPrintPage(); drawPageThumbs(); } };
+  const end = e => {
+    if (!prDrag) return; const d = prDrag; prDrag = null; let moved = false;
+    if (d.mode === 'ovmove' && d.started && e && e.type === 'pointerup') { // 말풍선을 다른 컷 칸 위에 놓으면 그 칸으로 옮긴다
+      const p = pt(e), inF = x => { const f = itemFrac(x); return p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h; };
+      const o = ovList(d.it).find(v => v.id === d.oid), tgt = [...tItems()].reverse().find(x => x !== d.it && x.vis !== false && (x.type || 'cut') === 'cut' && cutOf(x) && inF(x));
+      if (o && tgt && !inF(d.it)) {
+        const clip = prOvClipOf(d.it, o), b = ovFrameBox(d.it, o, rectOf(d.it)), xf = cutXform(tgt, ...Object.values(rectOf(tgt)));
+        const n = prOvPut(tgt, clip, (b.cx - xf.ox) / xf.kc, (b.cy - xf.oy) / xf.kc); prOvTake(d.it, o); ovTidy(d.it);
+        prSel = tgt.id; prOv = { item: tgt.id, id: n.id }; moved = true; toast('말풍선을 ' + prCutName(tgt.cut) + ' 칸으로 옮겼습니다');
+      }
+    }
+    if (!moved && d.it && d.it.ov) ovTidy(d.it);
+    save(); renderPrintSide(); drawPrintPage(); drawPageThumbs(); if (moved) prLoadCuts();
+  };
   c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
   window.addEventListener('keydown', e => { // Delete: 선택한 요소 지우기(컷은 배치에서 빼기). 말풍선을 골라 둔 상태면 그 말풍선만 숨긴다
     if (view !== 'print' || !prSel || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
     if (e.key === 'Escape' && prOv) { prOv = null; renderPrintSide(); drawPrintPage(); return; }
     if ((e.key === 'Delete' || e.key === 'Backspace') && curOvObj()) {
-      const co = curOvObj(); ovEnt(co.it, co.o.id).vis = false; prOv = null; ovTidy(co.it); save(); renderPrintSide(); drawPrintPage(); drawPageThumbs(); prLoadCuts(); e.preventDefault(); return;
+      const co = curOvObj(); if (isExtraOv(co.it, co.o)) prOvTake(co.it, co.o); else ovEnt(co.it, co.o.id).vis = false; prOv = null; ovTidy(co.it); save(); renderPrintSide(); drawPrintPage(); drawPageThumbs(); prLoadCuts(); e.preventDefault(); return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       const x0 = tItems().find(x => x.id === prSel), a = x0 ? arrOf(x0) : null, i = a ? a.indexOf(x0) : -1;
@@ -5027,7 +5074,7 @@ async function exportPrint(kind) {
       const flat = new Map(), parts = new Map(), pk = new Map();
       for (const x of list) {
         if ((x.type || 'cut') !== 'cut') continue; const p = cutOf(x); if (!p) continue;
-        if (hasOv(x)) { const m = pk.get(x.cut) || pk.set(x.cut, new Map()).get(x.cut); p.overlays.forEach(o => { const e = x.ov[o.id]; m.set(ovKey(o, e), { o, e }); }); }
+        if (hasOv(x)) { const m = pk.get(x.cut) || pk.set(x.cut, new Map()).get(x.cut); ovList(x).forEach(o => { const e = x.ov && x.ov[o.id]; m.set(ovKey(o, e), { o, e }); }); }
         else if (!flat.has(x.cut)) flat.set(x.cut, await renderCutCanvas(p, { text: true }));
       }
       for (const [id, m] of pk) parts.set(id, await renderCutParts(P.panels.find(v => v.id === id), [...m.values()], 0));
