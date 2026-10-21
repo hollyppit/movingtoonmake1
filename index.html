@@ -622,6 +622,32 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-f"><button type="button" class="b sm" id="mkApply">적용</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
+<!-- 직접 그리기(후보정): 현재 화면(보정·크롭 포함) 위에 직접 그려 새 버전으로 저장 -->
+<dialog id="dlgDraw">
+  <div class="dlg-h"><h3>직접 그리기 — 현재 화면 위에 그려서 고치기</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b">
+    <div class="padtools">
+      <button type="button" class="b ghost sm" id="dwPen" aria-pressed="true" title="단축키 B">✏ 펜</button>
+      <button type="button" class="b ghost sm" id="dwBlur" aria-pressed="false" title="단축키 R">💧 번짐</button>
+      <button type="button" class="b ghost sm" id="dwEraser" aria-pressed="false" title="단축키 E — 그린 것을 원본으로 되돌립니다">🧹 원본 복원</button>
+      <button type="button" class="b ghost sm" id="dwPick" aria-pressed="false" title="단축키 I (Alt+클릭도 됨)">💉 스포이드</button>
+      <input type="color" id="dwColor" value="#111111" aria-label="색">
+      <span id="dwSwatches" class="padtools"></span>
+    </div>
+    <div class="padtools">
+      <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="dwSize" min="1" max="200" value="12"> <b id="dwSizeV">12</b></label>
+      <label class="note">불투명 <input type="range" id="dwAlpha" min="5" max="100" value="100"> <b id="dwAlphaV">100</b>%</label>
+      <label class="chk"><input type="checkbox" id="dwPress" checked> 필압</label>
+      <button type="button" class="b ghost sm" id="dwUndo" title="Ctrl+Z">↶ 되돌리기</button>
+      <button type="button" class="b ghost sm" id="dwRedo" title="Ctrl+Shift+Z">↷ 다시</button>
+      <button type="button" class="b ghost sm" id="dwReset">처음으로</button>
+    </div>
+    <div class="padwrap" id="dwWrap"><canvas id="dwCv"></canvas><div class="brush-cursor" id="dwCursor"></div></div>
+    <p class="note">펜 = 색을 그립니다 · 번짐 = 그린 곳을 부드럽게 · 원본 복원 = 그리기 전 모습으로 되돌림. 저장하면 보정·크롭이 반영된 그림이 새 버전으로 추가되고 이전 이미지는 버전에 남습니다. 단축키 — 펜 B · 번짐 R · 복원 E · 스포이드 I · 굵기 [ ] · 되돌리기 Ctrl+Z.</p>
+  </div>
+  <div class="dlg-f"><button type="button" class="b sm" id="dwSave">새 버전으로 저장</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
 <input type="file" id="importFile" accept=".json,application/json" hidden>
 <input type="file" id="bgmFile" accept="audio/*" multiple hidden>
 <div id="toast" class="toast" role="status" hidden></div>
@@ -1698,6 +1724,128 @@ async function maskApply() {
   MK.busy = false; p._ebusy = false; $('#mkApply').disabled = false; save(); refreshPanel(p);
 }
 initMask();
+
+/* ---- 직접 그리기(후보정): 작업 캔버스에 직접 그린다. 펜/복원은 획 레이어에 모았다가 불투명도로 합성하고, 번짐은 바로 칠한다. 되돌리기는 스냅샷 ---- */
+const DW = { p: null, tool: 'pen', color: '#111111', size: 12, alpha: 1, press: true, W: 0, H: 0, work: null, orig: null, snap: null, stroke: null, undo: [], redo: [], cur: false, last: null, raf: 0, busy: false };
+const DW_COLORS = ['#111111', '#ffffff', '#e03131', '#f08c00', '#fcc419', '#2f9e44', '#1c7ed6', '#9c36b5'];
+const dwClone = c => { const n = document.createElement('canvas'); n.width = c.width; n.height = c.height; n.getContext('2d').drawImage(c, 0, 0); return n; };
+function dwShow() { $('#dwCv').getContext('2d').drawImage(DW.work, 0, 0); }
+function dwCompose() { // 시작 스냅샷 + 획 레이어(불투명도 적용)
+  const g = DW.work.getContext('2d'); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  g.clearRect(0, 0, DW.W, DW.H); g.drawImage(DW.snap, 0, 0);
+  const layer = DW.stroke;
+  if (DW.tool === 'eraser') { const t = dwClone(DW.orig), tg = t.getContext('2d'); tg.globalCompositeOperation = 'destination-in'; tg.drawImage(layer, 0, 0); g.globalAlpha = DW.alpha; g.drawImage(t, 0, 0); }
+  else { g.globalAlpha = DW.alpha; g.drawImage(layer, 0, 0); }
+  g.globalAlpha = 1; dwShow();
+}
+function dwSeg(g, a, b) {
+  const w = q => Math.max(0.5, DW.size * (DW.press && a.pen ? 0.25 + 0.9 * q : 1));
+  g.lineCap = g.lineJoin = 'round'; g.strokeStyle = g.fillStyle = DW.tool === 'eraser' ? '#000' : DW.color;
+  if (!b) { g.beginPath(); g.arc(a.x, a.y, w(a.q) / 2, 0, 7); g.fill(); return; }
+  g.lineWidth = w((a.q + b.q) / 2); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+}
+function dwBlurDab(x, y) {
+  const r = Math.max(4, DW.size * 0.9), g = DW.work.getContext('2d'), s = Math.ceil(r * 2 + 8);
+  const sx = Math.round(x - s / 2), sy = Math.round(y - s / 2), t = document.createElement('canvas'); t.width = t.height = s;
+  const tg = t.getContext('2d'); if ('filter' in tg) tg.filter = 'blur(' + Math.max(1.5, r / 4) + 'px)';
+  tg.drawImage(DW.work, sx, sy, s, s, 0, 0, s, s); tg.filter = 'none';
+  tg.globalCompositeOperation = 'destination-in'; const rg = tg.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, r);
+  rg.addColorStop(0, 'rgba(0,0,0,' + (0.6 * DW.alpha) + ')'); rg.addColorStop(1, 'rgba(0,0,0,0)'); tg.fillStyle = rg; tg.fillRect(0, 0, s, s);
+  g.drawImage(t, sx, sy);
+}
+function dwSetTool(t) {
+  DW.tool = t;
+  for (const [k, id] of [['pen', 'dwPen'], ['blur', 'dwBlur'], ['eraser', 'dwEraser'], ['pick', 'dwPick']]) $('#' + id).setAttribute('aria-pressed', String(k === t));
+}
+function dwSetColor(c) { DW.color = c; $('#dwColor').value = c; $$('#dwSwatches .sw').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c === c))); }
+function dwPush() { DW.undo.push(dwClone(DW.work)); if (DW.undo.length > 12) DW.undo.shift(); DW.redo = []; }
+function dwRestore(c) { const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(c, 0, 0); dwShow(); }
+async function openDraw(p) {
+  if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
+  try {
+    const blob = await bakePanel(p, 'image/png'), img = await loadImageFromBlob(blob);
+    DW.p = p; DW.W = W; DW.H = H; DW.undo = []; DW.redo = []; DW.cur = false;
+    DW.orig = document.createElement('canvas'); DW.orig.width = W; DW.orig.height = H; DW.orig.getContext('2d').drawImage(img, 0, 0, W, H);
+    DW.work = dwClone(DW.orig);
+    const cv = $('#dwCv'); cv.width = W; cv.height = H;
+    const sc = Math.min(Math.min(innerWidth - 80, 560) / W, Math.min(innerHeight * 0.58, 760) / H), wrap = $('#dwWrap');
+    wrap.style.width = Math.round(W * sc) + 'px'; wrap.style.height = Math.round(H * sc) + 'px';
+    dwShow(); dwSetTool('pen'); $('#dwSave').disabled = false; $('#dlgDraw').showModal();
+  } catch (e) { toast(e.message); }
+}
+function initDraw() {
+  const cv = $('#dwCv'), wrap = $('#dwWrap'), cur = $('#dwCursor');
+  $('#dwSwatches').innerHTML = DW_COLORS.map(c => `<button type="button" class="sw" data-c="${c}" style="background:${c}" aria-pressed="false" aria-label="${c}"></button>`).join('');
+  $$('#dwSwatches .sw').forEach(b => (b.onclick = () => { dwSetColor(b.dataset.c); if (DW.tool === 'pick') dwSetTool('pen'); }));
+  dwSetColor(DW.color);
+  const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height, q: e.pointerType === 'pen' ? (e.pressure || 0.5) : 1, pen: e.pointerType === 'pen' }; };
+  const pick = a => { const d = cv.getContext('2d').getImageData(clamp(Math.round(a.x), 0, DW.W - 1), clamp(Math.round(a.y), 0, DW.H - 1), 1, 1).data; dwSetColor('#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')); };
+  const moveCursor = e => {
+    const r = wrap.getBoundingClientRect(), d = DW.size * r.width / DW.W * (DW.tool === 'blur' ? 1.8 : 1);
+    if (DW.tool === 'pick' || e.pointerType === 'touch') { cur.style.display = 'none'; return; }
+    cur.style.display = 'block'; cur.style.width = cur.style.height = Math.max(4, d) + 'px';
+    cur.style.transform = `translate(${e.clientX - r.left - d / 2}px,${e.clientY - r.top - d / 2}px)`;
+  };
+  cv.addEventListener('pointerdown', e => {
+    if (e.button > 0) return; e.preventDefault(); const a = pos(e);
+    if (DW.tool === 'pick' || e.altKey) { pick(a); if (DW.tool === 'pick') dwSetTool('pen'); return; }
+    cv.setPointerCapture(e.pointerId); dwPush(); DW.cur = true; DW.last = a;
+    if (DW.tool === 'blur') { dwBlurDab(a.x, a.y); dwShow(); return; }
+    DW.snap = dwClone(DW.work); DW.stroke = document.createElement('canvas'); DW.stroke.width = DW.W; DW.stroke.height = DW.H;
+    dwSeg(DW.stroke.getContext('2d'), a); dwCompose();
+  });
+  cv.addEventListener('pointermove', e => {
+    moveCursor(e); if (!DW.cur) return;
+    const co = e.getCoalescedEvents ? e.getCoalescedEvents() : [], list = co.length ? co : [e];
+    for (const ev of list) {
+      const b = pos(ev);
+      if (DW.tool === 'blur') { const dx = b.x - DW.last.x, dy = b.y - DW.last.y, n = Math.max(1, Math.floor(Math.hypot(dx, dy) / Math.max(2, DW.size / 4))); for (let i = 1; i <= n; i++) dwBlurDab(DW.last.x + dx * i / n, DW.last.y + dy * i / n); }
+      else dwSeg(DW.stroke.getContext('2d'), DW.last, b);
+      DW.last = b;
+    }
+    cancelAnimationFrame(DW.raf); DW.raf = requestAnimationFrame(() => (DW.tool === 'blur' ? dwShow() : dwCompose()));
+  });
+  const end = () => { if (!DW.cur) return; DW.cur = false; cancelAnimationFrame(DW.raf); if (DW.tool === 'blur') dwShow(); else dwCompose(); DW.stroke = DW.snap = null; };
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+  cv.addEventListener('pointerleave', () => { cur.style.display = 'none'; });
+  const setSize = v => { DW.size = clamp(v, 1, 200); $('#dwSize').value = DW.size; $('#dwSizeV').textContent = DW.size; };
+  const undo = () => { const c = DW.undo.pop(); if (c) { DW.redo.push(dwClone(DW.work)); dwRestore(c); } };
+  const redo = () => { const c = DW.redo.pop(); if (c) { DW.undo.push(dwClone(DW.work)); dwRestore(c); } };
+  $('#dwPen').onclick = () => dwSetTool('pen'); $('#dwBlur').onclick = () => dwSetTool('blur');
+  $('#dwEraser').onclick = () => dwSetTool('eraser'); $('#dwPick').onclick = () => dwSetTool('pick');
+  $('#dwColor').oninput = e => { dwSetColor(e.target.value); if (DW.tool === 'pick' || DW.tool === 'eraser') dwSetTool('pen'); };
+  $('#dwSize').oninput = e => setSize(+e.target.value);
+  $('#dwAlpha').oninput = e => { DW.alpha = clamp(+e.target.value, 5, 100) / 100; $('#dwAlphaV').textContent = Math.round(DW.alpha * 100); };
+  $('#dwPress').onchange = e => { DW.press = e.target.checked; };
+  $('#dwUndo').onclick = undo; $('#dwRedo').onclick = redo;
+  $('#dwReset').onclick = () => { if (DW.undo.length && !confirm('그린 것을 모두 지우고 처음 상태로 돌릴까요?')) return; dwPush(); dwRestore(DW.orig); };
+  $('#dlgDraw').addEventListener('keydown', e => {
+    if (e.altKey) return; const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
+    else if (mod) return;
+    else if (e.code === 'KeyB') { e.preventDefault(); dwSetTool('pen'); }
+    else if (e.code === 'KeyR') { e.preventDefault(); dwSetTool('blur'); }
+    else if (e.code === 'KeyE') { e.preventDefault(); dwSetTool('eraser'); }
+    else if (e.code === 'KeyI') { e.preventDefault(); dwSetTool('pick'); }
+    else if (e.code === 'BracketRight') { e.preventDefault(); setSize(DW.size + (e.shiftKey ? 10 : 2)); }
+    else if (e.code === 'BracketLeft') { e.preventDefault(); setSize(DW.size - (e.shiftKey ? 10 : 2)); }
+  });
+  $('#dlgDraw').addEventListener('close', () => { DW.undo = []; DW.redo = []; DW.orig = DW.work = DW.snap = DW.stroke = null; });
+  $('#dwSave').onclick = async () => {
+    const p = DW.p; if (!p || DW.busy) return;
+    if (!DW.undo.length) return toast('아직 그린 것이 없습니다');
+    DW.busy = true; $('#dwSave').disabled = true;
+    try {
+      const blob = await canvasBlob(DW.work, 'image/png');
+      p.versions.push({ assetId: await addAsset(blob), src: 'draw', at: Date.now(), prompt: '직접 그리기', edit: true });
+      p.cur = p.versions.length - 1; resetFraming(p); p._est = '✓ 직접 그리기를 새 버전으로 저장했습니다 — 이전 이미지는 버전에 남아 있습니다';
+      $('#dlgDraw').close(); save(); refreshPanel(p); toast('새 버전으로 저장했습니다');
+    } catch (e) { toast(e.message); }
+    DW.busy = false; $('#dwSave').disabled = false;
+  };
+}
+initDraw();
 
 /* ---- 이미지 합성: 현재 컷 이미지를 바탕으로, 첨부한 이미지를 지시대로 합친다 ---- */
 async function safeMix(p, instr, n) {
@@ -3079,6 +3227,9 @@ function tabFix(p) {
   ${isec('inp', '🖌 부분 수정', '칠한 곳만 바꾸기', `
     <p class="note">바꿀 영역만 칠해서 고칩니다. 칠하지 않은 곳은 원본 그대로 유지됩니다.</p>
     <div class="row"><button type="button" class="b sm" id="inpBtn" ${dis}>🖌 영역 칠해서 수정…</button></div>`)}
+  ${isec('draw', '✏ 직접 그리기', '붓·번짐·지우개로 직접 고치기', `
+    <p class="note">AI 없이 현재 화면(보정·크롭 포함) 위에 직접 그려서 고칩니다. 펜·번짐·원본 복원·스포이드를 쓸 수 있고, 저장하면 새 버전으로 추가됩니다.</p>
+    <div class="row"><button type="button" class="b sm" id="drawBtn" ${dis}>✏ 직접 그리기 열기…</button></div>`)}
   ${isec('mix', '🧩 이미지 합성', '다른 이미지 첨부 + 지시', `
     <p class="note">현재 컷 이미지를 바탕으로, 첨부한 이미지를 지시대로 합칩니다. 첨부는 최대 4장이고, 지시에서는 ‘첨부 1’, ‘첨부 2’처럼 번호로 부를 수 있습니다.</p>
     <div class="refs" id="mixRefs"></div>
@@ -3123,6 +3274,7 @@ function bindFix(p, el) {
   $('#faceReset', el).onclick = () => ['yaw', 'pitch', 'roll'].forEach(k => setFace(k, 0));
   $('#faceBtn', el).onclick = () => aiFace(p);
   $('#inpBtn', el).onclick = () => openMask(p);
+  $('#drawBtn', el).onclick = () => openDraw(p);
   $('#toonBtn', el).onclick = () => aiToon(p);
   const mr = $('#mixRefs', el);
   (p.mixRefs || []).forEach((id, i) => { const t = refThumb(id, false, () => { p.mixRefs.splice(i, 1); dropAssetIfUnused(id); save(); refreshPanel(p); }); t.insertAdjacentHTML('beforeend', '<span class="nx">첨부 ' + (i + 1) + '</span>'); mr.appendChild(t); });
