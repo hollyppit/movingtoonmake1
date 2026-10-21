@@ -941,7 +941,7 @@ function newPanel() {
 }
 function newOverlay(kind, p) {
   const n = p.overlays.length;
-  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 60, font: 'nanumgothic', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, tail: null };
+  const base = { id: uid(), kind, text: '', x: 0.5, y: 0.3, w: 0.62, size: 60, font: 'nanumgothic', color: '#111111', fill: '#ffffff', fillA: 1, stroke: '#111111', strokeW: 4, anim: 'pop', start: +Math.min(Math.max(0, panelDur(p) - 1), 0.4 + n * 0.9).toFixed(1), dur: 0, out: 'fade', shapeImg: null, imgScale: 1, flashLen: 1, flashGap: 1, tail: null };
   if (kind === 'speech') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'rect' || kind === 'rrect') Object.assign(base, { text: '대사를 입력하세요', y: 0.26 + (n % 3) * 0.1, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
   if (kind === 'whisper') Object.assign(base, { text: '소곤소곤…', anim: 'fade', y: 0.26 + (n % 3) * 0.1, strokeW: 3, tail: { x: 0.42, y: 0.38 + (n % 3) * 0.1 } });
@@ -971,7 +971,7 @@ function migrate(pr) {
     const n = Object.assign(newPanel(), p);
     n.adj = Object.assign({ ...ADJ0 }, p.adj);
     n.layers = (p.layers || []).map(l => Object.assign(newLayer(l.assetId), l, { kind: 'layer' }));
-    n.overlays = (p.overlays || []).map(o => Object.assign({ fillA: 1, strokeW: 4, dur: 0, start: 0, out: 'fade', shapeImg: null, imgScale: 1 }, o));
+    n.overlays = (p.overlays || []).map(o => Object.assign({ fillA: 1, strokeW: 4, dur: 0, start: 0, out: 'fade', shapeImg: null, imgScale: 1, flashLen: 1, flashGap: 1 }, o));
     if (n.job && n.job.status === 'submitting') n.job = { status: 'failed', msg: '전송 중 페이지가 닫혔습니다' };
     return n;
   });
@@ -2707,7 +2707,7 @@ function drawShape(ctx, o, L, tip) {
     s.closePath(); shapes.push(s);
     if (tip) shapes.push(tailPath(L, tip, 0.12 * (+o.tailW || 1)));
   } else if (o.kind === 'flash') { // 집중 플래시: 안팎이 모두 가시처럼 갈라진 두꺼운 검은 띠 (안쪽은 비어 있음)
-    const seed = hash(o.id), N = 220, band = clamp((+o.strokeW || 4) / 4, 0.6, 2);
+    const seed = hash(o.id), N = Math.round(220 / clamp(+o.flashGap || 1, 0.3, 3)), len = clamp(+o.flashLen || 1, 0.2, 4), band = clamp((+o.strokeW || 4) / 4, 0.6, 2);
     const ring = (rBase, up, dn, off) => {
       const s = new Path2D();
       for (let i = 0; i < N; i++) {
@@ -2717,7 +2717,7 @@ function drawShape(ctx, o, L, tip) {
       }
       s.closePath(); return s;
     };
-    const outer = ring(1.07 + 0.04 * band, 0.12 * band, 0.02, 0), inner = ring(0.96, 0.0, 0.07 * band, 7000);
+    const outer = ring(1.07 + 0.04 * band, 0.12 * band * len, 0.02, 0), inner = ring(0.96, 0.0, 0.07 * band * len, 7000);
     ctx.fillStyle = o.stroke || '#111'; ctx.fill(outer);
     if (tip) ctx.fill(tailPath(L, tip, 0.08 * (+o.tailW || 1)));
     ctx.fillStyle = fill; ctx.fill(inner);
@@ -3452,6 +3452,7 @@ function tabText(p) {
     </div>
     <div class="colors"><label>글자 <input type="color" data-f="color"></label><label>${o.kind === 'caption' ? '외곽' : '배경'} <input type="color" data-f="${o.kind === 'caption' ? 'stroke' : 'fill'}"></label>${o.kind === 'caption' ? '' : '<label>테두리 <input type="color" data-f="stroke"></label>'}</div>
     ${o.kind === 'caption' ? '' : sl('배경 불투명', 'fillA', 0, 1, 0.01)}${sl(o.kind === 'caption' ? '외곽 두께' : '테두리 두께', 'strokeW', 0, 12, 0.5, 'px')}
+    ${o.kind === 'flash' ? sl('가시 길이', 'flashLen', 0.2, 3, 0.05, '×') + sl('가시 간격', 'flashGap', 0.4, 3, 0.05, '×') : ''}
     ${bubbleUI(o)}
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">
       <span class="lbl">대사 음성 · ${S.ttsEngine === 'eleven' ? '일레븐랩스' : S.ttsEngine === 'gemini' ? 'Gemini' : 'OpenAI'} ${esc(S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)}${isServer() ? ' · 서버' : ''}</span>
