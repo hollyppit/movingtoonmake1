@@ -2628,7 +2628,7 @@ function layoutOv(ctx, o) {
     // 글 덩어리의 각 줄 모서리가 모두 들어가는 가장 작은 타원(가로:세로 = k:1)에 여백만 더한다
     const k = clamp(Math.sqrt(tw / th) * 0.95, 1.05, 1.7), n = lines.length; let s = o.size;
     lines.forEach((l, i) => { const y = Math.abs(i - (n - 1) / 2) * lh + lh * 0.5; s = Math.max(s, Math.hypot(widths[i] / 2 / k, y)); });
-    const f = { shout: 1.12, thought: 1.12, flash: 1.1, wavy: 1.06 }[o.kind] || 1, extra = o.kind === 'shout' || o.kind === 'flash' ? 0.7 : 0.55;
+    const f = { shout: 1.12, thought: 1.12, flash: 1.15, wavy: 1.06 }[o.kind] || 1, extra = o.kind === 'shout' || o.kind === 'flash' ? 0.7 : 0.55;
     s = (s + o.size * extra) * f; rx = k * s; ry = s;
     if (o.shapeImg && assets.has(o.shapeImg)) { const k2 = +o.imgScale || 1; rx *= 1.2 * k2; ry *= 1.25 * k2; } // 이미지 말풍선은 안쪽 여백이 있어 더 크게
   }
@@ -2706,14 +2706,22 @@ function drawShape(ctx, o, L, tip) {
     const n = 140, s = new Path2D(); for (let i = 0; i <= n; i++) { const ang = i / n * Math.PI * 2, r = 1 + 0.045 * Math.sin(ang * 14); const x = Math.cos(ang) * L.rx * r, y = Math.sin(ang) * L.ry * r; i ? s.lineTo(x, y) : s.moveTo(x, y); }
     s.closePath(); shapes.push(s);
     if (tip) shapes.push(tailPath(L, tip, 0.12 * (+o.tailW || 1)));
-  } else if (o.kind === 'flash') { // 촘촘한 털 같은 가시 (집중 플래시)
-    const n = 96, seed = hash(o.id), s = new Path2D();
-    for (let i = 0; i < n * 2; i++) {
-      const ang = i / (n * 2) * Math.PI * 2, r = i % 2 ? 1.0 : 1.08 + rnd(seed + i) * 0.2;
-      const x = Math.cos(ang) * L.rx * r, y = Math.sin(ang) * L.ry * r; i ? s.lineTo(x, y) : s.moveTo(x, y);
-    }
-    s.closePath(); shapes.push(s);
-    if (tip) shapes.push(tailPath(L, tip, 0.08 * (+o.tailW || 1)));
+  } else if (o.kind === 'flash') { // 집중 플래시: 안팎이 모두 가시처럼 갈라진 두꺼운 검은 띠 (안쪽은 비어 있음)
+    const seed = hash(o.id), N = 220, band = clamp((+o.strokeW || 4) / 4, 0.6, 2);
+    const ring = (rBase, up, dn, off) => {
+      const s = new Path2D();
+      for (let i = 0; i < N; i++) {
+        const ang = (i + (rnd(seed + off + i * 3) - 0.5) * 0.8) / N * Math.PI * 2;
+        const r = rBase + (i % 2 ? up * (0.15 + 0.85 * rnd(seed + off + i)) : -dn * rnd(seed + off + i + 500));
+        const x = Math.cos(ang) * L.rx * r, y = Math.sin(ang) * L.ry * r; i ? s.lineTo(x, y) : s.moveTo(x, y);
+      }
+      s.closePath(); return s;
+    };
+    const outer = ring(1.16 + 0.1 * band, 0.2 * band, 0.03, 0), inner = ring(0.94, 0.0, 0.1 * band, 7000);
+    ctx.fillStyle = o.stroke || '#111'; ctx.fill(outer);
+    if (tip) ctx.fill(tailPath(L, tip, 0.08 * (+o.tailW || 1)));
+    ctx.fillStyle = fill; ctx.fill(inner);
+    return;
   } else if (o.kind === 'shout') {
     const n = 22, seed = hash(o.id), s = new Path2D();
     for (let i = 0; i < n; i++) {
