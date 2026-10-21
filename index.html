@@ -136,6 +136,7 @@ pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; backgroun
 .stage-wrap.drop #stage { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
 .transport { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 640px; }
 .transport input[type=range] { flex: 1; min-width: 120px; }
+.transport .allseek { display: flex; align-items: center; gap: 8px; flex-basis: 100%; font-size: .8rem; color: var(--muted, #8a8575); }
 .tc { font-variant-numeric: tabular-nums; font-size: .78rem; color: var(--ink-2); min-width: 120px; text-align: center; }
 
 /* 오른쪽 탭 */
@@ -412,6 +413,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <button type="button" class="b ghost sm" id="playAll">▶ 전체</button>
       <input type="range" id="scrub" min="0" max="1000" value="1000" aria-label="컷 내 시간">
       <span id="tc" class="tc">0.0 / 4.0s</span>
+      <label class="allseek" title="전체 영상에서 보고 싶은 구간으로 이동 (재생 중에도 끌면 그 지점부터 이어서 재생)">전체 <input type="range" id="scrubAll" min="0" max="1000" value="0" aria-label="전체 시간"> <span id="tcAll" class="tc">0.0s</span></label>
       <button type="button" class="b ghost sm" id="imgEdit" aria-pressed="false" title="컷 안에서 이미지를 끌어 옮기고 크기를 바꿉니다 (Esc로 끝내기)">🖼 이동·크기</button>
       <button type="button" class="b ghost sm" id="makeInkOpen">✏ 효과음 펜</button>
       <label class="chk"><input type="checkbox" id="guides"> 쇼츠 안전영역</label>
@@ -2836,6 +2838,7 @@ function drawEditing() {
   if ($('#guides').checked) drawGuides(cx);
   $('#tc').textContent = `컷 ${P.panels.indexOf(p) + 1} · ${lt.toFixed(1)} / ${panelDur(p).toFixed(1)}s`;
   $('#scrub').value = Math.round(lt / panelDur(p) * 1000);
+  { const sg = timeline().find(x => x.p === p); if (sg) showAllPos(sg.start + lt); }
   updateTimelineHead(p, lt);
 }
 
@@ -2846,9 +2849,21 @@ const player = { playing: false, onEnd: null };
 function pauseAllVideos() { assets.forEach(a => a.video && !a.video.paused && a.video.pause()); }
 /* 재생 시작 시각을 오디오 시계(t0)에 맞춰 영상·말풍선·음성이 어긋나지 않게 한다 */
 function startClock(t0) { const c = actx(); player.base = performance.now() + (t0 - c.currentTime) * 1000; }
+/* 전체 시간 슬라이더: 현재 위치 표시·이동. 멈춰 있으면 그 컷을 고르고 ▶ 전체가 그 지점부터 시작한다 */
+let allFrom = null; // 사용자가 전체 슬라이더로 고른 시작 지점(초)
+function showAllPos(t) {
+  const tot = totalDur(), sl = $('#scrubAll'); if (!sl) return;
+  if (!sl.matches(':active')) sl.value = tot > 0 ? Math.round(clamp(t, 0, tot) / tot * 1000) : 0;
+  $('#tcAll').textContent = clamp(t, 0, tot).toFixed(1) + ' / ' + tot.toFixed(1) + 's';
+}
+function allStart() { // ▶ 전체의 시작 지점: 고른 지점(고른 컷 안일 때) 또는 고른 컷의 처음
+  const segs = timeline(), s = segs.find(x => x.p.id === sel) || segs[0];
+  return allFrom != null && allFrom >= s.start && allFrom < s.start + s.dur ? allFrom : s.start;
+}
 async function play(mode, opt = {}) {
   stop();
   const segs = timeline(); let from = 0, to = segs.reduce((a, s) => a + s.dur, 0), loop = false;
+  if (mode === 'all' && Number.isFinite(opt.from)) from = clamp(opt.from, 0, Math.max(0, to - 0.05)); // 전체 재생을 원하는 지점부터
   if (mode === 'panel') { const s = segs.find(s => s.p.id === sel); from = s.start; to = s.start + s.dur; loop = true; }
   const bgm = mode === 'all';
   player.token = (player.token || 0) + 1; const tk = player.token;
@@ -2873,7 +2888,7 @@ function tick(now) {
     if (player.loop) { pauseAllVideos(); startClock(scheduleAudio(player.from, player.to, { bgm: player.bgm })); t = player.from; }
     else { renderAt(player.to - 0.001); const cb = player.onEnd; player.onEnd = null; if (cb) cb(); stop(); return; }
   }
-  player.t = t; syncVideos(t); renderAt(t);
+  player.t = t; syncVideos(t); renderAt(t); if (player.mode === 'all') showAllPos(t);
   const timelineSegment = player.segs.find(segment => segment.p.id === sel);
   if (timelineSegment) updateTimelineHead(timelineSegment.p, t - timelineSegment.start);
   const s = player.segs;
@@ -5980,7 +5995,16 @@ $('#addPanel').onclick = () => {
 };
 $('#cutsUp').onchange = async e => { const fs = e.target.files; if (fs.length) await addImagesAsCuts(fs); e.target.value = ''; };
 $('#playPanel').onclick = () => (player.playing && player.mode === 'panel' ? stop() : play('panel'));
-$('#playAll').onclick = () => (player.playing && player.mode === 'all' ? stop() : play('all'));
+$('#playAll').onclick = () => (player.playing && player.mode === 'all' ? stop() : play('all', { from: allStart() }));
+$('#scrubAll').oninput = e => {
+  const tot = totalDur(), T = +e.target.value / 1000 * tot, segs = timeline(), sg = segs.find(x => T >= x.start && T < x.start + x.dur) || segs[segs.length - 1];
+  $('#tcAll').textContent = T.toFixed(1) + ' / ' + tot.toFixed(1) + 's';
+  if (player.playing && player.mode === 'all') return; // 재생 중에는 손을 뗄 때 그 지점부터 이어서 재생
+  allFrom = Math.min(T, sg.start + sg.dur - 0.001);
+  if (sg.p.id !== sel) selectPanel(sg.p.id);
+  scrubT = clamp(allFrom - sg.start, 0, panelDur(sg.p) - 0.001); requestDraw();
+};
+$('#scrubAll').onchange = e => { if (player.playing && player.mode === 'all') play('all', { from: +e.target.value / 1000 * totalDur() }); };
 $('#scrub').oninput = e => { stop(); scrubT = (+e.target.value / 1000) * panelDur(selPanel()); requestDraw(); };
 $('#guides').onchange = requestDraw;
 $('#makeInkOpen').onclick = () => openInkEditor('make');
