@@ -6052,13 +6052,22 @@ const aiChat = [];
 const editSummary = () => ({
   aspect: P.aspect, total_sec: +totalDur().toFixed(2), selected_panel: P.panels.findIndex(p => p.id === sel) + 1,
   panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), read_need: +readNeed(p).toFixed(1), prompt: String(p.prompt || '').slice(0, 80),
-    overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size })) })),
+    overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size, color: o.color, fill: o.fill, fillA: o.fillA, stroke: o.stroke })) })),
   audio: P.audio.map((t, i) => ({ track: i + 1, name: t.name, start: +t.start || 0, vol: t.vol, fadeIn: t.fadeIn, fadeOut: t.fadeOut, loop: !!t.loop })),
 });
 /* 글 읽는 시간: 공백 뺀 글자당 0.15초(최소 1.2초). 컷이 글을 다 보여 주려면 가장 늦게 끝나는 글의 등장 시각 + 읽는 시간이 필요하다 */
 const readSec = o => Math.max(1.2, [...String(o.text || '').replace(/\s/g, '')].length * 0.15);
 const readNeed = p => p.overlays.reduce((m, o) => (o.kind === 'flash' || !String(o.text || '').trim() ? m : Math.max(m, (+o.start || 0) + readSec(o))), 0);
 const aiNum = v =>(Number.isFinite(+v) && v !== null && v !== '' && typeof v !== 'boolean' ? +v : null);
+const HEX6 = /^#[0-9a-f]{6}$/i;
+/* 색(#RRGGBB)·불투명도·테두리 두께·글자 크기를 허용 범위로 보정해 오버레이에 넣는다. 잘못된 값은 무시 */
+function applyOvStyle(o, op) {
+  ['color', 'fill', 'stroke'].forEach(k => { if (typeof op[k] === 'string' && HEX6.test(op[k].trim())) o[k] = op[k].trim().toLowerCase(); });
+  const a = aiNum(op.fillA), w = aiNum(op.strokeW), z = aiNum(op.size);
+  if (a !== null) o.fillA = +clamp(a, 0, 1).toFixed(2);
+  if (w !== null) o.strokeW = +clamp(w, 0, 12).toFixed(1);
+  if (z !== null) o.size = Math.round(clamp(z, 20, 140));
+}
 function applyEditOps(ops) {
   const done = [], skipped = [];
   // 번호는 요청 시점(요약)의 컷·오버레이·트랙을 가리키므로, 적용 중 순서가 바뀌어도 흔들리지 않게 미리 붙잡아 둔다
@@ -6089,13 +6098,18 @@ function applyEditOps(ops) {
       const o = p && ovs.get(p)[Math.trunc(+op.overlay) - 1];
       if (!o) return skipped.push(label + ' 오버레이' + op.overlay);
       if (op.tool === 'delete_overlay') { p.overlays.splice(p.overlays.indexOf(o), 1); if (selOv === o.id) selOv = null; return done.push(label); }
-      const s = aiNum(op.start), d = aiNum(op.dur), z = aiNum(op.size);
+      const s = aiNum(op.start), d = aiNum(op.dur);
+      applyOvStyle(o, op);
       if (typeof op.text === 'string') o.text = op.text.slice(0, 400);
       if (s !== null) o.start = +clamp(s, 0, Math.max(0, panelDur(p) - 0.3)).toFixed(2);
       if (d !== null) o.dur = d <= 0 ? 0 : +clamp(d, 0.3, DUR_MAX).toFixed(2);
       if (pick(op.anim, Object.keys(ANIMS))) o.anim = op.anim;
-      if (z !== null) o.size = Math.round(clamp(z, 20, 140));
       done.push(label);
+    } else if (op.tool === 'style_overlays') {
+      const list = Array.isArray(op.panels) && op.panels.length ? op.panels.map(panelAt).filter(Boolean) : pans;
+      let n = 0;
+      list.forEach(q => ovs.get(q).forEach(o => { if (op.kind && o.kind !== op.kind) return; applyOvStyle(o, op); n++; }));
+      if (n) done.push('스타일 ' + n + '개'); else skipped.push('style_overlays(대상 없음)');
     } else if (op.tool === 'add_overlay') {
       if (!p || !pick(op.kind, Object.keys(KINDS))) return skipped.push(label);
       const o = newOverlay(op.kind, p), s = aiNum(op.start), d = aiNum(op.dur);
@@ -6103,6 +6117,7 @@ function applyEditOps(ops) {
       if (s !== null) o.start = +clamp(s, 0, Math.max(0, panelDur(p) - 0.3)).toFixed(2);
       if (d !== null && d > 0) o.dur = +clamp(d, 0.3, DUR_MAX).toFixed(2);
       if (pick(op.anim, Object.keys(ANIMS))) o.anim = op.anim;
+      applyOvStyle(o, op);
       p.overlays.push(o); done.push(label);
     } else if (op.tool === 'move_panel') {
       const from = p ? P.panels.indexOf(p) : -1, to = clamp(Math.trunc(+op.to) - 1, 0, P.panels.length - 1);
