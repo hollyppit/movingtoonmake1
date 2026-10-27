@@ -113,6 +113,13 @@ pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; backgroun
 .sl output { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: .75rem; }
 .colors { display: flex; gap: 14px; flex-wrap: wrap; font-size: .8rem; color: var(--ink-2); }
 .colors label { display: flex; align-items: center; gap: 6px; }
+.sws { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.sw-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; font-size: .75rem; color: var(--ink-3); }
+.sw-row > span { width: 36px; flex: none; }
+.sw { width: 17px; height: 17px; padding: 0; border-radius: 50%; border: 1px solid var(--line-2); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35); }
+.sw:hover { transform: scale(1.12); }
+.sw:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.sw.on { outline: 2px solid var(--gold-d); outline-offset: 1px; }
 
 /* 칩·썸네일 */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -3122,6 +3129,20 @@ function duplicatePanel(p) {
    UI: 오른쪽 탭
    ========================================================= */
 const sl = (name, f, min, max, step, u = '') => `<label class="sl"><span>${name}</span><input type="range" data-f="${f}" min="${min}" max="${max}" step="${step}"><output data-o="${f}" data-u="${u}"></output></label>`;
+/* 색 선택기 아래에 두는 고정 색 견본. 눌러도 색 선택기(<input type=color>)를 거쳐 같은 경로로 저장된다 */
+const SWATCHES = [['#111111', '검정'], ['#ffffff', '흰색'], ['#fff4c2', '연노랑'], ['#ffd23f', '노랑'], ['#f4a261', '주황'], ['#d62828', '빨강'], ['#f8d7da', '연분홍'],
+  ['#cfe8ff', '하늘'], ['#1d4ed8', '파랑'], ['#0f1b3d', '남색'], ['#ebd9aa', '크림'], ['#cdb27a', '금색']];
+function colorSwatches(o) {
+  const rows = o.kind === 'caption' ? [['color', '글자'], ['stroke', '외곽']] : [['color', '글자'], ['fill', '배경'], ['stroke', '테두리']];
+  return '<div class="sws">' + rows.map(([f, lbl]) => '<div class="sw-row"><span>' + lbl + '</span>' + SWATCHES.map(([c, n]) =>
+    '<button type="button" class="sw' + (String(o[f] || '').toLowerCase() === c ? ' on' : '') + '" data-sw="' + f + '" data-c="' + c + '" style="background:' + c + '" title="' + lbl + ' ' + n + '" aria-label="' + lbl + ' ' + n + '"></button>').join('') + '</div>').join('') + '</div>';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('button.sw[data-sw]'); if (!b) return;
+  const input = b.closest('.sws')?.parentElement?.querySelector('input[type="color"][data-f="' + b.dataset.sw + '"]'); if (!input) return;
+  input.value = b.dataset.c; input.dispatchEvent(new Event('change', { bubbles: true }));
+  b.parentElement.querySelectorAll('.sw').forEach(x => x.classList.toggle('on', x === b));
+});
 const opts = (map, cur) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${v}</option>`).join('');
 const stCls = s => (/^실패/.test(s || '') ? 'err' : /^✓/.test(s || '') ? 'ok' : '');
 
@@ -3499,6 +3520,7 @@ function tabText(p) {
       ${tailable ? `<label class="chk" style="align-self:end"><input type="checkbox" id="tailChk" ${o.tail ? 'checked' : ''}> 꼬리 표시</label>` : '<span></span>'}
     </div>
     <div class="colors"><label>글자 <input type="color" data-f="color"></label><label>${o.kind === 'caption' ? '외곽' : '배경'} <input type="color" data-f="${o.kind === 'caption' ? 'stroke' : 'fill'}"></label>${o.kind === 'caption' ? '' : '<label>테두리 <input type="color" data-f="stroke"></label>'}</div>
+    ${colorSwatches(o)}
     ${o.kind === 'caption' ? '' : sl('배경 불투명', 'fillA', 0, 1, 0.01)}${sl(o.kind === 'caption' ? '외곽 두께' : '테두리 두께', 'strokeW', 0, 12, 0.5, 'px')}
     ${o.kind === 'flash' ? sl('가시 길이', 'flashLen', 0.2, 3, 0.05, '×') + sl('가시 간격', 'flashGap', 0.4, 3, 0.05, '×') : ''}
     ${bubbleUI(o)}
