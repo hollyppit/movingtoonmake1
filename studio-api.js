@@ -563,6 +563,120 @@ export async function handleLayout(req, env) {
   } catch (e) { return json({ error: e.message }, e.status || 502); }
 }
 
+/* ---------- AI 편집 어시스턴트: 타임라인 요약 + 사용자 지시 → Claude 가 편집 도구(tool use)로 수정안을 낸다 ----------
+   서버는 수정안(ops)만 돌려주고, 실제 적용·범위 보정·되돌리기는 브라우저가 한다. */
+const EDIT_MODEL = 'claude-sonnet-5-5';
+const EDIT_TRANS = ['fade', 'cut', 'slide', 'flash'];
+const EDIT_MOTION = ['none', 'zoom-in', 'zoom-out', 'pan-left', 'pan-right', 'pan-up', 'pan-down', 'shake'];
+const EDIT_ANIM = ['pop', 'fade', 'slideUp', 'typewriter', 'shake', 'wipe', 'none'];
+const EDIT_TOOLS = [
+  { name: 'set_panel', description: '컷의 길이·전환·카메라 모션을 바꾼다. 바꿀 항목만 넣는다.', input_schema: { type: 'object', required: ['panel'], properties: {
+    panel: { type: 'integer', description: '컷 번호(1부터)' }, dur: { type: 'number', description: '컷 길이(초) 0.3~15' },
+    trans: { type: 'string', enum: EDIT_TRANS, description: '이 컷으로 들어오는 전환' }, motion: { type: 'string', enum: EDIT_MOTION }, motionAmt: { type: 'number', description: '모션 세기 0~0.3' } } } },
+  { name: 'set_overlay', description: '말풍선·나레이션·자막의 글·등장 시점·길이·애니메이션·크기를 바꾼다. 바꿀 항목만 넣는다.', input_schema: { type: 'object', required: ['panel', 'overlay'], properties: {
+    panel: { type: 'integer', description: '컷 번호(1부터)' }, overlay: { type: 'integer', description: '그 컷 안 오버레이 번호(1부터)' },
+    text: { type: 'string' }, start: { type: 'number', description: '컷 시작 기준 등장 시각(초)' }, dur: { type: 'number', description: '표시 길이(초). 0이면 컷 끝까지' },
+    anim: { type: 'string', enum: EDIT_ANIM }, size: { type: 'number', description: '글자 크기 20~140' } } } },
+  { name: 'add_overlay', description: '컷에 말풍선·나레이션·자막을 새로 추가한다.', input_schema: { type: 'object', required: ['panel', 'kind', 'text'], properties: {
+    panel: { type: 'integer' }, kind: { type: 'string', enum: ['speech', 'thought', 'shout', 'whisper', 'narration', 'caption'] }, text: { type: 'string' },
+    start: { type: 'number' }, dur: { type: 'number' }, anim: { type: 'string', enum: EDIT_ANIM } } } },
+  { name: 'delete_overlay', description: '오버레이를 지운다. 사용자가 지우라고 분명히 말했을 때만 쓴다.', input_schema: { type: 'object', required: ['panel', 'overlay'], properties: { panel: { type: 'integer' }, overlay: { type: 'integer' } } } },
+  { name: 'move_panel', description: '컷의 순서를 옮긴다.', input_schema: { type: 'object', required: ['panel', 'to'], properties: { panel: { type: 'integer', description: '옮길 컷 번호(1부터)' }, to: { type: 'integer', description: '옮겨 갈 자리(1부터)' } } } },
+  { name: 'set_audio', description: '오디오 트랙(배경음악 등)의 시작·볼륨·페이드를 바꾼다.', input_schema: { type: 'object', required: ['track'], properties: {
+    track: { type: 'integer', description: '오디오 트랙 번호(1부터)' }, start: { type: 'number' }, vol: { type: 'number', description: '0~1' }, fadeIn: { type: 'number' }, fadeOut: { type: 'number' } } } },
+];
+export async function handleEdit(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
+  try {
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const b = await readObject(req);
+    const instruction = String(b.instruction || '').trim().slice(0, 1000);
+    if (!instruction) return json({ error: '지시 내용이 필요합니다' }, 400);
+    const sm = b.summary;
+    if (!sm || !Array.isArray(sm.panels) || !sm.panels.length || sm.panels.length > 120) return json({ error: '타임라인 요약(컷 1~120개)이 필요합니다' }, 400);
+    const history = (Array.isArray(b.history) ? b.history : []).slice(-8).filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.text === 'string' && h.text).map(h => ({ role: h.role, content: h.text.slice(0, 600) }));
+    const system = '당신은 세로형 숏폼 "무빙툰"(컷 이미지 + 말풍선·자막 + 음악) 타임라인을 다루는 영상 편집자입니다. 사용자가 현재 타임라인 요약(JSON)과 수정 지시를 보냅니다. ' +
+      '규칙: (1) 반드시 도구로만 수정하고, 컷·오버레이·트랙은 요약에 적힌 번호(1부터)로 가리킵니다. (2) 지시받은 것만 최소한으로 고치고, 요청하지 않은 글·그림·순서는 건드리지 않습니다. ' +
+      '(3) 시간 단위는 초이며, 오버레이 등장 시각은 컷 길이 안에 있어야 합니다. 말풍선 글은 읽을 시간(한글 한 글자당 약 0.15초, 최소 1.2초)을 줍니다. ' +
+      '(4) 지시가 모호하면 도구를 쓰지 말고 짧게 되물어봅니다. (5) 마지막에 무엇을 어떻게 바꿨는지 한국어로 1~3문장으로 알립니다. 도구 결과는 사용자가 미리보기로 확인하고 되돌릴 수 있습니다.';
+    const user = '현재 타임라인:\n' + JSON.stringify(sm).slice(0, 60000) + '\n\n지시: ' + instruction;
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 3000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const blocks = j.content || [];
+    const ops = blocks.filter(c => c.type === 'tool_use' && c.input && typeof c.input === 'object').slice(0, 60).map(c => ({ tool: c.name, ...c.input }));
+    const message = blocks.filter(c => c.type === 'text').map(c => c.text).join('').trim().slice(0, 800);
+    return json({ ops, message, model: EDIT_MODEL });
+  } catch (e) { return json({ error: e.message }, e.status || 502); }
+}
+
+/* ---------- 대본 자동 자막: 오디오를 Whisper 로 전사(단어별 시각) → 대본이 있으면 Claude 가 대본 문장에 시각을 맞춘다 ----------
+   글은 들은 내용보다 대본을 기준으로 하고, 시각만 전사에서 가져온다. 대본이 없으면 전사 구간을 그대로 쓴다.
+   요청: multipart { file(오디오), script(선택), lang(기본 ko) } → { captions:[{text,start,end}], duration, source:'script'|'whisper' } (시각은 오디오 파일 기준 초) */
+const CAPTION_MODEL = 'claude-sonnet-5-5';
+const CAPTION_MAX_BYTES = 25 * 1024 * 1024; // Whisper 업로드 한도
+/* 자막 목록 정리: 숫자·순서·겹침을 바로잡고 쓸 수 없는 항목은 버린다 */
+export function cleanCaptions(list, duration) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach(c => {
+    const text = String(c && c.text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    let s = +(c && c.start), e = +(c && c.end);
+    if (!text || !Number.isFinite(s) || !Number.isFinite(e)) return;
+    s = Math.max(0, s); if (duration > 0) e = Math.min(duration, e);
+    if (e - s < 0.2) return;
+    out.push({ text, start: +s.toFixed(2), end: +e.toFixed(2) });
+  });
+  out.sort((a, b) => a.start - b.start);
+  for (let i = 1; i < out.length; i++) if (out[i].start < out[i - 1].end) out[i - 1].end = +Math.max(out[i - 1].start + 0.2, out[i].start).toFixed(2);
+  return out.filter(c => c.end - c.start >= 0.2).slice(0, 400);
+}
+export async function handleCaptions(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
+  const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
+  try {
+    const oaKey = env[ENV.openai]; if (!oaKey) return json({ error: 'OPENAI_API_KEY 없음', kind: 'auth' }, 502);
+    let form; try { form = await req.formData(); } catch { return json({ error: 'multipart 형식이 필요합니다' }, 400); }
+    const file = form.get('file');
+    if (!file || typeof file === 'string' || !file.size) return json({ error: '오디오 파일이 필요합니다' }, 400);
+    if (file.size > CAPTION_MAX_BYTES) return json({ error: '오디오가 25MB를 넘습니다. 더 짧게 나누거나 줄여서 올려 주세요.' }, 413);
+    const script = String(form.get('script') || '').trim().slice(0, 12000);
+    const lang = /^[a-z]{2}$/.test(String(form.get('lang') || '')) ? String(form.get('lang')) : 'ko';
+    const fd = new FormData();
+    fd.append('file', file, file.name || 'audio.mp3'); fd.append('model', 'whisper-1'); fd.append('language', lang); fd.append('response_format', 'verbose_json');
+    fd.append('timestamp_granularities[]', 'word'); fd.append('timestamp_granularities[]', 'segment');
+    const w = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + oaKey }, body: fd });
+    const wj = await w.json().catch(() => ({}));
+    if (!w.ok) return json({ error: wj.error?.message || 'HTTP ' + w.status, kind: w.status === 429 ? 'rate' : w.status === 401 ? 'auth' : 'bad' }, 502);
+    const duration = +wj.duration || 0;
+    const words = (wj.words || []).map(x => ({ w: String(x.word || '').trim(), s: +(+x.start).toFixed(2), e: +(+x.end).toFixed(2) })).filter(x => x.w && Number.isFinite(x.s) && Number.isFinite(x.e));
+    const segs = (wj.segments || []).map(x => ({ text: String(x.text || '').trim(), start: +x.start, end: +x.end }));
+    if (!words.length && !segs.length) return json({ error: '오디오에서 말소리를 찾지 못했습니다' }, 422);
+    if (!script) return json({ captions: cleanCaptions(segs, duration), duration, source: 'whisper' });
+    const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+    const system = '당신은 숏폼 영상 자막 편집자입니다. 대본과, 음성을 전사한 단어별 시각(w=단어, s=시작초, e=끝초)을 받습니다. ' +
+      '규칙: (1) 자막 글은 반드시 대본의 글(맞춤법 포함)을 쓰고, 전사 글은 시각을 찾는 데만 씁니다. (2) 대본을 한 자막당 한국어 기준 약 8~18자(길어도 25자)의 의미 단위로 나눕니다. 대본의 줄바꿈은 가급적 경계로 존중합니다. ' +
+      '(3) 각 자막의 start/end는 해당 대목을 말한 첫·끝 단어의 시각에 맞춥니다. 자막은 시간순이고 겹치지 않으며 대본 순서를 바꾸지 않습니다. ' +
+      '(4) 대본에 있지만 말하지 않은 대목은 건너뛰고, 말했는데 대본에 없는 대목은 자막으로 만들지 않습니다. (5) JSON만 답합니다(마크다운 금지): {"captions":[{"text":string,"start":number,"end":number}]}';
+    const user = JSON.stringify({ duration, script, words: words.length ? words : undefined, segments: words.length ? undefined : segs }).slice(0, 90000);
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: CAPTION_MODEL, max_tokens: 8000, system, messages: [{ role: 'user', content: user }] }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+    const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 자막을 읽지 못했습니다' }, 502);
+    let out; try { out = JSON.parse(m[0]); } catch { return json({ error: 'AI 응답 형식 오류' }, 502); }
+    const captions = cleanCaptions(out && out.captions, duration);
+    if (!captions.length) return json({ error: '대본과 음성을 맞추지 못했습니다. 대본이 오디오와 같은 내용인지 확인해 주세요.' }, 502);
+    return json({ captions, duration, source: 'script', model: CAPTION_MODEL });
+  } catch (e) { return json({ error: e.message }, e.status || 502); }
+}
+
 /* ---------- 출판만화 배치: 한 컷 칸 안의 말풍선·글 자리를 그림을 보고 정한다 ---------- */
 export async function handleOvLayout(req, env) {
   if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
@@ -667,6 +781,8 @@ export default {
     if (p === '/api/admin') return handleAdmin(req, env);
     if (p === '/api/polish') return handlePolish(req, env);
     if (p === '/api/layout') return handleLayout(req, env);
+    if (p === '/api/edit') return handleEdit(req, env);
+    if (p === '/api/captions') return handleCaptions(req, env);
     if (p === '/api/ovlayout') return handleOvLayout(req, env);
     if (p === '/api/prompt') return handlePrompt(req, env);
     if (p === '/api/config') return handleConfig(req, env);

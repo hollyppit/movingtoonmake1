@@ -70,6 +70,22 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .timeline-dock .otl .bar-t { height: 32px; font-size: .82rem; }
 .timeline-dock .otl .grip { width: 14px; }
 .timeline-empty { padding: 8px; color: var(--ink-3); font-size: .82rem; }
+#aiEdit { position: fixed; right: 16px; bottom: 16px; z-index: 40; width: min(380px, calc(100vw - 32px)); max-height: min(520px, 70vh); display: flex; flex-direction: column; background: var(--bg-2); border: 1px solid var(--line); border-top: 2px solid var(--gold); border-radius: 6px; box-shadow: 0 8px 28px rgba(40, 34, 20, .22); }
+#aiEdit[hidden] { display: none; }
+#aiEdit .ai-h { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
+#aiEdit .ai-h h3 { margin: 0; font-size: .9rem; }
+#aiEdit .ai-log { flex: 1; min-height: 120px; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: .84rem; }
+#aiEdit .ai-m { padding: 6px 10px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+#aiEdit .ai-m.me { align-self: flex-end; background: var(--panel-2); }
+#aiEdit .ai-m.bot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line-2); }
+#aiEdit .ai-m.err { color: var(--err); }
+#aiEdit .ai-cap { border-top: 1px solid var(--line-2); padding: 6px 12px; font-size: .84rem; }
+#aiEdit .ai-cap summary { cursor: pointer; color: var(--gold-l); font-weight: 600; }
+#aiEdit .ai-cap-b { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+#aiEdit .ai-cap-b label { display: flex; align-items: center; gap: 6px; }
+#aiEdit .ai-cap-b select, #aiEdit .ai-cap-b textarea { width: 100%; }
+#aiEdit .ai-f { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line-2); }
+#aiEdit .ai-f textarea { flex: 1; min-height: 38px; max-height: 96px; resize: vertical; }
 @media (max-width: 980px) { .timeline-dock { order: 1; height: 200px; flex: none; padding: 10px 12px; } }
 
 /* 입력 */
@@ -352,6 +368,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     <span id="cloudSt" class="note" style="margin:0;white-space:nowrap"></span>
     <button type="button" id="costBadge" class="badge" title="성공한 호출 기준 추정 누적 비용 · 클릭하면 생성 기록">$0.00</button>
     <button type="button" class="b ghost sm" id="setBtn">설정</button>
+    <button type="button" class="b ghost sm" id="aiEditBtn" title="AI에게 말로 타임라인 편집을 시키고 피드백으로 다듬습니다">AI 편집</button>
     <button type="button" class="b ghost sm" id="helpBtn">도움말</button>
     <div class="menu">
       <button type="button" class="b ghost sm" id="fileBtn" aria-haspopup="true" aria-expanded="false">파일 ▾</button>
@@ -534,6 +551,19 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <datalist id="klModels"><option value="kling-v2-1"><option value="kling-v2-1-master"><option value="kling-v2-5-turbo"><option value="kling-v1-6"></datalist>
 
 <!-- 도움말 -->
+<section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
+  <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
+  <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
+  <details class="ai-cap" id="aiCap"><summary>대본으로 자막 자동 생성</summary>
+    <div class="ai-cap-b">
+      <label><span>음성 트랙</span><select id="capTrack"></select></label>
+      <textarea id="capScript" rows="4" placeholder="대본을 붙여 넣으세요. 비워 두면 들은 그대로 자막을 만듭니다." aria-label="대본"></textarea>
+      <label class="ai-chk"><input type="checkbox" id="capReplace" checked> 이전에 자동으로 만든 자막은 지우고 교체</label>
+      <button type="button" class="b sm" id="capGo">자막 만들기</button>
+    </div>
+  </details>
+  <form class="ai-f" id="aiForm"><textarea id="aiIn" rows="2" placeholder="예: 2번 컷 말풍선을 더 늦게 띄우고 전체 컷을 조금 짧게 해줘" aria-label="편집 지시"></textarea><button type="submit" class="b sm" id="aiSend">보내기</button></form>
+</section>
 <dialog id="dlgHelp">
   <div class="dlg-h"><h3>작업 순서와 연결 방법</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
   <div class="dlg-b">
@@ -6011,6 +6041,149 @@ $('#makeInkOpen').onclick = () => openInkEditor('make');
 $('#exportBtn').onclick = exportVideo;
 $('#costBadge').onclick = () => { renderLog(); $('#dlgLog').showModal(); };
 $('#logClear').onclick = () => { if (confirm('생성 기록을 지울까요? (비용 합계도 초기화됩니다)')) { P.log = []; save(); updateCost(); renderLog(); } };
+/* =========================================================
+   AI 편집 어시스턴트: 타임라인 요약 → /api/edit(Claude 도구 호출) → 수정안(ops)을 검증·보정해 적용.
+   적용 직전 상태를 되돌리기 기록에 남기므로 Ctrl+Z 한 번으로 이전 버전으로 돌아간다.
+   ========================================================= */
+const aiChat = [];
+const editSummary = () => ({
+  aspect: P.aspect, total_sec: +totalDur().toFixed(2), selected_panel: P.panels.findIndex(p => p.id === sel) + 1,
+  panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), prompt: String(p.prompt || '').slice(0, 80),
+    overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size })) })),
+  audio: P.audio.map((t, i) => ({ track: i + 1, name: t.name, start: +t.start || 0, vol: t.vol, fadeIn: t.fadeIn, fadeOut: t.fadeOut, loop: !!t.loop })),
+});
+const aiNum = v => (Number.isFinite(+v) && v !== null && v !== '' && typeof v !== 'boolean' ? +v : null);
+function applyEditOps(ops) {
+  const done = [], skipped = [];
+  // 번호는 요청 시점(요약)의 컷·오버레이·트랙을 가리키므로, 적용 중 순서가 바뀌어도 흔들리지 않게 미리 붙잡아 둔다
+  const pans = P.panels.slice(), ovs = new Map(pans.map(p => [p, p.overlays.slice()])), tracks = P.audio.slice();
+  const panelAt = n => pans[Math.trunc(+n) - 1];
+  const pick = (v, list) => (list.includes(v) ? v : undefined);
+  ops.forEach(op => {
+    const p = panelAt(op.panel), label = op.tool + (op.panel ? ' 컷' + op.panel : op.track ? ' 트랙' + op.track : '');
+    if (op.tool === 'set_panel') {
+      if (!p) return skipped.push(label);
+      const d = aiNum(op.dur), m = aiNum(op.motionAmt);
+      if (d !== null) p.dur = +clamp(d, DUR_MIN, DUR_MAX).toFixed(2);
+      if (pick(op.trans, ['fade', 'cut', 'slide', 'flash'])) p.trans = op.trans;
+      if (pick(op.motion, Object.keys(MOTIONS))) p.motion = op.motion;
+      if (m !== null) p.motionAmt = +clamp(m, 0, 0.3).toFixed(3);
+      done.push(label);
+    } else if (op.tool === 'set_overlay' || op.tool === 'delete_overlay') {
+      const o = p && ovs.get(p)[Math.trunc(+op.overlay) - 1];
+      if (!o) return skipped.push(label + ' 오버레이' + op.overlay);
+      if (op.tool === 'delete_overlay') { p.overlays.splice(p.overlays.indexOf(o), 1); if (selOv === o.id) selOv = null; return done.push(label); }
+      const s = aiNum(op.start), d = aiNum(op.dur), z = aiNum(op.size);
+      if (typeof op.text === 'string') o.text = op.text.slice(0, 400);
+      if (s !== null) o.start = +clamp(s, 0, Math.max(0, panelDur(p) - 0.3)).toFixed(2);
+      if (d !== null) o.dur = d <= 0 ? 0 : +clamp(d, 0.3, DUR_MAX).toFixed(2);
+      if (pick(op.anim, Object.keys(ANIMS))) o.anim = op.anim;
+      if (z !== null) o.size = Math.round(clamp(z, 20, 140));
+      done.push(label);
+    } else if (op.tool === 'add_overlay') {
+      if (!p || !pick(op.kind, Object.keys(KINDS))) return skipped.push(label);
+      const o = newOverlay(op.kind, p), s = aiNum(op.start), d = aiNum(op.dur);
+      if (typeof op.text === 'string' && op.text) o.text = op.text.slice(0, 400);
+      if (s !== null) o.start = +clamp(s, 0, Math.max(0, panelDur(p) - 0.3)).toFixed(2);
+      if (d !== null && d > 0) o.dur = +clamp(d, 0.3, DUR_MAX).toFixed(2);
+      if (pick(op.anim, Object.keys(ANIMS))) o.anim = op.anim;
+      p.overlays.push(o); done.push(label);
+    } else if (op.tool === 'move_panel') {
+      const from = p ? P.panels.indexOf(p) : -1, to = clamp(Math.trunc(+op.to) - 1, 0, P.panels.length - 1);
+      if (from < 0 || !Number.isFinite(to)) return skipped.push(label);
+      P.panels.splice(to, 0, P.panels.splice(from, 1)[0]); done.push(label);
+    } else if (op.tool === 'set_audio') {
+      const t = tracks[Math.trunc(+op.track) - 1];
+      if (!t) return skipped.push(label);
+      const s = aiNum(op.start), v = aiNum(op.vol), fi = aiNum(op.fadeIn), fo = aiNum(op.fadeOut);
+      if (s !== null) t.start = +Math.max(0, s).toFixed(2);
+      if (v !== null) t.vol = +clamp(v, 0, 1).toFixed(2);
+      if (fi !== null) t.fadeIn = +clamp(fi, 0, 10).toFixed(2);
+      if (fo !== null) t.fadeOut = +clamp(fo, 0, 10).toFixed(2);
+      done.push(label);
+    } else skipped.push(label);
+  });
+  return { done, skipped };
+}
+function aiSay(cls, text) {
+  const d = document.createElement('div'); d.className = 'ai-m ' + cls; d.textContent = text;
+  $('#aiLog').appendChild(d); $('#aiLog').scrollTop = 1e9; return d;
+}
+let aiBusy = false;
+async function aiSend(instruction) {
+  if (aiBusy || !instruction) return;
+  if (!isServer()) return aiSay('bot err', 'AI 편집은 서버 모드에서만 쓸 수 있습니다. 설정에서 서버 모드로 연결하세요.');
+  aiBusy = true; $('#aiSend').disabled = true;
+  aiSay('me', instruction);
+  const wait = aiSay('bot', '편집안을 만드는 중…');
+  try {
+    const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat });
+    wait.remove();
+    let note = '';
+    if (d.ops && d.ops.length) {
+      stop(); flushLocal(); // 적용 직전 상태를 기록에 남겨 Ctrl+Z 로 돌아올 수 있게 한다
+      const r = applyEditOps(d.ops);
+      if (r.done.length) { save(); thumbSig = ''; renderAll(); flushLocal(); }
+      note = '\n\n✓ ' + r.done.length + '곳 수정' + (r.skipped.length ? ' · 건너뜀 ' + r.skipped.length + '곳(' + r.skipped.join(', ') + ')' : '') + ' — 마음에 안 들면 Ctrl+Z로 되돌립니다.';
+    }
+    const msg = (d.message || (d.ops && d.ops.length ? '수정했습니다.' : '수정할 내용이 없습니다.')) + note;
+    aiSay('bot', msg);
+    aiChat.push({ role: 'user', text: instruction }, { role: 'assistant', text: msg.slice(0, 500) });
+    if (aiChat.length > 16) aiChat.splice(0, aiChat.length - 16);
+  } catch (e) { wait.remove(); aiSay('bot err', '오류: ' + (e.message || e)); }
+  finally { aiBusy = false; $('#aiSend').disabled = false; }
+}
+/* 자막 시각(오디오 파일 기준 초)을 타임라인 컷별 오버레이로 바꾼다. 컷 경계를 넘는 자막은 컷마다 나눠 넣는다 */
+function captionPlan(caps, track, segs) {
+  const off = (+track.start || 0) - (+track.trimIn || 0), out = [];
+  caps.forEach(c => {
+    const a = c.start + off, b = c.end + off;
+    segs.forEach((s, i) => {
+      const lo = Math.max(a, s.start), hi = Math.min(b, s.start + s.dur);
+      if (hi - lo >= 0.2) out.push({ i, text: c.text, start: +(lo - s.start).toFixed(2), dur: +(hi - lo).toFixed(2) });
+    });
+  });
+  return out;
+}
+function fillCapTracks() {
+  $('#capTrack').innerHTML = P.audio.length ? P.audio.map((t, i) => '<option value="' + i + '">' + (i + 1) + '. ' + esc(t.name || '오디오') + '</option>').join('') : '<option value="">오디오 트랙이 없습니다 (배경음악 탭에서 추가)</option>';
+}
+$('#aiCap').addEventListener('toggle', () => { if ($('#aiCap').open) fillCapTracks(); });
+let capBusy = false;
+async function captionsRun() {
+  if (capBusy) return;
+  if (!isServer()) return aiSay('bot err', '자동 자막은 서버 모드에서만 쓸 수 있습니다. 설정에서 서버 모드로 연결하세요.');
+  const track = P.audio[+$('#capTrack').value], a = track && assets.get(track.assetId);
+  if (!a) return aiSay('bot err', '자막을 만들 음성 트랙을 고르세요. 먼저 배경음악 탭에서 음성 파일을 올려야 합니다.');
+  if (a.blob.size > 25 * 1024 * 1024) return aiSay('bot err', '음성이 25MB를 넘어 전사할 수 없습니다. 더 짧게 나누어 올려 주세요.');
+  const script = $('#capScript').value.trim();
+  capBusy = true; $('#capGo').disabled = true;
+  const wait = aiSay('bot', script ? '음성을 받아 적고 대본에 맞추는 중…' : '음성을 받아 적는 중…');
+  try {
+    const type = a.blob.type || '', fd = new FormData();
+    fd.append('file', a.blob, 'audio.' + (/wav/.test(type) ? 'wav' : /mp4|m4a|aac/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : /webm/.test(type) ? 'webm' : 'mp3'));
+    fd.append('script', script); fd.append('lang', 'ko');
+    const d = await srv('/api/captions', { method: 'POST', body: fd });
+    wait.remove();
+    const segs = timeline(), plan = captionPlan(d.captions || [], track, segs);
+    if (!plan.length) { aiSay('bot err', '자막 시각이 영상 길이 안에 들지 않습니다. 음성 트랙의 시작 위치를 확인하세요.'); return; }
+    stop(); flushLocal(); // 적용 직전 상태를 기록에 남겨 Ctrl+Z 로 돌아올 수 있게 한다
+    if ($('#capReplace').checked) P.panels.forEach(p => { p.overlays = p.overlays.filter(o => !o.auto); });
+    plan.forEach(c => {
+      const p = segs[c.i].p, o = newOverlay('caption', p);
+      Object.assign(o, { text: c.text, start: c.start, dur: c.dur, auto: true }); p.overlays.push(o);
+    });
+    save(); thumbSig = ''; renderAll(); flushLocal();
+    aiSay('bot', '자막 ' + (d.captions || []).length + '개를 ' + plan.length + '곳에 넣었습니다 (' + (d.source === 'script' ? '대본 기준' : '들은 그대로') + '). 마음에 안 들면 Ctrl+Z로 되돌립니다.');
+  } catch (e) { wait.remove(); aiSay('bot err', '오류: ' + (e.message || e)); }
+  finally { capBusy = false; $('#capGo').disabled = false; }
+}
+$('#capGo').onclick = captionsRun;
+$('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '타임라인을 보고 컷 길이·전환·말풍선 타이밍·음악 볼륨을 고쳐 드립니다. 한 번에 하나씩 요청하면 가장 정확합니다.'); $('#aiIn').focus(); } };
+$('#aiEditClose').onclick = () => { $('#aiEdit').hidden = true; };
+$('#aiForm').onsubmit = e => { e.preventDefault(); const v = $('#aiIn').value.trim(); if (!v) return; $('#aiIn').value = ''; aiSend(v); };
+$('#aiIn').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#aiForm').requestSubmit(); } };
+
 $('#helpBtn').onclick = () => $('#dlgHelp').showModal();
 $$('[data-close]').forEach(b => (b.onclick = () => b.closest('dialog').close()));
 
