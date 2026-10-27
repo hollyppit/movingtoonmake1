@@ -573,6 +573,9 @@ const EDIT_TOOLS = [
   { name: 'set_panel', description: '컷의 길이·전환·카메라 모션을 바꾼다. 바꿀 항목만 넣는다.', input_schema: { type: 'object', required: ['panel'], properties: {
     panel: { type: 'integer', description: '컷 번호(1부터)' }, dur: { type: 'number', description: '컷 길이(초) 0.3~15' },
     trans: { type: 'string', enum: EDIT_TRANS, description: '이 컷으로 들어오는 전환' }, motion: { type: 'string', enum: EDIT_MOTION }, motionAmt: { type: 'number', description: '모션 세기 0~0.3' } } } },
+  { name: 'fit_reading_time', description: '글(말풍선·자막)을 다 읽을 시간이 모자란 컷의 길이를 한 번에 맞춘다(요약의 read_need 기준). 영상 클립이 있는 컷은 건드리지 않는다. 컷이 많을 때는 set_panel을 컷마다 부르지 말고 이것을 쓴다.', input_schema: { type: 'object', properties: {
+    panels: { type: 'array', items: { type: 'integer' }, description: '대상 컷 번호들(1부터). 생략하면 전체' }, pad: { type: 'number', description: '글을 다 읽은 뒤 여유(초). 기본 0.4' },
+    allow_shorten: { type: 'boolean', description: 'true면 글이 짧아 길이가 남는 컷은 줄인다(최소 2초). 기본 false' } } } },
   { name: 'set_overlay', description: '말풍선·나레이션·자막의 글·등장 시점·길이·애니메이션·크기를 바꾼다. 바꿀 항목만 넣는다.', input_schema: { type: 'object', required: ['panel', 'overlay'], properties: {
     panel: { type: 'integer', description: '컷 번호(1부터)' }, overlay: { type: 'integer', description: '그 컷 안 오버레이 번호(1부터)' },
     text: { type: 'string' }, start: { type: 'number', description: '컷 시작 기준 등장 시각(초)' }, dur: { type: 'number', description: '표시 길이(초). 0이면 컷 끝까지' },
@@ -599,18 +602,24 @@ export async function handleEdit(req, env) {
     const system = '당신은 세로형 숏폼 "무빙툰"(컷 이미지 + 말풍선·자막 + 음악) 타임라인을 다루는 영상 편집자입니다. 사용자가 현재 타임라인 요약(JSON)과 수정 지시를 보냅니다. ' +
       '규칙: (1) 반드시 도구로만 수정하고, 컷·오버레이·트랙은 요약에 적힌 번호(1부터)로 가리킵니다. (2) 지시받은 것만 최소한으로 고치고, 요청하지 않은 글·그림·순서는 건드리지 않습니다. ' +
       '(3) 시간 단위는 초이며, 오버레이 등장 시각은 컷 길이 안에 있어야 합니다. 말풍선 글은 읽을 시간(한글 한 글자당 약 0.15초, 최소 1.2초)을 줍니다. ' +
-      '(4) 지시가 모호하면 도구를 쓰지 말고 짧게 되물어봅니다. (5) 마지막에 무엇을 어떻게 바꿨는지 한국어로 1~3문장으로 알립니다. 도구 결과는 사용자가 미리보기로 확인하고 되돌릴 수 있습니다.';
+      '(4) 사용자는 되묻는 것보다 알아서 판단해 주기를 원합니다. 도구 결과는 언제든 Ctrl+Z로 되돌릴 수 있으니, 지시가 다소 열려 있어도(예: "알아서 다듬어줘") 질문하지 말고 요약을 보고 스스로 문제를 찾아 보수적으로 고칩니다. ' +
+      '다듬을 때 볼 것: 글 읽는 시간이 모자란 컷(read_need가 dur보다 큰 컷 → fit_reading_time), 한 컷에서 말풍선이 한꺼번에 뜨거나 겹쳐 읽기 어려운 타이밍, 너무 긴 컷, 음악이 대사를 덮는 볼륨. 사용자가 "그대로 둬"라고 한 항목과 요청하지 않은 글·그림·순서·음악 추가는 건드리지 않습니다. 정말로 진행할 수 없을 때(예: 대상이 전혀 특정되지 않음)만 짧게 한 번 되묻습니다. ' +
+      '(5) 이전 대화에서 되물은 질문에 사용자가 답했다면 더 묻지 말고 그 답대로 바로 도구를 호출합니다. (6) 컷이 많으면 컷마다 도구를 부르지 말고 fit_reading_time처럼 한 번에 처리하는 도구를 우선합니다. ' +
+      '(7) 마지막에 무엇을 어떻게 바꿨는지, 어떤 가정을 했는지 한국어로 1~3문장으로 알립니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
     const user = '현재 타임라인:\n' + JSON.stringify(sm).slice(0, 60000) + '\n\n지시: ' + instruction;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 3000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 8000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
     const blocks = j.content || [];
     const ops = blocks.filter(c => c.type === 'tool_use' && c.input && typeof c.input === 'object').slice(0, 60).map(c => ({ tool: c.name, ...c.input }));
-    const message = blocks.filter(c => c.type === 'text').map(c => c.text).join('').trim().slice(0, 800);
-    return json({ ops, message, model: EDIT_MODEL });
+    let message = blocks.filter(c => c.type === 'text').map(c => c.text).join('').trim().slice(0, 800);
+    const cut = j.stop_reason === 'max_tokens'; // 응답이 길이 한도에서 잘리면 마지막 도구 호출이 빠진다
+    if (cut) message = (message ? message + '\n' : '') + '※ 응답이 길어 일부만 적용했습니다. 같은 요청을 한 번 더 보내면 나머지를 이어서 처리합니다.';
+    if (!message && !ops.length) message = 'AI가 수정안을 내지 않았습니다. 요청을 조금 더 구체적으로(예: "글 읽는 시간만 맞춰줘") 다시 보내 주세요.';
+    return json({ ops, message, truncated: cut, model: EDIT_MODEL });
   } catch (e) { return json({ error: e.message }, e.status || 502); }
 }
 

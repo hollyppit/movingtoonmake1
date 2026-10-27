@@ -79,6 +79,8 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 #aiEdit .ai-m.me { align-self: flex-end; background: var(--panel-2); }
 #aiEdit .ai-m.bot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line-2); }
 #aiEdit .ai-m.err { color: var(--err); }
+#aiEdit .ai-quick { padding: 6px 12px; border-top: 1px solid var(--line-2); }
+#aiEdit .ai-quick .b { width: 100%; }
 #aiEdit .ai-cap { border-top: 1px solid var(--line-2); padding: 6px 12px; font-size: .84rem; }
 #aiEdit .ai-cap summary { cursor: pointer; color: var(--gold-l); font-weight: 600; }
 #aiEdit .ai-cap-b { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
@@ -554,11 +556,12 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
+  <div class="ai-quick"><button type="button" class="b sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다. Ctrl+Z로 되돌릴 수 있어요.">✨ 알아서 다듬기</button></div>
   <details class="ai-cap" id="aiCap"><summary>대본으로 자막 자동 생성</summary>
     <div class="ai-cap-b">
       <label><span>음성 트랙</span><select id="capTrack"></select></label>
       <textarea id="capScript" rows="4" placeholder="대본을 붙여 넣으세요. 비워 두면 들은 그대로 자막을 만듭니다." aria-label="대본"></textarea>
-      <label class="ai-chk"><input type="checkbox" id="capReplace" checked> 이전에 자동으로 만든 자막은 지우고 교체</label>
+      <label class="ai-chk"><input type="checkbox" id="capReplace" checked> 이전에 자동으로 만든 자막은 교체 (직접 고친 자막은 남김)</label>
       <button type="button" class="b sm" id="capGo">자막 만들기</button>
     </div>
   </details>
@@ -6048,11 +6051,14 @@ $('#logClear').onclick = () => { if (confirm('생성 기록을 지울까요? (�
 const aiChat = [];
 const editSummary = () => ({
   aspect: P.aspect, total_sec: +totalDur().toFixed(2), selected_panel: P.panels.findIndex(p => p.id === sel) + 1,
-  panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), prompt: String(p.prompt || '').slice(0, 80),
+  panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), read_need: +readNeed(p).toFixed(1), prompt: String(p.prompt || '').slice(0, 80),
     overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size })) })),
   audio: P.audio.map((t, i) => ({ track: i + 1, name: t.name, start: +t.start || 0, vol: t.vol, fadeIn: t.fadeIn, fadeOut: t.fadeOut, loop: !!t.loop })),
 });
-const aiNum = v => (Number.isFinite(+v) && v !== null && v !== '' && typeof v !== 'boolean' ? +v : null);
+/* 글 읽는 시간: 공백 뺀 글자당 0.15초(최소 1.2초). 컷이 글을 다 보여 주려면 가장 늦게 끝나는 글의 등장 시각 + 읽는 시간이 필요하다 */
+const readSec = o => Math.max(1.2, [...String(o.text || '').replace(/\s/g, '')].length * 0.15);
+const readNeed = p => p.overlays.reduce((m, o) => (o.kind === 'flash' || !String(o.text || '').trim() ? m : Math.max(m, (+o.start || 0) + readSec(o))), 0);
+const aiNum = v =>(Number.isFinite(+v) && v !== null && v !== '' && typeof v !== 'boolean' ? +v : null);
 function applyEditOps(ops) {
   const done = [], skipped = [];
   // 번호는 요청 시점(요약)의 컷·오버레이·트랙을 가리키므로, 적용 중 순서가 바뀌어도 흔들리지 않게 미리 붙잡아 둔다
@@ -6069,6 +6075,16 @@ function applyEditOps(ops) {
       if (pick(op.motion, Object.keys(MOTIONS))) p.motion = op.motion;
       if (m !== null) p.motionAmt = +clamp(m, 0, 0.3).toFixed(3);
       done.push(label);
+    } else if (op.tool === 'fit_reading_time') {
+      const list = Array.isArray(op.panels) && op.panels.length ? op.panels.map(panelAt).filter(Boolean) : pans;
+      const pad = clamp(aiNum(op.pad) ?? 0.4, 0, 2); let n = 0;
+      list.forEach(q => {
+        if (usesClip(q)) return; // 영상 클립이 있는 컷은 길이를 건드리지 않는다
+        const base = readNeed(q), need = +(base + pad).toFixed(2), d = panelDur(q);
+        if (need > d + 0.05) { q.dur = +Math.min(DUR_MAX, need).toFixed(2); n++; }
+        else if (op.allow_shorten === true && base > 0 && need < d - 1) { q.dur = +Math.max(DUR_MIN, need, 2).toFixed(2); n++; }
+      });
+      if (n) done.push('글 읽는 시간 ' + n + '컷'); else skipped.push('글 읽는 시간(고칠 컷 없음)');
     } else if (op.tool === 'set_overlay' || op.tool === 'delete_overlay') {
       const o = p && ovs.get(p)[Math.trunc(+op.overlay) - 1];
       if (!o) return skipped.push(label + ' 오버레이' + op.overlay);
@@ -6110,14 +6126,14 @@ function aiSay(cls, text) {
   $('#aiLog').appendChild(d); $('#aiLog').scrollTop = 1e9; return d;
 }
 let aiBusy = false;
-async function aiSend(instruction) {
+async function aiSend(instruction, auto = false) {
   if (aiBusy || !instruction) return;
   if (!isServer()) return aiSay('bot err', 'AI 편집은 서버 모드에서만 쓸 수 있습니다. 설정에서 서버 모드로 연결하세요.');
   aiBusy = true; $('#aiSend').disabled = true;
   aiSay('me', instruction);
   const wait = aiSay('bot', '편집안을 만드는 중…');
   try {
-    const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat });
+    const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat, auto });
     wait.remove();
     let note = '';
     if (d.ops && d.ops.length) {
@@ -6149,6 +6165,7 @@ function fillCapTracks() {
   $('#capTrack').innerHTML = P.audio.length ? P.audio.map((t, i) => '<option value="' + i + '">' + (i + 1) + '. ' + esc(t.name || '오디오') + '</option>').join('') : '<option value="">오디오 트랙이 없습니다 (배경음악 탭에서 추가)</option>';
 }
 $('#aiCap').addEventListener('toggle', () => { if ($('#aiCap').open) fillCapTracks(); });
+const capSig = o => [o.text, +o.start || 0, +o.dur || 0, o.size, o.x, o.y, o.font, o.color, o.anim].join('|');
 let capBusy = false;
 async function captionsRun() {
   if (capBusy) return;
@@ -6168,10 +6185,11 @@ async function captionsRun() {
     const segs = timeline(), plan = captionPlan(d.captions || [], track, segs);
     if (!plan.length) { aiSay('bot err', '자막 시각이 영상 길이 안에 들지 않습니다. 음성 트랙의 시작 위치를 확인하세요.'); return; }
     stop(); flushLocal(); // 적용 직전 상태를 기록에 남겨 Ctrl+Z 로 돌아올 수 있게 한다
-    if ($('#capReplace').checked) P.panels.forEach(p => { p.overlays = p.overlays.filter(o => !o.auto); });
+    // 자동 자막에는 만들 때의 글·시각을 서명으로 남긴다. 사용자가 손댄 자막은 서명이 달라져 교체 때 지워지지 않는다
+    if ($('#capReplace').checked) P.panels.forEach(p => { p.overlays = p.overlays.filter(o => !(o.auto && o.auto === capSig(o))); });
     plan.forEach(c => {
       const p = segs[c.i].p, o = newOverlay('caption', p);
-      Object.assign(o, { text: c.text, start: c.start, dur: c.dur, auto: true }); p.overlays.push(o);
+      Object.assign(o, { text: c.text, start: c.start, dur: c.dur }); o.auto = capSig(o); p.overlays.push(o);
     });
     save(); thumbSig = ''; renderAll(); flushLocal();
     aiSay('bot', '자막 ' + (d.captions || []).length + '개를 ' + plan.length + '곳에 넣었습니다 (' + (d.source === 'script' ? '대본 기준' : '들은 그대로') + '). 마음에 안 들면 Ctrl+Z로 되돌립니다.');
@@ -6181,6 +6199,7 @@ async function captionsRun() {
 $('#capGo').onclick = captionsRun;
 $('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '타임라인을 보고 컷 길이·전환·말풍선 타이밍·음악 볼륨을 고쳐 드립니다. 한 번에 하나씩 요청하면 가장 정확합니다.'); $('#aiIn').focus(); } };
 $('#aiEditClose').onclick = () => { $('#aiEdit').hidden = true; };
+$('#aiAuto').onclick = () => aiSend('타임라인 전체를 보고 읽기 쉽게 알아서 다듬어줘. 글 읽는 시간이 모자란 컷은 맞추고, 말풍선 등장 타이밍이 겹치거나 너무 빠르면 정리해. 컷 순서·그림·글 내용·음악은 건드리지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiForm').onsubmit = e => { e.preventDefault(); const v = $('#aiIn').value.trim(); if (!v) return; $('#aiIn').value = ''; aiSend(v); };
 $('#aiIn').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#aiForm').requestSubmit(); } };
 
