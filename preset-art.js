@@ -110,5 +110,54 @@
     '<g clip-path="url(#lc-dim)"><rect width="120" height="90" fill="#05070d" opacity=".82"/><ellipse cx="49" cy="38" rx="17" ry="19" fill="url(#lg-dim)"/></g>' + sun(12, 22, 2.8),
     clip('dim') + '<radialGradient id="lg-dim"><stop offset="0" stop-color="#ffe7b0" stop-opacity=".55"/><stop offset="1" stop-color="#ffe7b0" stop-opacity="0"/></radialGradient>');
 
-  window.PRESET_ART = { cam: cam, lit: lit };
+  /* ---------- 영상화 카메라 움직임: 위에서 본 도식(카메라·인물·이동 경로) ----------
+     카메라는 위(0°)를 보게 그리고 회전(deg)으로 방향을 정한다. 노란 점선 화살표가 카메라의 이동·회전, 흐린 카메라는 시작 위치 */
+  const GOLD = '#d98200';
+  const mbg = '<rect width="120" height="90" fill="#e6edf1"/><path d="M0 45H120M60 0V90" stroke="#d3dde3" stroke-width=".8"/>';
+  const subj = (x, y, r) => { r = r || 6.5; return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="#8bb8e6" stroke="#4e82b8" stroke-width="1.4"/><circle cx="' + x + '" cy="' + f1(y - r * 0.15) + '" r="' + f1(r * 0.45) + '" fill="#bcd8f3"/>'; };
+  const cone = (x, y, deg, w, len, dash) => '<g transform="translate(' + x + ' ' + y + ') rotate(' + (deg || 0) + ')"><polygon points="0,-6 ' + (-w) + ',' + (-6 - len) + ' ' + w + ',' + (-6 - len) + '" fill="rgba(245,180,0,.2)" stroke="#e0a100" stroke-width=".9"' + (dash ? ' stroke-dasharray="2.5 2"' : '') + '/></g>';
+  const body = (x, y, deg, ghost) => '<g transform="translate(' + x + ' ' + y + ') rotate(' + (deg || 0) + ')" opacity="' + (ghost ? 0.38 : 1) + '"><rect x="-5.5" y="-4" width="11" height="8.5" rx="1.6" fill="#4a4f5c"/><rect x="-3" y="-7.4" width="6" height="4" rx="1" fill="#2c303a"/><circle cx="3" cy="-1.2" r="1" fill="#ffd23f"/></g>';
+  const cam2 = (x, y, deg, o) => { o = o || {}; return cone(x, y, deg, o.w || 15, o.len || 26, o.dash) + body(x, y, deg, o.ghost); };
+  const arr = (x1, y1, x2, y2) => {
+    const a = Math.atan2(y2 - y1, x2 - x1), h = 4, p = s => (f1(x2 - Math.cos(a + s) * h) + ',' + f1(y2 - Math.sin(a + s) * h));
+    return '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + GOLD + '" stroke-width="1.8" stroke-dasharray="3.2 2.2" stroke-linecap="round"/><polygon points="' + x2 + ',' + y2 + ' ' + p(-0.5) + ' ' + p(0.5) + '" fill="' + GOLD + '"/>';
+  };
+  const curve = (d, hx, hy, ang) => '<path d="' + d + '" fill="none" stroke="' + GOLD + '" stroke-width="1.8" stroke-dasharray="3.2 2.2" stroke-linecap="round"/><polygon points="' + hx + ',' + hy + ' ' + f1(hx - Math.cos(ang - 0.5) * 4.2) + ',' + f1(hy - Math.sin(ang - 0.5) * 4.2) + ' ' + f1(hx - Math.cos(ang + 0.5) * 4.2) + ',' + f1(hy - Math.sin(ang + 0.5) * 4.2) + '" fill="' + GOLD + '"/>';
+  const mv = sv => svg(mbg + sv);
+  const mov = {};
+  mov.dolly_in = mv(subj(60, 20) + cam2(60, 82, 0, { ghost: 1, len: 24 }) + cam2(60, 60, 0, { len: 24 }) + arr(90, 78, 90, 50));
+  mov.dolly_out = mv(subj(60, 20) + cam2(60, 54, 0, { ghost: 1, len: 22 }) + cam2(60, 82, 0, { len: 24 }) + arr(90, 54, 90, 80));
+  mov.zoom_in = mv(subj(60, 22) + cone(60, 80, 0, 26, 46, 1) + cam2(60, 80, 0, { w: 10, len: 46 }) + arr(30, 32, 42, 32) + arr(90, 32, 78, 32));
+  mov.zoom_out = mv(subj(60, 22, 5) + cone(60, 80, 0, 10, 46, 1) + cam2(60, 80, 0, { w: 26, len: 46 }) + arr(42, 30, 30, 30) + arr(78, 30, 90, 30));
+  mov.dolly_zoom = mv('<polygon points="60,52 36,22 84,22" fill="rgba(245,180,0,.18)" stroke="#e0a100" stroke-width=".9" stroke-dasharray="2.5 2"/><polygon points="60,80 36,22 84,22" fill="rgba(245,180,0,.2)" stroke="#e0a100" stroke-width=".9"/>' +
+    subj(60, 22, 6) + body(60, 52, 0, 1) + body(60, 82, 0) + arr(94, 54, 94, 80) + '<path d="M26 20 L26 24 M94 20 L94 24" stroke="#4a4f5c" stroke-width="1.4"/>');
+  mov.crash_zoom = mv(subj(54, 22) + cone(54, 80, 0, 24, 46, 1) + cam2(54, 80, 0, { w: 9, len: 46 }) +
+    '<path d="M100 12 L90 36 L97 36 L92 56 L108 28 L99 28Z" fill="#ffd23f" stroke="#d99a00" stroke-width="1" stroke-linejoin="round"/><path d="M24 40 h14 M20 48 h14 M24 56 h14" stroke="#9aa6af" stroke-width="1.4" stroke-linecap="round"/>');
+  mov.pan = mv(subj(22, 16, 5) + subj(60, 12, 5) + subj(98, 16, 5) + cam2(60, 72, -30, { ghost: 1, len: 28 }) + cam2(60, 72, 30, { ghost: 1, len: 28 }) + cam2(60, 72, 0, { len: 28 }) +
+    curve('M36 80 Q60 92 84 80', 84, 80, -0.9));
+  mov.tilt = mv('<rect x="88" y="6" width="16" height="74" fill="#c3ced6" stroke="#9aa6af"/><path d="M92 14h8M92 24h8M92 34h8M92 44h8M92 54h8M92 64h8" stroke="#9aa6af" stroke-width="1.2"/><path d="M0 82H120" stroke="#9aa6af" stroke-width="1.4"/>' +
+    cam2(26, 62, 62, { ghost: 1, len: 40, w: 12 }) + cam2(26, 62, 118, { ghost: 1, len: 40, w: 12 }) + cam2(26, 62, 90, { len: 40, w: 12 }) + arr(46, 52, 46, 34) + arr(46, 70, 46, 78));
+  mov.truck = mv(subj(60, 20) + cam2(28, 72, 0, { ghost: 1, len: 30 }) + cam2(92, 72, 0, { len: 30 }) + arr(36, 84, 82, 84));
+  mov.pedestal = mv('<path d="M0 84H120" stroke="#9aa6af" stroke-width="1.4"/><circle cx="92" cy="44" r="6" fill="#8bb8e6" stroke="#4e82b8" stroke-width="1.4"/><rect x="85" y="52" width="14" height="30" rx="4" fill="#8bb8e6" stroke="#4e82b8" stroke-width="1.4"/>' +
+    cam2(24, 74, 90, { ghost: 1, len: 40, w: 10 }) + cam2(24, 32, 90, { len: 40, w: 10 }) + arr(8, 74, 8, 28));
+  mov.orbit = mv(subj(60, 44) + '<circle cx="60" cy="44" r="28" fill="none" stroke="#9aa6af" stroke-width="1.2" stroke-dasharray="3 3"/>' +
+    cam2(60, 72, 0, { ghost: 1, len: 14, w: 7 }) + cam2(84, 63, -50, { ghost: 1, len: 14, w: 7 }) + cam2(36, 63, 50, { len: 14, w: 7 }) + arr(46, 82, 74, 82));
+  mov.whip_pan = mv(subj(22, 16, 5) + subj(98, 16, 5) + cam2(60, 72, -40, { ghost: 1, len: 24 }) + cam2(60, 72, -18, { ghost: 1, len: 24 }) + cam2(60, 72, 42, { len: 24 }) +
+    '<path d="M8 36 h24 M4 44 h28 M8 52 h24" stroke="#9aa6af" stroke-width="1.4" stroke-linecap="round"/>' + curve('M30 82 Q60 94 92 78', 92, 78, -1.0));
+  mov.tracking = mv(subj(60, 26) + '<circle cx="54" cy="42" r="1.6" fill="#8bb8e6"/><circle cx="66" cy="48" r="1.6" fill="#8bb8e6"/>' + cam2(60, 74, 0, { len: 26 }) + arr(90, 72, 90, 34) + arr(30, 72, 30, 34));
+  mov.leading = mv(subj(60, 72) + cam2(60, 22, 180, { len: 26 }) + arr(90, 74, 90, 36) + arr(30, 24, 30, 8));
+  mov.handheld = mv(subj(60, 20) + cam2(60, 66, 0, { len: 26 }) + '<path d="M46 62 q-4 3 0 6 M42 58 q-7 6 0 12 M74 62 q4 3 0 6 M78 58 q7 6 0 12" fill="none" stroke="#9aa6af" stroke-width="1.4" stroke-linecap="round"/>' +
+    '<path d="M16 84 Q24 76 32 84 T48 84 T64 84 T80 84 T96 84" fill="none" stroke="' + GOLD + '" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3.2 2.2"/>');
+  mov.steadicam = mv(subj(90, 18) + curve('M14 82 C40 82 46 62 66 58 S94 46 100 40', 100, 40, -0.62) + cam2(66, 58, 22, { len: 26 }) + body(30, 80, 70, 1));
+  mov.fpv = mv('<rect x="14" y="6" width="92" height="70" rx="3" fill="none" stroke="#8a98a3" stroke-width="1.6" opacity=".45"/><rect x="30" y="16" width="60" height="50" rx="2" fill="none" stroke="#8a98a3" stroke-width="1.6" opacity=".6"/><rect x="43" y="24" width="34" height="34" rx="2" fill="none" stroke="#8a98a3" stroke-width="1.6" opacity=".8"/><rect x="52" y="31" width="16" height="20" rx="1.5" fill="#cfd9e0" stroke="#8a98a3" stroke-width="1.4"/>' +
+    curve('M16 84 C36 76 50 64 60 42', 60, 42, -1.2) + '<g transform="translate(24 74)"><circle r="2.6" fill="#4a4f5c"/><path d="M-6 -6 L6 6 M6 -6 L-6 6" stroke="#4a4f5c" stroke-width="1.6" stroke-linecap="round"/></g>');
+  mov.pov = mv('<polygon points="60,64 18,8 102,8" fill="rgba(245,180,0,.2)" stroke="#e0a100" stroke-width=".9"/>' + subj(60, 26, 5.5) + '<path d="M40 44 h40" stroke="#c3ced6" stroke-width="1.4"/>' +
+    '<ellipse cx="60" cy="74" rx="20" ry="10" fill="#fff" stroke="#4a4f5c" stroke-width="1.6"/><circle cx="60" cy="72" r="6.5" fill="#4e82b8"/><circle cx="60" cy="72" r="2.8" fill="#1f2a4a"/><circle cx="62" cy="70" r="1.2" fill="#fff"/>');
+  mov.static = mv(subj(60, 22) + cam2(52, 72, 0, { len: 30 }) + '<rect x="80" y="70" width="14" height="10" rx="2" fill="#4a4f5c"/><path d="M83 70 v-4 a4 4 0 0 1 8 0 v4" fill="none" stroke="#4a4f5c" stroke-width="1.8"/>' + arr(46, 22, 32, 22) + arr(74, 22, 88, 22));
+  mov.dutch = svg('<rect width="120" height="90" fill="#e6edf1"/><path d="M4 45H116" stroke="#9aa6af" stroke-width="1" stroke-dasharray="3 3"/>' +
+    '<g transform="rotate(-16 60 45)"><rect x="16" y="12" width="88" height="66" rx="2" fill="#f4f8fa" stroke="#4a4f5c" stroke-width="1.8"/><path d="M16 52H104" stroke="#7a8a96" stroke-width="1.6"/><rect x="16" y="52" width="88" height="26" fill="#d8e0e5"/>' + subj(60, 34, 7) + '<rect x="53" y="41" width="14" height="22" rx="5" fill="#8bb8e6" stroke="#4e82b8" stroke-width="1.4"/></g>');
+  mov.rack = mv('<circle cx="34" cy="52" r="17" fill="#8bb8e6" fill-opacity=".4" stroke="#4e82b8" stroke-width="1.4" stroke-dasharray="3 3"/>' + subj(88, 28, 8) +
+    '<path d="M76 16 h-5 v5 M100 16 h5 v5 M76 40 h-5 v-5 M100 40 h5 v-5" fill="none" stroke="' + GOLD + '" stroke-width="1.6" stroke-linecap="round"/>' + arr(50, 52, 70, 38) + cam2(60, 84, 0, { len: 20, w: 12 }));
+
+  window.PRESET_ART = { cam: cam, lit: lit, mov: mov };
 })();

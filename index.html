@@ -326,6 +326,10 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .pre3.vis em { font-style: normal; font-size: .66rem; font-weight: 600; color: var(--cinnabar); padding: 0 3px; }
 .pre3.vis small { padding: 0 3px; }
 .pre3.vis button:hover:not(:disabled) .pv { outline: 2px solid var(--gold); outline-offset: -2px; }
+.pre3.vis button[aria-pressed="true"] { border-color: var(--gold-d); background: #fbf3dc; box-shadow: 0 0 0 2px var(--gold) inset; }
+.pre3.vis button[aria-pressed="true"] b::before { content: '✓ '; color: var(--gold-d); }
+.mov-grp { margin: 8px 0 3px; font-size: .74rem; font-weight: 700; color: var(--ink-2); }
+.mov-sel { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: .78rem; }
 
 /* 여러 컷 선택·일괄 생성 */
 .pi .th { position: relative; }
@@ -755,6 +759,35 @@ const MOTION_PRESETS = [
   ['격투 임팩트', 'A sudden impact: quick forward motion, cloth and hair whip back, small camera shake, speed lines feel.'],
   ['바람·빛', 'Wind blows through the scene, light shimmers and dust particles float; gentle parallax.'],
 ];
+/* 영상화 카메라 연출: 하나를 고르면 클링 프롬프트 끝에 'Camera movement: …'가 붙는다. 그림은 preset-art.js 의 mov */
+const MOVE_GROUPS = [['dist', '거리·화각'], ['rot', '회전·이동'], ['follow', '따라가기·시점'], ['style', '고정·연출']];
+const MOVES = [
+  { k: 'dolly_in', g: 'dist', n: '달리 인', m: '몰입', s: '카메라가 앞으로 다가감', en: 'Dolly in: the camera physically moves forward toward the subject on a smooth track, the parallax between subject and background changes, and the subject gradually grows larger in frame.' },
+  { k: 'dolly_out', g: 'dist', n: '달리 아웃', m: '고립', s: '카메라가 뒤로 물러남', en: 'Dolly out: the camera physically moves backward away from the subject on a smooth track, revealing more of the surroundings as the subject gets smaller in frame.' },
+  { k: 'zoom_in', g: 'dist', n: '줌 인', m: '집중', s: '제자리에서 렌즈로 확대', en: 'Zoom in: the camera stays in place while the lens slowly zooms in, magnifying the subject with no parallax change.' },
+  { k: 'zoom_out', g: 'dist', n: '줌 아웃', m: '전체 파악', s: '제자리에서 렌즈로 축소', en: 'Zoom out: the camera stays in place while the lens slowly zooms out, revealing more of the scene with no parallax change.' },
+  { k: 'dolly_zoom', g: 'dist', n: '달리 줌', m: '현기증', s: '인물 크기는 그대로, 배경만 변함', en: 'Dolly zoom (vertigo effect): the camera moves backward while the lens zooms in, so the subject stays the same size while the background stretches and compresses dramatically.' },
+  { k: 'crash_zoom', g: 'dist', n: '크래시 줌', m: '충격', s: '순간적으로 확 당김', en: 'Crash zoom: a sudden, very fast zoom straight into the subject\'s face for shock and impact, then hold.' },
+  { k: 'pan', g: 'rot', n: '팬', m: '둘러봄', s: '제자리에서 좌우 회전', en: 'Pan: the camera stays in place and rotates horizontally, sweeping smoothly from left to right across the scene.' },
+  { k: 'tilt', g: 'rot', n: '틸트', m: '올려다봄', s: '제자리에서 위아래 회전', en: 'Tilt: the camera stays in place and rotates vertically, tilting smoothly upward across the scene.' },
+  { k: 'truck', g: 'rot', n: '트럭', m: '시선 이동', s: '카메라 전체가 좌우로 이동', en: 'Truck: the whole camera slides sideways horizontally while keeping its direction fixed, creating parallax against the background.' },
+  { k: 'pedestal', g: 'rot', n: '페데스털', m: '상승감', s: '방향 유지, 수직 이동', en: 'Pedestal: the camera rises straight up vertically while keeping its angle level, without tilting.' },
+  { k: 'orbit', g: 'rot', n: '오비트', m: '입체감', s: '인물 주위를 원으로 이동', en: 'Orbit: the camera circles around the subject in a smooth arc, keeping the subject centered while the background rotates behind.' },
+  { k: 'whip_pan', g: 'rot', n: '휩 팬', m: '장면 전환', s: '빠른 회전으로 시선 전환', en: 'Whip pan: a very fast horizontal pan with strong motion blur that sharply redirects the viewer\'s attention.' },
+  { k: 'tracking', g: 'follow', n: '트래킹·팔로우', m: '동행', s: '인물 뒤에서 따라감', en: 'Tracking shot: the camera follows the subject from behind as they move forward, keeping a constant distance.' },
+  { k: 'leading', g: 'follow', n: '리딩 샷', m: '대면', s: '인물 앞에서 후진하며 촬영', en: 'Leading shot: the camera moves backward ahead of the subject, filming their face as they walk toward the camera at a constant distance.' },
+  { k: 'handheld', g: 'follow', n: '핸드헬드', m: '현장감', s: '걸음 따라 자연스러운 흔들림', en: 'Handheld camera: natural, subtle camera shake that follows each step, as if held by a person.' },
+  { k: 'steadicam', g: 'follow', n: '스테디캠·짐벌', m: '부드러움', s: '같은 경로를 매끄럽게 이동', en: 'Steadicam / gimbal: the camera glides smoothly and steadily along a path with no shake.' },
+  { k: 'fpv', g: 'follow', n: 'FPV 플라이스루', m: '속도감', s: '공간 사이를 비행하며 통과', en: 'FPV fly-through: a fast drone-like camera flies through the space and through openings, immersive and dynamic.' },
+  { k: 'pov', g: 'follow', n: 'POV 샷', m: '몰입', s: '인물의 시점으로 현장감', en: 'POV shot: first-person point of view, seen through the character\'s eyes with natural head movement.' },
+  { k: 'static', g: 'style', n: '고정 샷', m: '안정', s: '카메라 고정, 인물만 움직임', en: 'Static locked-off camera: the camera does not move at all; only the subject and the environment move.', neg: 'camera movement, camera shake, zoom, pan, tilt' },
+  { k: 'dutch', g: 'style', n: '더치 앵글', m: '불안', s: '기울어진 구도로 긴장감', en: 'Dutch angle: the camera is tilted about 15 degrees so the horizon stays diagonal throughout, creating tension.' },
+  { k: 'rack', g: 'style', n: '랙 포커스', m: '시선 유도', s: '초점을 옮겨 대상 강조', en: 'Rack focus: the focus shifts smoothly between foreground and subject, the out-of-focus area softly blurred, drawing attention to the subject.' },
+];
+const moveOf = p => MOVES.find(m => m.k === p.klingCam) || null;
+const camMoveText = p => { const m = moveOf(p); return m ? ' Camera movement: ' + m.en : ''; };
+/* 카메라 연출을 골랐는데 움직임 프롬프트가 비어 있으면, 기본 문구의 '카메라가 천천히 다가감'이 연출과 부딪히지 않게 카메라 얘기를 뺀 기본 문구를 쓴다 */
+const DEFAULT_MOTION_NOCAM = 'Subtle natural motion: hair and clothes move gently, soft breathing and blinking. Keep the exact same art style, character design and colors. No text.';
 const ADJ0 = { b: 100, c: 100, s: 100, h: 0, warm: 0, blur: 0, vig: 0 };
 const PROV = { openai: 'OpenAI', gemini: 'Gemini', kling: 'Kling', tts: '음성', server: '서버', anthropic: 'Claude' };
 const SRC = { openai: 'OA', gemini: 'GM', upload: '업로드', bake: '보정' };
@@ -991,7 +1024,7 @@ function newPanel() {
     id: uid(), prompt: '', extra: '', regenLvl: 'keep', dirRefs: [], sketch: null, skRef: false, skEdit: false, layers: [], klingAudio: false, klingDialogue: '', klingVoice: '', clipMute: false, clipVol: 1, chars: [], prov: '', versions: [], cur: -1,
     adj: { ...ADJ0 }, zoom: 1, fx: 0.5, fy: 0.5, motion: 'zoom-in', motionAmt: 0.08,
     dur: 4, trans: 'fade', overlays: [],
-    klingPrompt: '', klingNeg: '', klingMode: 'std', klingLen: 5, klingTail: false,
+    klingPrompt: '', klingNeg: '', klingCam: '', klingMode: 'std', klingLen: 5, klingTail: false,
     job: null, clips: [], clipCur: -1, useVideo: true,
   };
 }
@@ -1642,8 +1675,11 @@ const LIGHTS = [
 /* 버튼에 붙는 설명: 일러스트(preset-art.js) + 이름 + 연출 효과(분위기) + 한 줄 설명. 일러스트가 없어도 글자만으로 동작한다 */
 const PRESET_MOOD = { eye: '중립', high: '취약함', low: '권력', bird: '전체 조망', worm: '위압감', dutch: '불안감', close: '친밀감', wide: '고립감', side: '관찰',
   front: '안정', left: '대비', right: '대비', back: '신비', top: '엄숙', under: '공포', keyL: '입체감', keyR: '입체감', dim: '긴장감' };
-const presetBtn = (attr, group, c, dis) => '<button type="button" data-' + attr + '="' + c.k + '" ' + dis + ' title="' + esc(c.n + ' — ' + c.s + ' · ' + (PRESET_MOOD[c.k] || '')) + '">' +
-  '<span class="pv">' + (window.PRESET_ART?.[group]?.[c.k] || '') + '</span><b>' + c.n + '</b><em>' + (PRESET_MOOD[c.k] || '') + '</em><small>' + c.s + '</small></button>';
+const presetBtn = (attr, group, c, dis, pressed) => { // pressed 를 주면 선택 토글 버튼(aria-pressed)이 된다
+  const mood = c.m || PRESET_MOOD[c.k] || '';
+  return '<button type="button" data-' + attr + '="' + c.k + '" ' + dis + (pressed === undefined ? '' : ' aria-pressed="' + pressed + '"') + ' title="' + esc(c.n + ' — ' + c.s + ' · ' + mood) + '">' +
+    '<span class="pv">' + (window.PRESET_ART?.[group]?.[c.k] || '') + '</span><b>' + c.n + '</b><em>' + mood + '</em><small>' + c.s + '</small></button>';
+};
 /* ---- 얼굴 각도: 몸은 그대로 두고 머리 방향만 바꾼다 ---- */
 function drawFaceWidget(cv, f) {
   const x = cv.getContext('2d'), w = cv.width, R = w * 0.34, rad = v => (v * Math.PI) / 180;
@@ -2197,9 +2233,9 @@ async function fetchBlob(url) {
 }
 /* 서버 모드: /api/kling 이 서명·전송을 맡고, 완성 영상을 Supabase Storage에 저장해 키로 돌려준다(링크 만료·CORS 문제 없음) */
 /* 클링에 보낼 최종 프롬프트: 움직임 + (소리를 켠 경우) 대사·목소리 */
-const klingNegText = p => ((p.klingNeg || DEFAULT_NEG) + (p.klingSlow ? ', ' + SLOWMO_NEG : '')).slice(0, 2500);
+const klingNegText = p => ((p.klingNeg || DEFAULT_NEG) + (p.klingSlow ? ', ' + SLOWMO_NEG : '') + (moveOf(p)?.neg ? ', ' + moveOf(p).neg : '')).slice(0, 2500);
 function klingFinalPrompt(p, motion) { // motion: AI가 변환한 움직임 프롬프트 (있으면 직접 쓴 초안 대신 쓴다)
-  let t = (motion || p.klingPrompt || DEFAULT_MOTION).trim();
+  let t = (motion || p.klingPrompt || (p.klingCam ? DEFAULT_MOTION_NOCAM : DEFAULT_MOTION)).trim() + camMoveText(p);
   if (p.klingSlow) t += ' ' + SLOWMO;
   const lines = p.klingAudio ? String(p.klingDialogue || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean) : [];
   if (lines.length) {
@@ -2312,7 +2348,7 @@ async function startKling(p) {
     const body = {
       model_name: S.klModel,
       image: await blobToB64(await bakePanel(p, 'image/jpeg', 0.9)),
-      prompt: ((p.klingPrompt || DEFAULT_MOTION) + (p.klingSlow ? ' ' + SLOWMO : '')).slice(0, 2500),
+      prompt: ((p.klingPrompt || (p.klingCam ? DEFAULT_MOTION_NOCAM : DEFAULT_MOTION)) + camMoveText(p) + (p.klingSlow ? ' ' + SLOWMO : '')).slice(0, 2500),
       negative_prompt: klingNegText(p),
       cfg_scale: 0.5, mode: p.klingMode, duration: String(p.klingLen),
     };
@@ -5561,6 +5597,7 @@ function bindText(p, el) {
 function deleteOverlay(p, o) { p.overlays = p.overlays.filter(x => x !== o); selOv = null; save(); renderInspector(); renderPanels(); requestDraw(); }
 
 /* ---- 영상화 탭 ---- */
+const movSelText = p => { const m = moveOf(p); return m ? '선택: <b>' + m.n + '</b> — ' + esc(m.s) : '선택 없음 (움직임 프롬프트만 사용)'; };
 function tabVideo(p) {
   const clip = curClip(p), job = p.job, busy = job?.status === 'submitting' || job?.status === 'processing';
   const est = (p.klingLen * (p.klingMode === 'pro' ? +S.cKlPro : +S.cKlStd)).toFixed(2);
@@ -5569,6 +5606,10 @@ function tabVideo(p) {
     <textarea data-f="klingPrompt" rows="3" placeholder="${esc(DEFAULT_MOTION)}"></textarea>
     <div class="chips">${MOTION_PRESETS.map(([n, t]) => `<button type="button" class="chip" data-mp="${esc(t)}">${n}</button>`).join('')}</div></div>
   ${convUI(p, 'motion')}
+  ${isec('kcam', '🎥 카메라 연출', moveOf(p) ? moveOf(p).n : '움직임 방식 고르기', `
+    <p class="note">영상에서 카메라를 어떻게 움직일지 고르세요. 고른 움직임이 클링 프롬프트에 자동으로 붙고, 다시 누르면 해제됩니다. 위 움직임 프롬프트에 카메라 움직임 문구가 있으면 서로 부딪힐 수 있습니다.</p>
+    <div class="mov-sel"><span id="movSel">${movSelText(p)}</span><button type="button" class="b ghost sm" id="movClear">해제</button></div>
+    ${MOVE_GROUPS.map(([g, gn]) => `<div class="mov-grp">${gn}</div><div class="pre3 vis">${MOVES.filter(m => m.g === g).map(m => presetBtn('mov', 'mov', m, '', m.k === p.klingCam)).join('')}</div>`).join('')}`, { open: true })}
   <div class="grp"><span class="lbl">② 영상 설정</span>
     <div class="g2">
       <label><span class="lbl">모드</span><select data-f="klingMode"><option value="std">Standard</option><option value="pro">Pro (고화질·비쌈)</option></select></label>
@@ -5612,6 +5653,14 @@ function bindVideo(p, el) {
     p.klingDialogue = lines.join('\n'); $('[data-f="klingDialogue"]', el).value = p.klingDialogue; save(); toast(lines.length + '줄을 가져왔습니다');
   };
   $$('[data-mp]', el).forEach(b => (b.onclick = () => { p.klingPrompt = b.dataset.mp + ' Keep the exact same art style and character design. No text.'; $('[data-f="klingPrompt"]', el).value = p.klingPrompt; save(); }));
+  /* 카메라 연출 선택: 다시 그리지 않고 그 자리에서 선택 표시만 바꿔, 스크롤 위치가 유지된다 */
+  const movSync = () => {
+    $$('[data-mov]', el).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.mov === p.klingCam)));
+    $('#movSel', el).innerHTML = movSelText(p);
+    const sm = $('details[data-sec="kcam"] > summary small', el); if (sm) sm.textContent = moveOf(p) ? moveOf(p).n : '움직임 방식 고르기';
+  };
+  $$('[data-mov]', el).forEach(b => (b.onclick = () => { p.klingCam = p.klingCam === b.dataset.mov ? '' : b.dataset.mov; save(); movSync(); }));
+  $('#movClear', el).onclick = () => { p.klingCam = ''; save(); movSync(); };
   $('#klBtn', el).onclick = () => startKling(p);
   $$('[data-clip]', el).forEach(b => (b.onclick = () => { p.clipCur = +b.dataset.clip; save(); refreshPanel(p); }));
   const fit = $('#fitDur', el); if (fit) fit.onclick = () => { p.dur = +(+curClip(p).dur || 5).toFixed(2); save(); renderPanels(); toast(`컷 길이 ${p.dur}초`); requestDraw(); };
