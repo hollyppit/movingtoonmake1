@@ -319,6 +319,13 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .pre3 button:hover:not(:disabled) { border-color: var(--gold); }
 .pre3 button:disabled { opacity: .45; cursor: not-allowed; }
 .pre3 button small { display: block; font-size: .6rem; color: var(--ink-3); }
+.pre3.vis button { display: flex; flex-direction: column; align-items: stretch; gap: 1px; padding: 3px 3px 5px; text-align: left; }
+.pre3.vis .pv { display: block; border-radius: 3px; overflow: hidden; background: var(--panel-2); line-height: 0; margin-bottom: 3px; }
+.pre3.vis .pv svg { display: block; width: 100%; height: auto; }
+.pre3.vis b { font-size: .78rem; font-weight: 700; padding: 0 3px; }
+.pre3.vis em { font-style: normal; font-size: .66rem; font-weight: 600; color: var(--cinnabar); padding: 0 3px; }
+.pre3.vis small { padding: 0 3px; }
+.pre3.vis button:hover:not(:disabled) .pv { outline: 2px solid var(--gold); outline-offset: -2px; }
 
 /* 여러 컷 선택·일괄 생성 */
 .pi .th { position: relative; }
@@ -713,6 +720,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <input type="file" id="bgmFile" accept="audio/*" multiple hidden>
 <div id="toast" class="toast" role="status" hidden></div>
 
+<script src="preset-art.js"></script>
 <script src="psd-text-engine.js"></script>
 <script src="psd-export.js"></script>
 <script src="ink-editor.js"></script>
@@ -1631,6 +1639,11 @@ const LIGHTS = [
   { k: 'keyR', n: '우상단 45°', s: '키 라이트', en: 'key light from the upper right at 45 degrees with soft fill, classic dimensional shading' },
   { k: 'dim', n: '어둡게', s: '로우키', en: 'low-key lighting, mostly dark with a single dim light source and deep shadows' },
 ];
+/* 버튼에 붙는 설명: 일러스트(preset-art.js) + 이름 + 연출 효과(분위기) + 한 줄 설명. 일러스트가 없어도 글자만으로 동작한다 */
+const PRESET_MOOD = { eye: '중립', high: '취약함', low: '권력', bird: '전체 조망', worm: '위압감', dutch: '불안감', close: '친밀감', wide: '고립감', side: '관찰',
+  front: '안정', left: '대비', right: '대비', back: '신비', top: '엄숙', under: '공포', keyL: '입체감', keyR: '입체감', dim: '긴장감' };
+const presetBtn = (attr, group, c, dis) => '<button type="button" data-' + attr + '="' + c.k + '" ' + dis + ' title="' + esc(c.n + ' — ' + c.s + ' · ' + (PRESET_MOOD[c.k] || '')) + '">' +
+  '<span class="pv">' + (window.PRESET_ART?.[group]?.[c.k] || '') + '</span><b>' + c.n + '</b><em>' + (PRESET_MOOD[c.k] || '') + '</em><small>' + c.s + '</small></button>';
 /* ---- 얼굴 각도: 몸은 그대로 두고 머리 방향만 바꾼다 ---- */
 function drawFaceWidget(cv, f) {
   const x = cv.getContext('2d'), w = cv.width, R = w * 0.34, rad = v => (v * Math.PI) / 180;
@@ -3472,10 +3485,10 @@ function tabFix(p) {
     <div class="row"><button type="button" class="b ghost sm" id="faceReset">0으로</button><button type="button" class="b sm" id="faceBtn" ${dis}>얼굴 각도 적용</button></div>`)}
   ${isec('cam', '🎥 카메라 앵글', '촬영 각도만 바꾸기', `
     <p class="note">캐릭터·화풍·포즈는 그대로, 촬영 각도만 바꿔 새 버전으로 만듭니다.</p>
-    <div class="pre3">${CAMERA.map(c => `<button type="button" data-cam="${c.k}" ${dis}>${c.n}<small>${c.s}</small></button>`).join('')}</div>`)}
+    <div class="pre3 vis">${CAMERA.map(c => presetBtn('cam', 'cam', c, dis)).join('')}</div>`)}
   ${isec('lit', '💡 조명 방향', '빛·명암만 바꾸기', `
     <p class="note">구도·캐릭터는 그대로, 빛의 방향과 명암만 바꿉니다.</p>
-    <div class="pre3">${LIGHTS.map(c => `<button type="button" data-lit="${c.k}" ${dis}>${c.n}<small>${c.s}</small></button>`).join('')}</div>`)}
+    <div class="pre3 vis">${LIGHTS.map(c => presetBtn('lit', 'lit', c, dis)).join('')}</div>`)}
   ${isec('adj', '🎚 색 보정 · 구도', '실시간 미리보기', `
     <span class="lbl">색 보정</span>
     ${sl('밝기', 'adj.b', 40, 180, 1, '%')}${sl('대비', 'adj.c', 40, 180, 1, '%')}${sl('채도', 'adj.s', 0, 200, 1, '%')}
