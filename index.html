@@ -233,6 +233,27 @@ dialog::backdrop { background: rgba(40, 34, 20, .4); }
 .padwrap img, .padwrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .padwrap img { opacity: .35; pointer-events: none; object-fit: fill; }
 .padwrap canvas { touch-action: none; cursor: crosshair; }
+#dlgDraw { width:min(1100px,96vw);height:min(940px,94dvh);max-height:94dvh; }
+#dlgDraw[open] { display:flex;flex-direction:column; }
+#dlgDraw .dlg-h,#dlgDraw .dlg-f { flex-shrink:0; }
+#dlgDraw .dlg-b { display:flex;flex-direction:column;flex:1;min-height:0;max-height:none;overflow:auto; }
+#dlgDraw .dlg-b > :not(#dwViewport) { flex-shrink:0; }
+#dlgDraw #dwViewport { flex:1 0 180px;height:auto; }
+#dlgDraw details p { margin:8px 0 0; }
+#dwViewport { height:min(52vh,680px); min-height:180px; overflow:auto; overscroll-behavior:contain; background:repeating-conic-gradient(#ddd 0 25%,#eee 0 50%) 0 0/20px 20px; border:1px solid var(--line); touch-action:none; }
+#dwWrap { margin:12px auto; flex-shrink:0; }
+#dwCv { user-select:none; -webkit-user-select:none; }
+#dwCursor { position:absolute;pointer-events:none;display:none;z-index:3;border:1px solid #fff;border-radius:50%;box-shadow:0 0 0 1px #111,inset 0 0 0 1px #111;transform:translate(-50%,-50%);box-sizing:border-box; }
+#dwCursor[data-tool=eraser] { border-style:dashed; }
+.dw-brush-info { display:flex;align-items:center;gap:8px;padding:4px 10px;border:1px solid var(--line);border-radius:5px;background:var(--bg-2); }
+#dwBrushSample { width:80px;height:56px;background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0/10px 10px;border-radius:3px; }
+#dwBrushLabel { font-size:.85rem; }
+#dwToolStatus { font-weight:600; }
+#dwSizeNumber { width:74px; }
+#dlgDraw [data-tool] { min-height:36px; }
+@media (pointer:coarse) { #dlgDraw .padtools .b { min-height:44px; } #dlgDraw input[type=range] { min-height:32px; } }
+#dlgDraw .dlg-f { position:relative;z-index:4;background:var(--bg-2); }
+
 .dlg-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line-2); }
 .dlg-h h3 { margin: 0; }
 .dlg-b { padding: 18px; display: grid; gap: 14px; max-height: 70vh; overflow: auto; }
@@ -694,6 +715,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-h"><h3>직접 그리기 — 현재 화면 위에 그려서 고치기</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
   <div class="dlg-b">
     <div class="padtools">
+      <button type="button" class="b ghost sm" data-tool="hand" aria-pressed="false" title="화면 이동 · Space를 누르고 드래그">✋ 이동</button>
       <button type="button" class="b ghost sm" data-tool="pen" aria-pressed="true" title="단축키 B">✏ 펜</button>
       <button type="button" class="b ghost sm" data-tool="air" aria-pressed="false" title="단축키 A — 부드럽게 번지는 스프레이. 누르고 있으면 계속 진해집니다">💨 에어브러시</button>
       <button type="button" class="b ghost sm" data-tool="hl" aria-pressed="false" title="단축키 H — 반투명 굵은 형광펜">🖍 형광펜</button>
@@ -715,15 +737,17 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <button type="button" class="b ghost sm" id="dwBlurAll" title="굵기에 비례해 화면 전체를 흐리게">전체 흐림</button>
     </div>
     <div class="padtools">
-      <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="dwSize" min="1" max="200" value="12"> <b id="dwSizeV">12</b></label>
+      <label class="note" title="단축키 [ 작게 · ] 크게">굵기 <input type="range" id="dwSize" min="1" max="200" value="12"> <b id="dwSizeV">12 px</b> <input id="dwSizeNumber" type="number" min="1" max="200" value="12" aria-label="브러시 굵기(px)"></label>
       <label class="note">불투명 <input type="range" id="dwAlpha" min="5" max="100" value="100"> <b id="dwAlphaV">100</b>%</label>
       <label class="chk"><input type="checkbox" id="dwPress" checked> 필압</label>
       <button type="button" class="b ghost sm" id="dwUndo" title="Ctrl+Z">↶ 되돌리기</button>
       <button type="button" class="b ghost sm" id="dwRedo" title="Ctrl+Shift+Z">↷ 다시</button>
       <button type="button" class="b ghost sm" id="dwReset">처음으로</button>
     </div>
-    <div class="padwrap" id="dwWrap"><canvas id="dwCv"></canvas><div class="brush-cursor" id="dwCursor"></div></div>
-    <p class="note">에어브러시 = 스프레이처럼 부드럽게(누르고 있으면 진해짐) · 형광펜 = 반투명 굵은 선 · 채우기 = 이어진 영역 칠하기 · 번짐/유동화 = 뭉개기·밀기 · 도형은 끌어서 그리고 '도형 채움'으로 속을 칠합니다 · 대칭을 켜면 가운데 선 기준으로 같이 그려집니다. 저장하면 보정·크롭이 반영된 그림이 새 버전으로 추가되고 이전 이미지는 버전에 남습니다. 단축키 — 펜 B · 에어 A · 형광펜 H · 복원 E · 채우기 G · 번짐 R · 유동화 U · 직선 L · 사각형 M · 원 O · 스포이드 I · 굵기 [ ] · 되돌리기 Ctrl+Z.</p>
+    <div class="padtools"><div class="dw-brush-info"><canvas id="dwBrushSample" width="80" height="56" aria-label="브러시 크기 미리보기"></canvas><div><div id="dwToolStatus">펜</div><output id="dwBrushLabel">브러시 크기</output></div></div><button type="button" class="b ghost sm" id="dwZoomOut" aria-label="축소">−</button><label>보기 확대 <input type="range" id="dwZoom" min="25" max="800" value="100"></label><output id="dwZoomValue"></output><button type="button" class="b ghost sm" id="dwZoomIn" aria-label="확대">＋</button><button type="button" class="b ghost sm" id="dwFit">화면에 맞춤</button></div>
+    <p class="note" style="margin:0">원형 커서가 실제 칠해지는 크기입니다. 굵기는 원본 이미지 기준 px입니다. 확대 후 ✋ 이동 또는 Space+드래그로 화면을 옮기세요. Ctrl+휠로 포인터 위치를 확대합니다.</p>
+    <div id="dwViewport"><div class="padwrap" id="dwWrap"><canvas id="dwCv" tabindex="0" aria-label="직접 그리기 캔버스"></canvas><div id="dwCursor" aria-hidden="true"></div></div></div>
+    <details class="note"><summary>도구 설명·단축키</summary><p class="note">에어브러시 = 스프레이처럼 부드럽게(누르고 있으면 진해짐) · 형광펜 = 반투명 굵은 선 · 채우기 = 이어진 영역 칠하기 · 번짐/유동화 = 뭉개기·밀기 · 도형은 끌어서 그리고 '도형 채움'으로 속을 칠합니다 · 대칭을 켜면 가운데 선 기준으로 같이 그려집니다. 저장하면 보정·크롭이 반영된 그림이 새 버전으로 추가되고 이전 이미지는 버전에 남습니다. 단축키 — 펜 B · 에어 A · 형광펜 H · 복원 E · 채우기 G · 번짐 R · 유동화 U · 직선 L · 사각형 M · 원 O · 스포이드 I · 굵기 [ ] · 되돌리기 Ctrl+Z.</p></details>
   </div>
   <div class="dlg-f"><button type="button" class="b sm" id="dwSave">새 버전으로 저장</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
@@ -1906,7 +1930,43 @@ const DW_DIRECT = ['air', 'blur', 'smudge'], DW_SHAPE = ['line', 'rect', 'ell'];
 const dwClone = c => { const n = document.createElement('canvas'); n.width = c.width; n.height = c.height; n.getContext('2d').drawImage(c, 0, 0); return n; };
 const dwRgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
 const dwEff = () => DW.alpha * (DW.tool === 'hl' ? 0.4 : 1);
-function dwShow() { $('#dwCv').getContext('2d').drawImage(DW.work, 0, 0); }
+/* Draw editor feedback and viewport. Sizes are canvas pixels, not CSS pixels. */
+const DW_TOOL_NAMES = {pen:'펜',air:'에어브러시',hl:'형광펜',eraser:'원본 복원',fill:'채우기',blur:'번짐',smudge:'유동화',line:'직선',rect:'사각형',ell:'원',pick:'스포이드',hand:'화면 이동'};
+function dwDiameter(point) {
+  const k={blur:1.8,smudge:1.8,air:2,hl:1.6}[DW.tool]||1;
+  const pressure=DW.press&&point?.pen&&!['hl','air','blur','smudge'].includes(DW.tool)? .25+.75*point.q:1;
+  return Math.max(.5,DW.size*k*pressure);
+}
+function dwFeedback() {
+  if(!DW.W)return;
+  const cv=$('#dwCv'),r=cv.getBoundingClientRect(),d=dwDiameter(DW.hover),css=d*r.width/DW.W,ring=$('#dwCursor');
+  const brush=['pen','hl','eraser','air','blur','smudge','line','rect','ell'].includes(DW.tool);
+  $('#dwToolStatus').textContent=DW_TOOL_NAMES[DW.tool]||DW.tool;
+  $('#dwBrushLabel').textContent=brush?Math.round(d)+' px · 화면 '+css.toFixed(1)+' px':DW.tool==='hand'?'드래그해서 화면 이동':'눌러서 '+(DW.tool==='pick'?'색 선택':'영역 채우기');
+  const sample=$('#dwBrushSample'),g=sample.getContext('2d');g.clearRect(0,0,80,56);
+  if(brush){const sd=Math.min(48,Math.max(2,css));g.globalAlpha=DW.alpha;g.fillStyle=DW.tool==='eraser'?'#888':DW.color;g.beginPath();g.arc(40,28,sd/2,0,Math.PI*2);g.fill();g.globalAlpha=1;g.strokeStyle='#777';g.stroke();}
+  ring.style.width=ring.style.height=Math.max(1,css)+'px';ring.dataset.tool=DW.tool;
+  if(DW.hover&&brush&&$('#dlgDraw').open){ring.style.display='block';ring.style.left=(DW.hover.x/DW.W*r.width)+'px';ring.style.top=(DW.hover.y/DW.H*r.height)+'px';}else ring.style.display='none';
+  cv.style.cursor=DW.tool==='hand'?'grab':brush?'none':'crosshair';
+  $('#dwUndo').disabled=!DW.undo.length||DW.cur;$('#dwRedo').disabled=!DW.redo.length||DW.cur;
+}
+function dwView(zoom=DW.zoom||1,anchor) {
+  if(!DW.W)return;const viewport=$('#dwViewport'),wrap=$('#dwWrap'),before=wrap.getBoundingClientRect(),vr=viewport.getBoundingClientRect();
+  const nx=anchor?(anchor.x-before.left)/before.width:.5,ny=anchor?(anchor.y-before.top)/before.height:.5;
+  const sc=Math.min(Math.max(80,viewport.clientWidth-24)/DW.W,Math.max(80,viewport.clientHeight-24)/DW.H);
+  DW.zoom=clamp(zoom,.25,8);DW.viewScale=sc;wrap.style.width=Math.max(1,Math.round(DW.W*sc*DW.zoom))+'px';wrap.style.height=Math.max(1,Math.round(DW.H*sc*DW.zoom))+'px';
+  $('#dwZoom').value=Math.round(DW.zoom*100);$('#dwZoomValue').textContent=Math.round(sc*DW.zoom*100)+'%';
+  const after=wrap.getBoundingClientRect();
+  if(anchor){viewport.scrollLeft+=after.left+nx*after.width-anchor.x;viewport.scrollTop+=after.top+ny*after.height-anchor.y;}else if(DW.zoom===1){viewport.scrollLeft=viewport.scrollTop=0;}
+  dwFeedback();
+}
+function dwDirty(a,b=a) {
+  const m=Math.max(dwDiameter(a),dwDiameter(b))/2+3,r={x0:Math.max(0,Math.floor(Math.min(a.x,b.x)-m)),y0:Math.max(0,Math.floor(Math.min(a.y,b.y)-m)),x1:Math.min(DW.W,Math.ceil(Math.max(a.x,b.x)+m)),y1:Math.min(DW.H,Math.ceil(Math.max(a.y,b.y)+m))};
+  const d=DW.dirty;DW.dirty=d?{x0:Math.min(d.x0,r.x0),y0:Math.min(d.y0,r.y0),x1:Math.max(d.x1,r.x1),y1:Math.max(d.y1,r.y1)}:r;
+}
+function dwSchedule() { if(!DW.raf)DW.raf=requestAnimationFrame(()=>{DW.raf=0;if(DW.cur)(DW_DIRECT.includes(DW.tool)?dwShow():dwCompose());}); }
+
+function dwShow(r) { const g=$('#dwCv').getContext('2d'); if(r){const w=r.x1-r.x0,h=r.y1-r.y0;if(w>0&&h>0){g.clearRect(r.x0,r.y0,w,h);g.drawImage(DW.work,r.x0,r.y0,w,h,r.x0,r.y0,w,h);}}else{g.clearRect(0,0,DW.W,DW.H);g.drawImage(DW.work,0,0);} }
 function dwVariants(a) { // 대칭이 켜져 있으면 같은 점의 거울 위치들
   const v = [a];
   if (DW.symH) v.push({ ...a, x: DW.W - a.x });
@@ -1915,16 +1975,20 @@ function dwVariants(a) { // 대칭이 켜져 있으면 같은 점의 거울 위�
   return v;
 }
 function dwEach(a, b, fn) { const va = dwVariants(a), vb = b ? dwVariants(b) : []; va.forEach((p, i) => fn(p, vb[i])); }
-function dwCompose() { // 시작 스냅샷 + 획 레이어(불투명도 적용)
-  const g = DW.work.getContext('2d'); g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
-  g.clearRect(0, 0, DW.W, DW.H); g.drawImage(DW.snap, 0, 0);
-  let layer = DW.stroke;
-  if (DW.tool === 'eraser') { layer = dwClone(DW.orig); const tg = layer.getContext('2d'); tg.globalCompositeOperation = 'destination-in'; tg.drawImage(DW.stroke, 0, 0); }
-  g.globalAlpha = dwEff(); g.drawImage(layer, 0, 0); g.globalAlpha = 1; dwShow();
+function dwCompose() {
+  if(!DW.snap||!DW.stroke)return;
+  const r=DW.dirty;if(!r)return;const w=r.x1-r.x0,h=r.y1-r.y0;DW.dirty=null;if(w<=0||h<=0)return;
+  const g=DW.work.getContext('2d');g.globalCompositeOperation='source-over';g.globalAlpha=1;g.clearRect(r.x0,r.y0,w,h);g.drawImage(DW.snap,r.x0,r.y0,w,h,r.x0,r.y0,w,h);
+  let layer=DW.stroke;
+  if(DW.tool==='eraser'){
+    if(!DW.restoreLayer){DW.restoreLayer=document.createElement('canvas');DW.restoreLayer.width=DW.W;DW.restoreLayer.height=DW.H;}
+    layer=DW.restoreLayer;const t=layer.getContext('2d');t.globalCompositeOperation='source-over';t.clearRect(r.x0,r.y0,w,h);t.drawImage(DW.orig,r.x0,r.y0,w,h,r.x0,r.y0,w,h);t.globalCompositeOperation='destination-in';t.drawImage(DW.stroke,r.x0,r.y0,w,h,r.x0,r.y0,w,h);
+  }
+  g.globalAlpha=dwEff();g.drawImage(layer,r.x0,r.y0,w,h,r.x0,r.y0,w,h);g.globalAlpha=1;dwShow(r);
 }
 function dwSeg(g, a, b) {
   const base = DW.tool === 'hl' ? DW.size * 1.6 : DW.size, pr = DW.press && a.pen && DW.tool !== 'hl';
-  const w = q => Math.max(0.5, base * (pr ? 0.25 + 0.9 * q : 1));
+  const w = q => Math.max(0.5, base * (pr ? 0.25 + 0.75 * q : 1));
   g.lineCap = g.lineJoin = 'round'; g.strokeStyle = g.fillStyle = DW.tool === 'eraser' ? '#000' : DW.color;
   if (!b) { g.beginPath(); g.arc(a.x, a.y, w(a.q) / 2, 0, 7); g.fill(); return; }
   g.lineWidth = w((a.q + b.q) / 2); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
@@ -1981,23 +2045,23 @@ function dwFill(a) { // 같은 색으로 이어진 영역을 칠한다 (가장�
 function dwBlurAll() {
   dwPush(); const t = document.createElement('canvas'); t.width = DW.W; t.height = DW.H; const tg = t.getContext('2d');
   if ('filter' in tg) tg.filter = 'blur(' + Math.max(1, DW.size / 6) + 'px)'; tg.drawImage(DW.work, 0, 0); tg.filter = 'none';
-  const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(t, 0, 0); dwShow();
+  const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(t, 0, 0); dwShow(); dwFeedback();
 }
-function dwSetTool(t) { DW.tool = t; $$('#dlgDraw [data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t))); }
-function dwSetColor(c) { DW.color = c; $('#dwColor').value = c; $$('#dwSwatches .sw').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c === c))); }
+function dwSetTool(t) { DW.finish?.(); DW.tool = t; $$('#dlgDraw [data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t))); dwFeedback(); }
+function dwSetColor(c) { DW.color = c; $('#dwColor').value = c; $$('#dwSwatches .sw').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.c === c))); dwFeedback(); }
 function dwPush() { DW.undo.push(dwClone(DW.work)); if (DW.undo.length > 12) DW.undo.shift(); DW.redo = []; }
 function dwRestore(c) { const g = DW.work.getContext('2d'); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.clearRect(0, 0, DW.W, DW.H); g.drawImage(c, 0, 0); dwShow(); }
 async function openDraw(p) {
   if (!curAsset(p)) return toast('먼저 이미지를 만들거나 올리세요');
   try {
     const blob = await bakePanel(p, 'image/png'), img = await loadImageFromBlob(blob);
-    DW.p = p; DW.W = W; DW.H = H; DW.undo = []; DW.redo = []; DW.cur = false;
+    DW.p = p; DW.W = W; DW.H = H; DW.undo = []; DW.redo = []; DW.cur = false; DW.pointer=null; DW.pan=null; DW.hover=null; DW.dirty=null; DW.restoreLayer=null; DW.zoom=1;
     DW.orig = document.createElement('canvas'); DW.orig.width = W; DW.orig.height = H; DW.orig.getContext('2d').drawImage(img, 0, 0, W, H);
     DW.work = dwClone(DW.orig);
     const cv = $('#dwCv'); cv.width = W; cv.height = H;
     const sc = Math.min(Math.min(innerWidth - 80, 560) / W, Math.min(innerHeight * 0.5, 760) / H), wrap = $('#dwWrap');
     wrap.style.width = Math.round(W * sc) + 'px'; wrap.style.height = Math.round(H * sc) + 'px';
-    dwShow(); dwSetTool('pen'); $('#dwSave').disabled = false; $('#dlgDraw').showModal();
+    dwShow(); dwSetTool('pen'); $('#dwSave').disabled = false; $('#dlgDraw').showModal(); $('#dlgDraw .dlg-b').scrollTop=0; dwView(1); $('#dwSize').value=$('#dwSizeNumber').value=DW.size; $('#dwSizeV').textContent=DW.size+' px';
   } catch (e) { toast(e.message); }
 }
 function initDraw() {
@@ -2005,65 +2069,71 @@ function initDraw() {
   $('#dwSwatches').innerHTML = DW_COLORS.map(c => `<button type="button" class="sw" data-c="${c}" style="background:${c}" aria-pressed="false" aria-label="${c}"></button>`).join('');
   $$('#dwSwatches .sw').forEach(b => (b.onclick = () => { dwSetColor(b.dataset.c); if (DW.tool === 'pick' || DW.tool === 'eraser') dwSetTool('pen'); }));
   dwSetColor(DW.color);
-  const pos = e => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height, q: e.pointerType === 'pen' ? (e.pressure || 0.5) : 1, pen: e.pointerType === 'pen' }; };
-  const pick = a => { const d = cv.getContext('2d').getImageData(clamp(Math.round(a.x), 0, DW.W - 1), clamp(Math.round(a.y), 0, DW.H - 1), 1, 1).data; dwSetColor('#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')); };
-  const moveCursor = e => {
-    const r = wrap.getBoundingClientRect(), k = { blur: 1.8, smudge: 1.8, air: 2, hl: 1.6 }[DW.tool] || 1, d = DW.size * r.width / DW.W * k;
-    if (!['pen', 'hl', 'eraser', 'air', 'blur', 'smudge'].includes(DW.tool) || e.pointerType === 'touch') { cur.style.display = 'none'; return; }
-    cur.style.display = 'block'; cur.style.width = cur.style.height = Math.max(4, d) + 'px';
-    cur.style.transform = `translate(${e.clientX - r.left - d / 2}px,${e.clientY - r.top - d / 2}px)`;
+  const pos = e => { const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*cv.width/r.width,y:(e.clientY-r.top)*cv.height/r.height,q:e.pointerType==='pen'?(e.pressure>0?clamp(e.pressure,0,1):(DW.cur?(DW.last?.q??.5):1)):1,pen:e.pointerType==='pen',pointerType:e.pointerType}; };
+  const pick = a => {const d=DW.work.getContext('2d').getImageData(clamp(Math.round(a.x),0,DW.W-1),clamp(Math.round(a.y),0,DW.H-1),1,1).data;dwSetColor('#'+[d[0],d[1],d[2]].map(v=>v.toString(16).padStart(2,'0')).join(''));};
+  const direct=(a,b)=>{const step=Math.max(2,DW.size/(DW.tool==='air'?5:4)),dx=b.x-a.x,dy=b.y-a.y,n=Math.max(1,Math.ceil(Math.hypot(dx,dy)/step));for(let i=1;i<=n;i++){const p={...b,x:a.x+dx*(i-1)/n,y:a.y+dy*(i-1)/n},q={...b,x:a.x+dx*i/n,y:a.y+dy*i/n};dwEach(p,q,(pp,qq)=>(DW.tool==='air'?dwAirDab(qq):DW.tool==='blur'?dwBlurDab(qq):dwSmudgeDab(pp,qq)));}};
+  const stopAir=()=>{clearInterval(DW.air);DW.air=0;};
+  const consume=e=>{
+    const b=pos(e);if(!Number.isFinite(b.x)||!Number.isFinite(b.y))return;
+    if(DW_DIRECT.includes(DW.tool))direct(DW.last,b);
+    else if(DW_SHAPE.includes(DW.tool)){dwShape(DW.start,b);DW.dirty={x0:0,y0:0,x1:DW.W,y1:DW.H};}
+    else dwEach(DW.last,b,(p,q)=>{dwSeg(DW.stroke.getContext('2d'),p,q);dwDirty(p,q);});
+    DW.last=b;DW.hover=b;
   };
-  const direct = (a, b) => { // 에어브러시·번짐·유동화: a→b 사이를 일정 간격으로 훑는다
-    const step = Math.max(2, DW.size / (DW.tool === 'air' ? 5 : 4)), dx = b.x - a.x, dy = b.y - a.y, n = Math.max(1, Math.floor(Math.hypot(dx, dy) / step));
-    for (let i = 1; i <= n; i++) {
-      const p = { ...b, x: a.x + dx * (i - 1) / n, y: a.y + dy * (i - 1) / n }, q = { ...b, x: a.x + dx * i / n, y: a.y + dy * i / n };
-      dwEach(p, q, (pp, qq) => (DW.tool === 'air' ? dwAirDab(qq) : DW.tool === 'blur' ? dwBlurDab(qq) : dwSmudgeDab(pp, qq)));
-    }
+  const end=e=>{
+    if(DW.pan){if(e&&e.pointerId!==DW.pointer)return;DW.pan=null;DW.pointer=null;cv.style.cursor=DW.tool==='hand'?'grab':'crosshair';return;}
+    if(!DW.cur||e&&e.pointerId!==DW.pointer)return;
+    if(e?.type==='pointerup'&&Math.hypot(pos(e).x-DW.last.x,pos(e).y-DW.last.y)>.01)consume(e);
+    DW.cur=false;DW.pointer=null;stopAir();cancelAnimationFrame(DW.raf);DW.raf=0;
+    if(DW_DIRECT.includes(DW.tool))dwShow();else dwCompose();DW.stroke=DW.snap=DW.restoreLayer=null;DW.dirty=null;
+    if(e?.pointerType==='touch')DW.hover=null;dwFeedback();
   };
-  const stopAir = () => { clearInterval(DW.air); DW.air = 0; };
-  cv.addEventListener('pointerdown', e => {
-    if (e.button > 0) return; e.preventDefault(); const a = pos(e);
-    if (DW.tool === 'pick' || e.altKey) { pick(a); if (DW.tool === 'pick') dwSetTool('pen'); return; }
-    cv.setPointerCapture(e.pointerId); dwPush();
-    if (DW.tool === 'fill') { dwFill(a); return; }
-    DW.cur = true; DW.last = a; DW.start = a;
-    if (DW.tool === 'air') { dwEach(a, null, dwAirDab); dwShow(); stopAir(); DW.air = setInterval(() => { if (DW.cur && DW.last) { dwEach(DW.last, null, dwAirDab); dwShow(); } }, 50); return; }
-    if (DW.tool === 'blur') { dwEach(a, null, dwBlurDab); dwShow(); return; }
-    if (DW.tool === 'smudge') return;
-    DW.snap = dwClone(DW.work); DW.stroke = document.createElement('canvas'); DW.stroke.width = DW.W; DW.stroke.height = DW.H;
-    if (DW_SHAPE.includes(DW.tool)) dwShape(a, a); else dwEach(a, null, p => dwSeg(DW.stroke.getContext('2d'), p));
-    dwCompose();
+  DW.finish=end;
+  cv.addEventListener('pointerdown',e=>{
+    if(DW.pointer!=null||DW.busy||e.button>0&&e.button!==1)return;e.preventDefault();cv.focus({preventScroll:true});const a=pos(e);DW.hover=a;
+    if(DW.tool==='hand'||DW.space||e.button===1){DW.pointer=e.pointerId;cv.setPointerCapture(e.pointerId);DW.pan={x:e.clientX,y:e.clientY,left:$('#dwViewport').scrollLeft,top:$('#dwViewport').scrollTop};cv.style.cursor='grabbing';cur.style.display='none';return;}
+    if(DW.tool==='pick'||e.altKey){pick(a);if(DW.tool==='pick')dwSetTool('pen');dwFeedback();return;}
+    DW.pointer=e.pointerId;cv.setPointerCapture(e.pointerId);dwPush();
+    if(DW.tool==='fill'){dwFill(a);DW.pointer=null;dwFeedback();return;}
+    DW.cur=true;DW.last=DW.start=a;DW.dirty=null;
+    if(DW.tool==='air'){dwEach(a,null,dwAirDab);dwShow();stopAir();DW.air=setInterval(()=>{if(DW.cur&&DW.last){dwEach(DW.last,null,dwAirDab);dwSchedule();}},50);dwFeedback();return;}
+    if(DW.tool==='blur'){dwEach(a,null,dwBlurDab);dwShow();dwFeedback();return;}if(DW.tool==='smudge'){dwFeedback();return;}
+    DW.snap=DW.undo[DW.undo.length-1];DW.stroke=document.createElement('canvas');DW.stroke.width=DW.W;DW.stroke.height=DW.H;
+    if(DW_SHAPE.includes(DW.tool)){dwShape(a,a);DW.dirty={x0:0,y0:0,x1:DW.W,y1:DW.H};}else dwEach(a,null,p=>{dwSeg(DW.stroke.getContext('2d'),p);dwDirty(p);});dwCompose();dwFeedback();
   });
-  cv.addEventListener('pointermove', e => {
-    moveCursor(e); if (!DW.cur) return;
-    const co = e.getCoalescedEvents ? e.getCoalescedEvents() : [], list = co.length ? co : [e];
-    for (const ev of list) {
-      const b = pos(ev);
-      if (DW_DIRECT.includes(DW.tool)) direct(DW.last, b);
-      else if (DW_SHAPE.includes(DW.tool)) dwShape(DW.start, b);
-      else dwEach(DW.last, b, (p, q) => dwSeg(DW.stroke.getContext('2d'), p, q));
-      DW.last = b;
-    }
-    cancelAnimationFrame(DW.raf); DW.raf = requestAnimationFrame(() => (DW_DIRECT.includes(DW.tool) ? dwShow() : dwCompose()));
+  cv.addEventListener('pointermove',e=>{
+    if(DW.pointer!=null&&e.pointerId!==DW.pointer)return;
+    if(DW.pan){e.preventDefault();$('#dwViewport').scrollLeft=DW.pan.left-(e.clientX-DW.pan.x);$('#dwViewport').scrollTop=DW.pan.top-(e.clientY-DW.pan.y);return;}
+    DW.hover=pos(e);dwFeedback();if(!DW.cur)return;e.preventDefault();
+    const co=e.getCoalescedEvents?.()||[],list=co.length?co:[e];for(const ev of list)consume(ev);dwSchedule();
   });
-  const end = () => { if (!DW.cur) return; DW.cur = false; stopAir(); cancelAnimationFrame(DW.raf); if (DW_DIRECT.includes(DW.tool)) dwShow(); else dwCompose(); DW.stroke = DW.snap = null; };
-  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
-  cv.addEventListener('pointerleave', () => { cur.style.display = 'none'; });
-  const setSize = v => { DW.size = clamp(v, 1, 200); $('#dwSize').value = DW.size; $('#dwSizeV').textContent = DW.size; };
-  const undo = () => { const c = DW.undo.pop(); if (c) { DW.redo.push(dwClone(DW.work)); dwRestore(c); } };
-  const redo = () => { const c = DW.redo.pop(); if (c) { DW.undo.push(dwClone(DW.work)); dwRestore(c); } };
-  $$('#dlgDraw [data-tool]').forEach(b => (b.onclick = () => dwSetTool(b.dataset.tool)));
+  cv.addEventListener('pointerup',end);cv.addEventListener('pointercancel',end);cv.addEventListener('lostpointercapture',end);
+  cv.addEventListener('pointerleave',()=>{if(!DW.cur){DW.hover=null;cur.style.display='none';}});
+  const setSize=v=>{DW.size=clamp(Math.round(v),1,200);$('#dwSize').value=DW.size;$('#dwSizeV').textContent=DW.size+' px';$('#dwSizeNumber').value=DW.size;dwFeedback();};
+  const undo=()=>{end();const c=DW.undo.pop();if(c){DW.redo.push(dwClone(DW.work));dwRestore(c);}dwFeedback();};
+  const redo=()=>{end();const c=DW.redo.pop();if(c){DW.undo.push(dwClone(DW.work));dwRestore(c);}dwFeedback();};
+  $$('#dlgDraw [data-tool]').forEach(b=>b.onclick=()=>dwSetTool(b.dataset.tool));
+  $('#dwZoom').oninput=e=>{end();dwView(+e.target.value/100);};
+  $('#dwZoomIn').onclick=()=>{end();dwView(DW.zoom*1.25);};$('#dwZoomOut').onclick=()=>{end();dwView(DW.zoom/1.25);};$('#dwFit').onclick=()=>{end();dwView(1);};
+  $('#dwViewport').addEventListener('wheel',e=>{if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();end();dwView(DW.zoom*Math.exp(-e.deltaY*.002),{x:e.clientX,y:e.clientY});},{passive:false});
+  $('#dlgDraw').addEventListener('keyup',e=>{if(e.code==='Space')DW.space=false;});
+  window.addEventListener('blur',()=>{DW.space=false;if($('#dlgDraw').open)end();});
+  window.addEventListener('resize',()=>{if($('#dlgDraw').open)dwView();});
+
   const tog = (id, k) => { $(id).onclick = () => { DW[k] = !DW[k]; $(id).setAttribute('aria-pressed', String(DW[k])); }; };
   tog('#dwSymH', 'symH'); tog('#dwSymV', 'symV');
   $('#dwBlurAll').onclick = dwBlurAll;
   $('#dwColor').oninput = e => { dwSetColor(e.target.value); if (DW.tool === 'pick' || DW.tool === 'eraser') dwSetTool('pen'); };
-  $('#dwSize').oninput = e => setSize(+e.target.value);
-  $('#dwAlpha').oninput = e => { DW.alpha = clamp(+e.target.value, 5, 100) / 100; $('#dwAlphaV').textContent = Math.round(DW.alpha * 100); };
-  $('#dwPress').onchange = e => { DW.press = e.target.checked; };
+  $('#dwSize').oninput = e => {end();setSize(+e.target.value);};
+  $('#dwSizeNumber').onchange=e=>{end();setSize(+e.target.value||1);};
+  $('#dwAlpha').oninput = e => { DW.alpha = clamp(+e.target.value, 5, 100) / 100; $('#dwAlphaV').textContent = Math.round(DW.alpha * 100); dwFeedback(); };
+  $('#dwPress').onchange = e => { DW.press = e.target.checked; dwFeedback(); };
   $('#dwUndo').onclick = undo; $('#dwRedo').onclick = redo;
-  $('#dwReset').onclick = () => { if (DW.undo.length && !confirm('그린 것을 모두 지우고 처음 상태로 돌릴까요?')) return; dwPush(); dwRestore(DW.orig); };
+  $('#dwReset').onclick = () => { if (DW.undo.length && !confirm('그린 것을 모두 지우고 처음 상태로 돌릴까요?')) return; end(); dwPush(); dwRestore(DW.orig); dwFeedback(); };
   const keys = { KeyB: 'pen', KeyA: 'air', KeyH: 'hl', KeyE: 'eraser', KeyG: 'fill', KeyR: 'blur', KeyU: 'smudge', KeyL: 'line', KeyM: 'rect', KeyO: 'ell', KeyI: 'pick' };
   $('#dlgDraw').addEventListener('keydown', e => {
+    if(e.target.closest('input,textarea,select'))return;
+    if(e.code==='Space'){e.preventDefault();DW.space=true;return;}
     if (e.altKey) return; const mod = e.ctrlKey || e.metaKey;
     if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); }
@@ -2072,9 +2142,10 @@ function initDraw() {
     else if (e.code === 'BracketRight') { e.preventDefault(); setSize(DW.size + (e.shiftKey ? 10 : 2)); }
     else if (e.code === 'BracketLeft') { e.preventDefault(); setSize(DW.size - (e.shiftKey ? 10 : 2)); }
   });
-  $('#dlgDraw').addEventListener('close', () => { stopAir(); DW.undo = []; DW.redo = []; DW.orig = DW.work = DW.snap = DW.stroke = null; });
+  $('#dlgDraw').addEventListener('close', () => { end(); stopAir();cancelAnimationFrame(DW.raf);DW.raf=0;DW.space=false;DW.hover=null;cur.style.display='none'; DW.undo = []; DW.redo = []; DW.orig = DW.work = DW.snap = DW.stroke = DW.restoreLayer = null; });
   $('#dwSave').onclick = async () => {
     const p = DW.p; if (!p || DW.busy) return;
+    end();
     if (!DW.undo.length) return toast('아직 그린 것이 없습니다');
     DW.busy = true; $('#dwSave').disabled = true;
     try {
