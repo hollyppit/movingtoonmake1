@@ -1,0 +1,11 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const api=await import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync('studio-api.js')).toString('base64'));
+const env={OPEN_ACCESS:'true',SUPABASE_URL:'https://storage.test',SUPABASE_SERVICE_ROLE_KEY:'mock-only',OPENAI_API_KEY:'mock-only'};
+const original=global.fetch;let sent=false,reads=[];
+try{global.fetch=async(url,opt={})=>{if(String(url).startsWith('https://storage.test/')){if(opt.method==='POST')return new Response('{}');reads.push(String(url));return new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/png'}});}assert.equal(String(url),'https://api.openai.com/v1/images/edits');assert.equal(opt.body.get('mask').type,'image/png');assert.equal(opt.body.get('image[]').type,'image/png');assert.equal(opt.body.get('size'),'1024x1536');sent=true;return Response.json({data:[{b64_json:'AA=='}]});};
+const req=body=>new Request('https://app.test/api/image',{method:'POST',body:JSON.stringify(body)});
+const r=await api.handleImage(req({prompt:'background only',refs:['studio/input.png'],mask:'studio/mask.png',order:['openai'],size:'1024x1536'}),env);assert.equal(r.status,200,await r.text());assert(sent);assert(reads.some(u=>u.endsWith('studio/mask.png')));
+for(const mask of [[],{},12])assert.equal((await api.handleImage(req({prompt:'test',refs:['studio/input.png'],mask}),env)).status,400);
+assert.equal((await api.handleImage(req({prompt:'test',mask:'studio/mask.png'}),env)).status,400);
+console.log('PASS: authenticated storage mask loads, server forwards PNG mask to OpenAI, invalid masks rejected');
+}finally{global.fetch=original;}})().catch(e=>{console.error(e);process.exitCode=1});

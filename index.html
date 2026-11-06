@@ -1347,7 +1347,7 @@ async function cloudOpen(id) {
    ========================================================= */
 class GenError extends Error { constructor(provider, kind, msg) { super(msg); this.provider = provider; this.kind = kind; } }
 
-async function openaiImage({ prompt, images = [], size }) {
+async function openaiImage({ prompt, images = [], size, mask }) {
   if (!S.oaKey) throw new GenError('openai', 'auth', 'API 키가 없습니다');
   let res;
   try {
@@ -1355,7 +1355,8 @@ async function openaiImage({ prompt, images = [], size }) {
       const fd = new FormData();
       fd.append('model', S.oaModel); fd.append('prompt', prompt); fd.append('n', '1');
       fd.append('size', size || genSize()); fd.append('quality', S.oaQuality);
-      images.forEach((b, i) => fd.append('image[]', b, `ref${i + 1}.jpg`));
+      images.forEach((b, i) => fd.append('image[]', b, `ref${i + 1}.${b.type === 'image/png' ? 'png' : 'jpg'}`));
+      if (mask) fd.append('mask', mask, 'mask.png');
       res = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + S.oaKey }, body: fd });
     } else {
       res = await fetch('https://api.openai.com/v1/images/generations', {
@@ -1423,15 +1424,15 @@ function providerOrder(mode) {
 /* images: [{ blob, cid? }] — cid가 있으면 서버 모드에서 R2 업로드를 재사용한다.
    직접 모드: 브라우저가 순서대로 시도하고 실패하면 다음 엔진으로 넘어간다.
    서버 모드: /api/image 가 같은 순서로 시도하고 { key, provider, model, attempts } 를 돌려준다(/api/ai 와 같은 형식). */
-async function generateImage({ prompt, images = [], purpose, prov, size, aspect }) {
+async function generateImage({ prompt, images = [], purpose, prov, size, aspect, mask }) {
   const order = providerOrder(prov || S.provider);
-  if (isServer()) return serverImage({ prompt, images, purpose, order, size, aspect });
+  if (isServer()) return serverImage({ prompt, images, purpose, order, size, aspect, mask });
   const errors = [], blobs = images.map(i => i.blob);
   for (const p of order) {
     if (order.length > 1 && !hasKey(p)) { errors.push(`${PROV[p]}: 키 없음 (건너뜀)`); continue; }
     const t0 = performance.now();
     try {
-      const blob = p === 'openai' ? await openaiImage({ prompt, images: blobs, size }) : await geminiImage({ prompt, images: blobs, aspect });
+      const blob = p === 'openai' ? await openaiImage({ prompt, images: blobs, size, mask }) : await geminiImage({ prompt, images: blobs, aspect });
       logCall({ kind: purpose, provider: p, ok: true, cost: p === 'openai' ? +S.cOa : +S.cGm, ms: Math.round(performance.now() - t0), refs: images.length });
       return { blob, provider: p, first: order[0], fellBack: p !== order[0], errors };
     } catch (e) {
@@ -1442,7 +1443,7 @@ async function generateImage({ prompt, images = [], purpose, prov, size, aspect 
   }
   throw new Error(errors.join('\n'));
 }
-async function serverImage({ prompt, images, purpose, order, size, aspect }) {
+async function serverImage({ prompt, images, purpose, order, size, aspect, mask }) {
   const t0 = performance.now();
   const refs = [];
   for (const im of images) refs.push(await ensureKey(im.cid, im.blob));
@@ -1451,7 +1452,8 @@ async function serverImage({ prompt, images, purpose, order, size, aspect }) {
     cost: a.ok ? (a.provider === 'openai' ? +S.cOa : +S.cGm) : 0, ms: a.ms, refs: refs.length,
   }));
   try {
-    const d = await srvJSON('/api/image', { prompt, refs, order, size: size || genSize(), aspect: aspect || genAspect(), quality: S.oaQuality, oaModel: S.oaModel, gmModel: S.gmModel });
+    const maskKey = mask ? await ensureKey(null, mask) : undefined;
+    const d = await srvJSON('/api/image', { prompt, refs, mask: maskKey, order, size: size || genSize(), aspect: aspect || genAspect(), quality: S.oaQuality, oaModel: S.oaModel, gmModel: S.gmModel });
     logAttempts(d.attempts && d.attempts.length ? d.attempts : [{ provider: d.provider, ok: true, ms: Math.round(performance.now() - t0) }]);
     const errors = (d.attempts || []).filter(a => !a.ok).map(a => `${PROV[a.provider] || a.provider} [${ERRK[a.kind] || a.kind || '실패'}] ${a.error}`);
     const blob = await fetchKey(d.key);
@@ -2406,6 +2408,39 @@ function applyFit(p, mode, iw, ih, opt = {}) {
   p.fx = opt.x ?? .5; p.fy = opt.y ?? .5; p.ix = 0; p.iy = 0;
   p.zoom = r.w / iw / Math.max(W / iw, H / ih); p.bgFill = mode === 'fit' ? (opt.background || 'blur') : null;
 }
+// Use a supported generation canvas, padding the target rather than distorting its geometry.
+function prepareExpansion(im, rect, width, height) {
+  const size = oaSizeFor(width/height), [cw,ch] = size.split('x').map(Number);
+  const k = Math.min(cw/width,ch/height), target = { x:(cw-width*k)/2,y:(ch-height*k)/2,w:width*k,h:height*k };
+  const r = { x:target.x+rect.x*k,y:target.y+rect.y*k,w:rect.w*k,h:rect.h*k };
+  const canvas=document.createElement('canvas');canvas.width=cw;canvas.height=ch;
+  const g=canvas.getContext('2d'),iw=im.naturalWidth,ih=im.naturalHeight;
+  // Edge colors provide local context without suggesting an unrelated scene in gray margins.
+  g.drawImage(im,0,0,iw,1,r.x,0,r.w,r.y);
+  g.drawImage(im,0,ih-1,iw,1,r.x,r.y+r.h,r.w,ch-r.y-r.h);
+  g.drawImage(im,0,0,1,ih,0,r.y,r.x,r.h);
+  g.drawImage(im,iw-1,0,1,ih,r.x+r.w,r.y,cw-r.x-r.w,r.h);
+  for(const [sx,sy,dx,dy,dw,dh] of [[0,0,0,0,r.x,r.y],[iw-1,0,r.x+r.w,0,cw-r.x-r.w,r.y],[0,ih-1,0,r.y+r.h,r.x,ch-r.y-r.h],[iw-1,ih-1,r.x+r.w,r.y+r.h,cw-r.x-r.w,ch-r.y-r.h]]) if(dw>0&&dh>0)g.drawImage(im,sx,sy,1,1,dx,dy,dw,dh);
+  g.drawImage(im,r.x,r.y,r.w,r.h);
+  const mask=document.createElement('canvas');mask.width=cw;mask.height=ch;const m=mask.getContext('2d');
+  // Alpha zero = editable. A narrow overlap gives the model boundary context; original is restored later.
+  m.fillStyle='#fff';const overlap=Math.min(8,r.w/8,r.h/8);m.fillRect(r.x+overlap,r.y+overlap,r.w-2*overlap,r.h-2*overlap);
+  return { canvas,mask,size,aspect:cw===ch?'1:1':cw>ch?'3:2':'2:3',target,normalized:{x:r.x/cw,y:r.y/ch,w:r.w/cw,h:r.h/ch} };
+}
+function blendExpansionEdge(g, im, r, w, h) {
+  // Blend only OUTSIDE the artwork. No feathering or color correction touches original pixels.
+  const edge=document.createElement('canvas');edge.width=w;edge.height=h;const e=edge.getContext('2d');
+  e.drawImage(im,r.x,r.y,r.w,r.h);
+  const data=e.getImageData(0,0,w,h),out=g.getImageData(0,0,w,h),band=Math.max(2,Math.round(Math.min(w,h)*.018));
+  const left=Math.ceil(r.x),top=Math.ceil(r.y),right=Math.min(w-1,Math.floor(r.x+r.w)-1),bottom=Math.min(h-1,Math.floor(r.y+r.h)-1);
+  for(let y=Math.max(0,top-band);y<=Math.min(h-1,bottom+band);y++)for(let x=Math.max(0,left-band);x<=Math.min(w-1,right+band);x++){
+    if(x>=left&&x<=right&&y>=top&&y<=bottom)continue;
+    const nx=clamp(x,left,right),ny=clamp(y,top,bottom),d=Math.hypot(x-nx,y-ny);if(d>=band)continue;
+    const a=(1-d/band)*data.data[(ny*w+nx)*4+3]/255,i=(y*w+x)*4,j=(ny*w+nx)*4;
+    for(let c=0;c<3;c++)out.data[i+c]=Math.round(out.data[i+c]*(1-a)+data.data[j+c]*a);
+  }
+  g.putImageData(out,0,0);
+}
 async function aiExpand(p, opt = {}) {
   const id = curAsset(p); if (!id || p._ebusy) return false;
   const width = opt.width || W, height = opt.height || H, label = width + '×' + height;
@@ -2416,19 +2451,22 @@ async function aiExpand(p, opt = {}) {
   try {
     // The model supplies background only. Its pixels inside the original rectangle are discarded.
     const c = document.createElement('canvas'); c.width = width; c.height = height; const g = c.getContext('2d');
-    g.fillStyle = '#ddd'; g.fillRect(0, 0, width, height);
-    g.drawImage(im, rect.x, rect.y, rect.w, rect.h);
-    const base = await toApiImage(await canvasBlob(c, 'image/png'), 1536);
+    const prepared = prepareExpansion(im, rect, width, height);
     const prompt = [
-      'BACKGROUND-ONLY OUTPAINTING. Extend the existing background into the empty gray margins of the attached canvas. Gray margins are placeholders, not scene elements.',
-      'The original artwork occupies rectangle x=' + (rect.x/width).toFixed(4) + ', y=' + (rect.y/height).toFixed(4) + ', width=' + (rect.w/width).toFixed(4) + ', height=' + (rect.h/height).toFixed(4) + ' in normalized canvas coordinates. Keep this rectangle at exactly the same position and scale. Do not crop, zoom, shift, recompose or redraw the original.',
-      'Only continue background textures and surfaces already visible at the boundaries: sky, clouds, ground, walls or distant scenery. Match the existing perspective, lighting, colors and linework. Use the simplest natural continuation.',
-      'Do NOT add people, faces, body parts, limbs, animals, objects, props, buildings, decorations, symbols or text. Do NOT complete or extend cropped characters. No new scene elements. Preserve the original scene and composition.',
-      'Return the complete ' + label + ' canvas with seamlessly extended background.', NO_TEXT
+      'BACKGROUND-ONLY OUTPAINTING. The attached canvas contains original artwork surrounded by edge-stretched placeholder bands. Replace ONLY those bands with a natural continuation of the immediately adjacent background.',
+      'The original artwork occupies normalized rectangle ' + JSON.stringify(prepared.normalized) + '. Preserve its exact position, size, perspective and composition. Do not zoom, crop, shift or reframe. Preserve the full padded canvas size.',
+      'Infer the background separately from each adjacent edge. If the edge is sky or clouds, continue ONLY that same sky or clouds. Never introduce ground, a horizon, flooring or a different setting where it is not already present at that edge.',
+      'Do NOT add people, faces, body parts, limbs, animals, objects, props, buildings, decorations, symbols or text. Do NOT complete cropped characters. Match existing colors, brightness, cloud scale and linework across the boundary.',
+      'The stretched pixels are placeholders, not repeated objects. Replace the repetition with seamless background. Do not create horizontal or vertical bands or abrupt transitions.', NO_TEXT
     ].join('\n\n');
-    const res = await generateImage({ prompt, images: [{ blob: base }], purpose: '원본 유지 확장', prov: p.prov, size: oaSizeFor(width / height), aspect: nearestGmAspect(width / height) });
+    const res = await generateImage({ prompt, images: [{ blob: await canvasBlob(prepared.canvas, 'image/png') }], mask: await canvasBlob(prepared.mask, 'image/png'), purpose: '원본 유지 확장', prov: p.prov, size: prepared.size, aspect: prepared.aspect });
     const generated = await createImageBitmap(res.blob);
-    try { g.clearRect(0, 0, width, height); g.drawImage(generated, 0, 0, width, height); } finally { generated.close(); }
+    try {
+      // Crop padding in the same normalized coordinates; never stretch a 2:3 response into 9:16.
+      const t = prepared.target, sx = generated.width / prepared.canvas.width, sy = generated.height / prepared.canvas.height;
+      g.drawImage(generated, t.x*sx, t.y*sy, t.w*sx, t.h*sy, 0, 0, width, height);
+    } finally { generated.close(); }
+    blendExpansionEdge(g, im, rect, width, height);
     // Replace, rather than alpha-blend, the protected artwork, including transparent source pixels.
     g.clearRect(rect.x, rect.y, rect.w, rect.h); g.drawImage(im, rect.x, rect.y, rect.w, rect.h);
     const nid = await addAsset(await canvasBlob(c, 'image/png'));

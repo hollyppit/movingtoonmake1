@@ -114,13 +114,14 @@ function unb64(str) { const bin = atob(str); const u = new Uint8Array(bin.length
 class GenError extends Error { constructor(kind, msg) { super(msg); this.kind = kind; } }
 
 /* ---------- 이미지: OpenAI → Gemini (순서는 요청의 order) ---------- */
-async function openaiImage(env, { prompt, refs, size, quality, model }) {
+async function openaiImage(env, { prompt, refs, size, quality, model, mask }) {
   const key = env[ENV.openai]; if (!key) throw new GenError('auth', 'OPENAI_API_KEY 없음');
   let res;
   if (refs.length) {
     const fd = new FormData();
     fd.append('model', model); fd.append('prompt', prompt); fd.append('n', '1'); fd.append('size', size); fd.append('quality', quality);
     refs.forEach((r, i) => fd.append('image[]', new Blob([r.bytes], { type: r.type }), `ref${i + 1}.${/png/.test(r.type) ? 'png' : 'jpg'}`));
+    if (mask) fd.append('mask', new Blob([mask.bytes], { type: 'image/png' }), 'mask.png');
     res = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd });
   } else {
     res = await fetch('https://api.openai.com/v1/images/generations', {
@@ -172,8 +173,9 @@ export async function handleImage(req, env) {
   if (!prompt) return json({ error: 'prompt 가 비었습니다' }, 400);
   const order = (Array.isArray(body.order) && body.order.length ? body.order : ['openai', 'gemini']).filter(p => p === 'openai' || p === 'gemini');
   if (!order.length) return json({ error: '지원하는 이미지 엔진이 없습니다' }, 400);
-  let refs;
-  try { refs = await Promise.all((body.refs || []).slice(0, 16).map(k => r2Get(env, String(k), who))); }
+  if (body.mask !== undefined && (typeof body.mask !== 'string' || !body.refs?.length)) return json({ error: 'mask 는 참조 이미지와 함께 파일 키로 전달해야 합니다' }, 400);
+  let refs, mask;
+  try { if (body.mask) mask = await r2Get(env, body.mask, who); refs = await Promise.all((body.refs || []).slice(0, 16).map(k => r2Get(env, String(k), who))); }
   catch (e) { return json({ error: e.message }, 400); }
 
   const attempts = [];
@@ -182,7 +184,7 @@ export async function handleImage(req, env) {
     const model = provider === 'openai' ? (body.oaModel || 'gpt-image-2') : (body.gmModel || 'gemini-2.5-flash-image');
     try {
       const img = provider === 'openai'
-        ? await openaiImage(env, { prompt, refs, size: body.size || '1024x1536', quality: body.quality || 'medium', model })
+        ? await openaiImage(env, { prompt, refs, size: body.size || '1024x1536', quality: body.quality || 'medium', model, mask })
         : await geminiImage(env, { prompt, refs, aspect: body.aspect || '9:16', model });
       attempts.push({ provider, model, ok: true, ms: Date.now() - t0 });
       const key = await r2Put(env, img.bytes, img.type, /jpe?g/.test(img.type) ? 'jpg' : /webp/.test(img.type) ? 'webp' : 'png', who);
