@@ -3145,7 +3145,7 @@ function bubbleBatches(list) {
 function linkBubbles(p, a, b) {
   if (!a || !b || a === b || !canJoinBubble(a) || !canJoinBubble(b)) return false;
   histSnap(); const old = new Set([a.bubbleGroup,b.bubbleGroup].filter(Boolean)), id = a.bubbleGroup || b.bubbleGroup || uid();
-  p.overlays.forEach(o => { if (canJoinBubble(o) && (o === a || o === b || old.has(o.bubbleGroup))) o.bubbleGroup = id; });
+  p.overlays.forEach(o => { if (canJoinBubble(o) && (o === a || o === b || old.has(o.bubbleGroup))) { o.bubbleGroup = id; for (const k of ['fill','fillA','stroke','strokeW']) o[k]=a[k]; } });
   save(); renderInspector(); renderPanels(); requestDraw(); return true;
 }
 function unlinkBubble(p, o) {
@@ -3886,7 +3886,7 @@ function tabText(p) {
   ${o ? `
   <div class="box grp">
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px"><span class="lbl">말풍선 합치기</span>
-    ${canJoinBubble(o) ? `<div class="row"><select id="bubbleJoinTarget" aria-label="합칠 말풍선" style="flex:1"><option value="">합칠 말풍선 선택</option>${p.overlays.filter(x=>x!==o&&canJoinBubble(x)&&(!o.bubbleGroup||x.bubbleGroup!==o.bubbleGroup)).map(x=>`<option value="${x.id}">${esc(KINDS[x.kind]+': '+(x.text||'(빈 텍스트)').slice(0,28))}</option>`).join('')}</select><button type="button" class="b sm" id="bubbleJoin">합치기</button></div>${o.bubbleGroup?'<button type="button" class="b ghost sm" id="bubbleUnjoin">이 말풍선 분리</button>':''}<p class="note">모양이 달라도 연결됩니다. 겹친 내부 테두리는 지우고, 떨어진 몸통은 연결합니다. 배경·테두리는 목록에서 먼저 나온 말풍선을 따릅니다. 대사·등장 시간·음성은 각각 유지됩니다.</p>`:'<span class="note">자막과 이미지 말풍선은 연결 대상에서 제외됩니다.</span>'}
+    ${canJoinBubble(o) ? `<div class="row"><select id="bubbleJoinTarget" aria-label="합칠 말풍선" style="flex:1"><option value="">합칠 말풍선 선택</option>${p.overlays.filter(x=>x!==o&&canJoinBubble(x)&&(!o.bubbleGroup||x.bubbleGroup!==o.bubbleGroup)).map(x=>`<option value="${x.id}">${esc(KINDS[x.kind]+': '+(x.text||'(빈 텍스트)').slice(0,28))}</option>`).join('')}</select><button type="button" class="b sm" id="bubbleJoin">합치기</button></div>${o.bubbleGroup?'<button type="button" class="b ghost sm" id="bubbleUnjoin">이 말풍선 분리</button>':''}<p class="note">모양이 달라도 연결됩니다. 겹친 내부 테두리는 지우고, 떨어진 몸통은 연결합니다. 배경·테두리는 현재 선택한 말풍선으로 통일하며, 연결 후에는 함께 바뀝니다. 대사·등장 시간·음성은 각각 유지됩니다.</p>`:'<span class="note">자막과 이미지 말풍선은 연결 대상에서 제외됩니다.</span>'}
     </div>
     <textarea data-f="text" rows="3" id="ovText" placeholder="텍스트 (줄바꿈 가능)"></textarea>
     <div class="row"><button type="button" class="b ghost sm" id="spellBtn">✓ 맞춤법 검사</button><button type="button" class="b ghost sm" id="polishBtn">✍ 문장 다듬기</button></div>
@@ -5843,6 +5843,7 @@ function bindText(p, el) {
     save(); requestDraw(); drawTimeline(p);
   });
   bind(el, o, (f, v) => {
+    if(o.bubbleGroup && ['fill','fillA','stroke','strokeW'].includes(f)) p.overlays.filter(x=>x.bubbleGroup===o.bubbleGroup).forEach(x=>x[f]=v);
     if (f === 'start') { // 등장 시각을 옮겨도 사라지는 시각은 그대로 둔다
       if (endAbs) { o.dur = +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2); if (o.start + o.dur > endAbs + 0.001) endAbs = o.start + o.dur; endIn.value = +endAbs.toFixed(2); }
       drawTimeline(p);
