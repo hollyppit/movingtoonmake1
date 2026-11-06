@@ -4525,6 +4525,27 @@ function coverGeom() {
 const targetMM = kind => { if (kind === 'cover') { const g = coverGeom(); return [g.total, g.ph]; } const [pw, ph] = prPageMM(); return kind === 'spread' ? [pw * 2, ph] : [pw, ph]; };
 
 /* 요소 사각형 ↔ 화면(캔버스) 비율 좌표. 본문은 페이지 비율, 표지는 구역 기준 mm */
+// Common 8-way handles and frame resizing for cuts, images and text boxes.
+function printResizeHandles(f) {
+  return {nw:[f.x,f.y],ne:[f.x+f.w,f.y],sw:[f.x,f.y+f.h],se:[f.x+f.w,f.y+f.h],n:[f.x+f.w/2,f.y],s:[f.x+f.w/2,f.y+f.h],w:[f.x,f.y+f.h/2],e:[f.x+f.w,f.y+f.h/2]};
+}
+const printResizeCursor = k => k==='n'||k==='s'?'ns-resize':k==='w'||k==='e'?'ew-resize':k==='nw'||k==='se'?'nwse-resize':'nesw-resize';
+function printResizeRect(f0, handle, nx, ny, locked = false) {
+  const min=.01,l=handle.includes('w'),r=handle.includes('e'),t=handle.includes('n'),b=handle.includes('s'),right=f0.x+f0.w,bottom=f0.y+f0.h;
+  let f={...f0};
+  if(l){f.x=Math.min(nx,right-min);f.w=right-f.x;}else if(r)f.w=Math.max(min,nx-f0.x);
+  if(t){f.y=Math.min(ny,bottom-min);f.h=bottom-f.y;}else if(b)f.h=Math.max(min,ny-f0.y);
+  if(!locked)return f;
+  const horizontal=l||r,vertical=t||b,kx=f.w/f0.w,ky=f.h/f0.h;
+  let k=horizontal&&vertical?(Math.abs(kx-1)>Math.abs(ky-1)?kx:ky):horizontal?kx:ky;
+  const ax=l?right:r?f0.x:f0.x+f0.w/2,ay=t?bottom:b?f0.y:f0.y+f0.h/2;
+  const mx=horizontal?(l?ax:1-ax)/f0.w:2*Math.min(ax,1-ax)/f0.w;
+  const my=vertical?(t?ay:1-ay)/f0.h:2*Math.min(ay,1-ay)/f0.h;
+  k=Math.max(Math.max(min/f0.w,min/f0.h),Math.min(k,mx,my));
+  f.w=f0.w*k;f.h=f0.h*k;f.x=l?ax-f.w:r?ax:ax-f.w/2;f.y=t?ay-f.h:b?ay:ay-f.h/2;
+  return f;
+}
+
 function itemFrac(it, kind = prKind()) {
   if (kind === 'spread') { const sl = slotOf(it); return { x: (sl + it.x) / 2, y: it.y, w: it.w / 2, h: it.h }; }
   if (kind !== 'cover') return { x: it.x, y: it.y, w: it.w, h: it.h };
@@ -4915,7 +4936,7 @@ function drawItem(ctx, it, rx, ry, rw, rh, k, getCut, kind) {
   if (type === 'cut') src = parts ? parts.base : getCut(it.cut); else if (assets.has(it.assetId)) { src = getImg(it.assetId); if (!src) prWaitImg(it.assetId); }
   ctx.save(); ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
   if (src) {
-    const iw = type === 'cut' ? W : src.naturalWidth || src.width, ih = type === 'cut' ? H : src.naturalHeight || src.height, s = it.fit === 'contain' ? Math.min(rw / iw, rh / ih) : Math.max(rw / iw, rh / ih), z = clamp(+it.zoom || 1, 0.2, 6), dw = iw * s * z, dh = ih * s * z;
+    const iw = type === 'cut' ? W : src.naturalWidth || src.width, ih = type === 'cut' ? H : src.naturalHeight || src.height, s = it.fit === 'contain' ? Math.min(rw / iw, rh / ih) : Math.max(rw / iw, rh / ih), z = clamp(+it.zoom || 1, 0.2, 6), stretch = type==='image' && it.fit==='stretch', dw = (stretch?rw:iw*s)*z, dh = (stretch?rh:ih*s)*z;
     ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, rx + (rw - dw) * (it.fx ?? 0.5), ry + (rh - dh) * (it.fy ?? 0.5), dw, dh);
   } else { ctx.fillStyle = '#d8d4c8'; ctx.fillRect(rx, ry, rw, rh); ctx.fillStyle = '#8A8575'; ctx.font = (4 * k) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(type === 'cut' ? prCutName(it.cut) : '이미지', rx + rw / 2, ry + rh / 2); }
   ctx.restore();
@@ -5022,7 +5043,7 @@ function drawPrintPage() {
     const f = itemFrac(it), rx = f.x * cw, ry = f.y * ch, rw = f.w * cw, rh = f.h * ch;
     const co = curOvObj();
     g.save(); g.strokeStyle = '#2F7F6B'; g.lineWidth = co ? 1.5 : 3; g.setLineDash([8, 5]); g.strokeRect(rx, ry, rw, rh); g.setLineDash([]);
-    if (!co) [[rx, ry], [rx + rw, ry], [rx, ry + rh], [rx + rw, ry + rh]].forEach(([x, y]) => { g.fillStyle = '#fff'; g.fillRect(x - 9, y - 9, 18, 18); g.strokeRect(x - 9, y - 9, 18, 18); });
+    if (!co) Object.values(printResizeHandles({x:rx,y:ry,w:rw,h:rh})).forEach(([x, y]) => { g.fillStyle = '#fff'; g.fillRect(x - 9, y - 9, 18, 18); g.strokeRect(x - 9, y - 9, 18, 18); });
     if (co) { // 선택한 말풍선: 주황 점선 + 모서리 크기 조절점
       const b = ovFrameBox(co.it, co.o, { x: rx, y: ry, w: rw, h: rh }), bx = b.cx - b.hw, by = b.cy - b.hh;
       g.strokeStyle = '#C0452F'; g.lineWidth = 3; g.setLineDash([7, 4]); g.strokeRect(bx, by, b.hw * 2, b.hh * 2); g.setLineDash([]);
@@ -5134,6 +5155,7 @@ function itemPanel(it, cov, tw, th) {
   const ty = it.type || 'cut', f = itemFrac(it), mm = v => (v).toFixed(1);
   let h = '<section class="sec"><h3>선택한 ' + (ty === 'text' ? '글상자' : ty === 'image' ? '이미지' : '컷 칸') + '</h3>';
   if (cov) h += '<label><span class="lbl">소속 구역</span><select id="itZone">' + Object.entries(ZONES).map(([k, v]) => '<option value="' + k + '"' + ((it.zone || 'front') === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label><div class="row"><button type="button" class="b ghost sm" id="itFitZone">구역에 꽉 채우기</button></div>';
+  if(ty==='image')h += '<div class="row"><button type="button" class="b sm" id="imFree">↔↕ 가로·세로 자유 변형</button><label class="chk"><input type="checkbox" id="imLock" '+(it.lock===true?'checked':'')+'> 비율 유지</label></div><p class="note">자유 변형은 이미지를 칸 크기에 맞춰 늘입니다. 원본 비율을 유지하며 자르려면 그림 맞춤에서 ‘칸을 가득 채움’을 선택하세요.</p>';
   h += '<div class="g2"><label><span class="lbl">가로 위치(mm)</span><input type="number" step="0.5" id="itX" value="' + mm(f.x * tw) + '"></label><label><span class="lbl">세로 위치(mm)</span><input type="number" step="0.5" id="itY" value="' + mm(f.y * th) + '"></label>' +
     '<label><span class="lbl">너비(mm)</span><input type="number" step="0.5" id="itW" value="' + mm(f.w * tw) + '"></label><label><span class="lbl">높이(mm)</span><input type="number" step="0.5" id="itH" value="' + mm(f.h * th) + '"></label></div>';
   if (ty === 'text') {
@@ -5145,10 +5167,10 @@ function itemPanel(it, cov, tw, th) {
       '<div class="row" style="align-items:center"><label class="chk"><input type="checkbox" id="txBold" ' + (it.bold ? 'checked' : '') + '> 굵게</label><label class="chk">글자색 <input type="color" id="txColor" value="' + (it.color || '#111111') + '"></label><label class="chk">배경 <input type="color" id="txBg" value="' + (it.bg || '#ffffff') + '"></label></div>' +
       '<label class="sl"><span>배경 불투명도</span><input type="range" id="txBgOp" min="0" max="1" step="0.05" value="' + (it.bgOp || 0) + '"></label>';
   } else {
-    h += '<label><span class="lbl">그림 맞춤</span><select id="imFit"><option value="cover"' + (it.fit !== 'contain' ? ' selected' : '') + '>칸을 가득 채움 (넘치는 부분 잘림)</option><option value="contain"' + (it.fit === 'contain' ? ' selected' : '') + '>그림 전체 보이기</option></select></label>' +
+    h += '<label><span class="lbl">그림 맞춤</span><select id="imFit"><option value="cover"' + (it.fit !== 'contain' && it.fit !== 'stretch' ? ' selected' : '') + '>칸을 가득 채움 (넘치는 부분 잘림)</option><option value="contain"' + (it.fit === 'contain' ? ' selected' : '') + '>그림 전체 보이기</option>' + (ty==='image'?'<option value="stretch"'+(it.fit==='stretch'?' selected':'')+'>가로·세로 늘여 맞춤 (자유 변형)</option>':'') + '</select></label>' +
       '<label class="sl"><span>그림 확대·축소 <b id="imZoomV">' + Math.round((+it.zoom || 1) * 100) + '%</b></span><input type="range" id="imZoom" min="0.2" max="4" step="0.01" value="' + (+it.zoom || 1) + '"></label>' +
       '<label class="sl"><span>그림 가로 위치</span><input type="range" id="imFx" min="0" max="1" step="0.01" value="' + (it.fx ?? 0.5) + '"></label><label class="sl"><span>그림 세로 위치</span><input type="range" id="imFy" min="0" max="1" step="0.01" value="' + (it.fy ?? 0.5) + '"></label>' +
-      (ty === 'image' ? '<label class="chk"><input type="checkbox" id="imLock" ' + (it.lock !== false ? 'checked' : '') + '> 크기 조절 시 비율 유지</label>' : '');
+      '<p class="note">모서리는 가로·세로, 변 가운데는 한 방향으로 조절합니다. Shift를 누르면 비율 유지가 임시 전환됩니다.</p>';
     const bm = borderMode(it), cfg = PR();
     h += '<label><span class="lbl">테두리 (이 칸만)</span><select id="imBMode"><option value="follow"' + (bm === 'follow' ? ' selected' : '') + '>전체 설정 따름</option><option value="off"' + (bm === 'off' ? ' selected' : '') + '>없음</option><option value="custom"' + (bm === 'custom' ? ' selected' : '') + '>직접 지정 (굵기·색)</option></select></label>' +
       (bm === 'custom' ? '<div class="g2"><label><span class="lbl">굵기(mm)</span><input type="number" id="imBorder" min="0" max="5" step="0.1" value="' + (it.border ?? cfg.border) + '"></label><label><span class="lbl">색</span><input type="color" id="imBColor" value="' + (it.borderColor || cfg.borderColor || '#000000') + '"></label></div>' : '') +
@@ -5329,7 +5351,7 @@ function bindPrint() {
     const [tw, th] = targetMM(kind), put = () => { const f = itemFrac(it); const r = { x: clamp(f.x, -0.5, 1.5), y: clamp(f.y, -0.5, 1.5), w: Math.max(0.01, f.w), h: Math.max(0.01, f.h) }; if (cropOn() && it.fill !== 'spread') { r.w = Math.min(r.w, 1); r.h = Math.min(r.h, 1); r.x = clamp(r.x, 0, 1 - r.w); r.y = clamp(r.y, 0, 1 - r.h); } setItemFrac(it, r); prRefresh(); };
     const num = (id, fn) => { const el = q(id); if (el) el.oninput = e => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) { fn(v); put(); } }; };
     num('#itX', v => { const f = itemFrac(it); setItemFrac(it, { ...f, x: v / tw }); }); num('#itY', v => { const f = itemFrac(it); setItemFrac(it, { ...f, y: v / th }); });
-    num('#itW', v => { const f = itemFrac(it); if (v > 1) setItemFrac(it, { ...f, w: v / tw }); }); num('#itH', v => { const f = itemFrac(it); if (v > 1) setItemFrac(it, { ...f, h: v / th }); });
+    num('#itW', v => {const f=itemFrac(it);if(v>1){const w=v/tw,h=it.type==='image'&&it.lock===true?f.h*w/f.w:f.h;setItemFrac(it,{...f,w,h});if(q('#itH'))q('#itH').value=(h*th).toFixed(1);}}); num('#itH', v => {const f=itemFrac(it);if(v>1){const h=v/th,w=it.type==='image'&&it.lock===true?f.w*h/f.h:f.w;setItemFrac(it,{...f,w,h});if(q('#itW'))q('#itW').value=(w*tw).toFixed(1);}});
     if (q('#itZone')) q('#itZone').onchange = e => { moveToZone(it, e.target.value); prRerender(); };
     if (q('#itFitZone')) q('#itFitZone').onclick = () => { fitToZone(it); prRerender(); };
     const on = (id, ev, fn) => { const el = q(id); if (el) el[ev] = e => { fn(e.target); }; };
@@ -5342,6 +5364,7 @@ function bindPrint() {
     on('#imZoom', 'oninput', el => { it.zoom = +el.value; const v = $('#imZoomV'); if (v) v.textContent = Math.round(it.zoom * 100) + '%'; prRefresh(); });
     on('#imFit', 'onchange', el => { it.fit = el.value; prRefresh(); }); on('#imFx', 'oninput', el => { it.fx = +el.value; prRefresh(); }); on('#imFy', 'oninput', el => { it.fy = +el.value; prRefresh(); });
     on('#imBorder', 'oninput', el => { const v = parseFloat(el.value); if (!Number.isNaN(v)) { it.border = clamp(v, 0, 5); it.borderOn = true; prRefresh(); } }); on('#imLock', 'onchange', el => { it.lock = el.checked; save(); });
+    on('#imFree','onclick',()=>{histSnap();it.lock=false;it.fit='stretch';it.zoom=1;it.fx=it.fy=.5;save();prRerender();toast('가로·세로 자유 변형: 모서리나 변 가운데 조절점을 드래그하세요');});
     on('#imBColor', 'oninput', el => { it.borderColor = el.value; it.borderOn = true; prRefresh(); });
     on('#imBMode', 'onchange', el => {
       if (el.value === 'follow') { delete it.borderOn; delete it.border; delete it.borderColor; }
@@ -5457,7 +5480,7 @@ let prClip = null, prOvClip = null; // 복사한 컷 칸·이미지·글상자 /
 /* 이미지·글상자 추가 (본문: 페이지 비율, 표지: 구역 기준 mm) */
 async function addPrintImage(file) {
   const id = await addAsset(file); await waitImg(id); const im = getImg(id), ratio = im && im.naturalWidth ? im.naturalHeight / im.naturalWidth : 1, name = (file.name || '이미지').replace(/\.[^.]+$/, '');
-  const item = { id: uid(), type: 'image', vis: true, assetId: id, name, fit: 'cover', fx: 0.5, fy: 0.5, lock: true }; // 테두리는 전체 설정을 따른다
+  const item = { id: uid(), type: 'image', vis: true, assetId: id, name, fit: 'stretch', fx: 0.5, fy: 0.5, lock: false }; // 새 이미지는 가로·세로를 독립적으로 변형
   if (prIsCover()) {
     const g = coverGeom(), z = prZone, zw = z === 'all' ? g.total : g.wid[z], w = zw * (z === 'all' ? 0.5 : 0.9), h = Math.min(g.ph * 0.9, w * ratio), w2 = Math.min(w, h / ratio);
     Object.assign(item, { zone: z, x: (zw - w2) / 2, y: (g.ph - h) / 2, w: w2, h });
@@ -5524,7 +5547,7 @@ function addPrintText() {
         if (Math.hypot(p.px - x, p.py - y) < HIT) { grab(e, { mode: 'ovresize', it: co.it, oid: co.o.id, cx: b.cx, cy: b.cy, d0: Math.max(1, Math.hypot(x - b.cx, y - b.cy)), s0: co.e && co.e.s != null ? co.e.s : 1 }); return; }
       }
     } else if (cur) {
-      const f = itemFrac(cur), cs = { nw: [f.x, f.y], ne: [f.x + f.w, f.y], sw: [f.x, f.y + f.h], se: [f.x + f.w, f.y + f.h] };
+      const f = itemFrac(cur), cs = printResizeHandles(f);
       for (const [k, [x, y]] of Object.entries(cs)) if (Math.hypot(p.px - x * Wp, p.py - y * Hp) < HIT) { grab(e, { mode: 'resize', k, it: cur, f0: { ...f } }); return; }
     }
     const h = hitTest(p), hit = h && h.it;
@@ -5549,7 +5572,7 @@ function addPrintText() {
       const p = pt(e), cur = tItems().find(x => x.id === prSel), co = curOvObj(); let cursor = '';
       if (co) { const th = tailHandle(co.it, co.o, rectOf(co.it)); if (th && Math.hypot(p.px - th.x, p.py - th.y) < HIT) cursor = 'crosshair'; }
       if (co && !cursor) { const b = ovFrameBox(co.it, co.o, rectOf(co.it)); [[b.cx - b.hw, b.cy - b.hh, 'nwse-resize'], [b.cx + b.hw, b.cy - b.hh, 'nesw-resize'], [b.cx - b.hw, b.cy + b.hh, 'nesw-resize'], [b.cx + b.hw, b.cy + b.hh, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x, p.py - y) < HIT) cursor = cu; }); }
-      else if (cur) { const f = itemFrac(cur); [[f.x, f.y, 'nwse-resize'], [f.x + f.w, f.y, 'nesw-resize'], [f.x, f.y + f.h, 'nesw-resize'], [f.x + f.w, f.y + f.h, 'nwse-resize']].forEach(([x, y, cu]) => { if (Math.hypot(p.px - x * CW(), p.py - y * CH()) < HIT) cursor = cu; }); }
+      else if (cur) { Object.entries(printResizeHandles(itemFrac(cur))).forEach(([k,[x,y]]) => { if (Math.hypot(p.px-x*CW(),p.py-y*CH())<HIT) cursor=printResizeCursor(k); }); }
       if (!cursor && hitTest(p)) cursor = 'move';
       c.style.cursor = cursor; return;
     }
@@ -5579,13 +5602,9 @@ function addPrintText() {
       if (!prIsCover() || cropOn()) { x = clamp(x, 0, Math.max(0, 1 - d.w)); y = clamp(y, 0, Math.max(0, 1 - d.h)); } else { x = clamp(x, -d.w * 0.8, 1 - d.w * 0.2); y = clamp(y, -d.h * 0.8, 1 - d.h * 0.2); }
       setItemFrac(it, { x, y, w: d.w, h: d.h });
     } else {
-      const f0 = d.f0, left = d.k.includes('w'), top = d.k.includes('n'); let nx = clamp(snap(clamp(p.x, 0, 1), xs, thrX), 0, 1), ny = clamp(snap(clamp(p.y, 0, 1), ys, thrY), 0, 1);
-      const r0 = f0.x + f0.w, b0 = f0.y + f0.h; let f = { ...f0 };
-      if (left) { nx = Math.min(nx, r0 - MIN); f.x = nx; f.w = r0 - nx; } else { nx = Math.max(nx, f0.x + MIN); f.w = nx - f0.x; }
-      if (top) { ny = Math.min(ny, b0 - MIN); f.y = ny; f.h = b0 - ny; } else { ny = Math.max(ny, f0.y + MIN); f.h = ny - f0.y; }
-      if (it.type === 'image' && it.lock !== false) { // 비율 유지: 너비를 기준으로 높이를 맞추고 기준 모서리는 고정
-        const [tw, th] = targetMM(prKind()), ratio = (f0.h * th) / (f0.w * tw), nh = f.w * tw * ratio / th; if (top) f.y = b0 - nh; f.h = nh;
-      }
+      const nx=clamp(snap(clamp(p.x,0,1),xs,thrX),0,1),ny=clamp(snap(clamp(p.y,0,1),ys,thrY),0,1);
+      const locked=(it.type==='image' && it.lock===true)!==e.shiftKey;
+      const f=printResizeRect(d.f0,d.k,nx,ny,locked);
       setItemFrac(it, f);
     }
     drawPrintPage();
@@ -5801,7 +5820,7 @@ async function openPageImport() {
             const p = srcPanel(it); if (!p) { skipped++; continue; }
             for (const id of srcCutAssetIds(p)) if (assets.has(id)) await waitImg(id).catch(() => {});
             const blob = await canvasBlob(drawSrcCut(src.pr, p, it.ov, 2000), 'image/jpeg', 0.94);
-            ni.type = 'image'; ni.assetId = await addAsset(blob); ni.name = '컷 ' + (src.pr.panels.indexOf(p) + 1) + ' · ' + src.title; ni.lock = true; delete ni.cut;
+            ni.type = 'image'; ni.assetId = await addAsset(blob); ni.name = '컷 ' + (src.pr.panels.indexOf(p) + 1) + ' · ' + src.title; ni.lock = false; delete ni.cut;
           }
           if (type !== 'text') { // 그 프로젝트의 테두리 기본값이 이 프로젝트와 다르면 칸에 직접 지정해 모양을 지킨다
             const on = it.borderOn ?? (sc.borderOn !== false), w = +(it.border ?? sc.border) || 0, color = it.borderColor || sc.borderColor || '#000000';
