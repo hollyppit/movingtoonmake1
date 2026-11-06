@@ -2922,7 +2922,7 @@ function drawPanel(ctx, p, lt, opt = {}) {
   }
   ctx.restore();
   (p.layers || []).forEach(l => drawLayer(ctx, l, lt, { still: opt.still, selected: opt.editing && l.id === selLayer && !selOverlay() }));
-  if (opt.overlays !== false) p.overlays.forEach(o => drawOverlay(ctx, o, lt, { editing: opt.editing, selected: opt.all || (o.id === selOv && opt.editing) }));
+  if (opt.overlays !== false) drawOverlayList(ctx,p.overlays,lt,opt);
 }
 
 /* ---- 말풍선·나레이션 ---- */
@@ -3126,10 +3126,70 @@ function drawOverlay(ctx, o, lt, opt = {}) {
     const R = Math.max(L.rx, L.ry) * 1.7 + (tip ? Math.hypot(tip.x, tip.y) : 0);
     ctx.beginPath(); ctx.rect(-R, -R, 2 * R * st.wipe, 2 * R); ctx.clip();
   }
-  drawShape(ctx, o, L, tip);
-  drawText(ctx, o, L, st.chars);
+  if (!opt.textOnly) drawShape(ctx, o, L, tip);
+  if (!opt.shapeOnly) drawText(ctx, o, L, st.chars);
   ctx.restore();
 }
+// Linked shapes keep dialogue objects editable and animate on their original timelines.
+const canJoinBubble = o => o.kind !== 'caption' && !o.shapeImg;
+function bubbleBatches(list) {
+  const groups = new Map(), batches = [];
+  list.forEach(o => {
+    if (!o.bubbleGroup || !canJoinBubble(o)) { batches.push([o]); return; }
+    let g = groups.get(o.bubbleGroup);
+    if (!g) { g = []; groups.set(o.bubbleGroup, g); batches.push(g); }
+    g.push(o);
+  });
+  return batches;
+}
+function linkBubbles(p, a, b) {
+  if (!a || !b || a === b || !canJoinBubble(a) || !canJoinBubble(b)) return false;
+  histSnap(); const old = new Set([a.bubbleGroup,b.bubbleGroup].filter(Boolean)), id = a.bubbleGroup || b.bubbleGroup || uid();
+  p.overlays.forEach(o => { if (canJoinBubble(o) && (o === a || o === b || old.has(o.bubbleGroup))) o.bubbleGroup = id; });
+  save(); renderInspector(); renderPanels(); requestDraw(); return true;
+}
+function unlinkBubble(p, o) {
+  histSnap(); const id=o.bubbleGroup; delete o.bubbleGroup;
+  const remaining=p.overlays.filter(x=>x.bubbleGroup===id); if(remaining.length===1)delete remaining[0].bubbleGroup;
+  save(); renderInspector(); renderPanels(); requestDraw();
+}
+const joinedBubbleCache = new Map();
+function joinedBubbleShape(list, lt, opt = {}) {
+  const force = o => !!(opt.all || opt.selected || (opt.editing && o.id === selOv));
+  const active = list.map(o=>({o,L:layoutOv(scratch(),o),st:ovState(o,lt,force(o))})).filter(v=>v.st && v.st.alpha>0);
+  if (!active.length) return null;
+  const style=list[0];
+  const key=JSON.stringify([W,H,style.fill,style.fillA,style.stroke,style.strokeW,active.map(({o,L,st})=>[o.id,o.kind,o.x,o.y,o.size,o.tail,o.tailW,o.flashLen,o.flashGap,L.rx,L.ry,{...st,chars:0}])]);
+  if(joinedBubbleCache.has(key))return joinedBubbleCache.get(key);
+  const mask=document.createElement('canvas');mask.width=W;mask.height=H;const m=mask.getContext('2d');
+  active.forEach(({o})=>drawOverlay(m,{...o,fill:'#ffffff',fillA:1,stroke:'#ffffff',strokeW:0},lt,{selected:force(o),shapeOnly:true}));
+  // Short, rounded bridges join separated bodies; existing overlap becomes a single silhouette.
+  for(let i=1;i<active.length;i++){
+    const a=active[i-1],b=active[i],ax=a.o.x*W+a.st.dx,ay=a.o.y*H+a.st.dy,bx=b.o.x*W+b.st.dx,by=b.o.y*H+b.st.dy;
+    m.save();m.globalAlpha=Math.min(a.st.alpha,b.st.alpha);m.strokeStyle='#fff';m.lineCap='round';
+    m.lineWidth=Math.max(4,Math.min(a.L.rx,a.L.ry,b.L.rx,b.L.ry)*.42*Math.min(a.st.scale,b.st.scale));
+    m.beginPath();m.moveTo(ax,ay);m.lineTo(bx,by);m.stroke();m.restore();
+  }
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d'),sw=+style.strokeW||0;
+  if(sw>0){for(let i=0;i<32;i++){const a=i*Math.PI/16;g.drawImage(mask,Math.cos(a)*sw,Math.sin(a)*sw);}g.globalCompositeOperation='source-in';g.fillStyle=style.stroke||'#111';g.fillRect(0,0,W,H);g.globalCompositeOperation='destination-out';g.drawImage(mask,0,0);g.globalCompositeOperation='source-over';}
+  m.globalCompositeOperation='source-in';m.fillStyle=rgba(style.fill,style.fillA??1);m.fillRect(0,0,W,H);g.drawImage(mask,0,0);
+  while(joinedBubbleCache.size>=Math.max(1,Math.min(16,Math.floor(16000000/(W*H)))))joinedBubbleCache.delete(joinedBubbleCache.keys().next().value);joinedBubbleCache.set(key,c);return c;
+}
+function drawOverlayList(ctx,list,lt,opt={}) {
+  bubbleBatches(list).forEach(batch=>{
+    if(batch.length===1){const o=batch[0];drawOverlay(ctx,o,lt,{...opt,selected:opt.all||opt.selected||(opt.editing&&o.id===selOv)});return;}
+    const shape=joinedBubbleShape(batch,lt,opt);if(shape)ctx.drawImage(shape,0,0);
+    batch.forEach(o=>drawOverlay(ctx,o,lt,{...opt,selected:opt.all||opt.selected||(opt.editing&&o.id===selOv),textOnly:true}));
+  });
+}
+// Apply print-only edits without losing shared shape membership.
+function printBubbleList(list, overrides) {
+  return list.filter(o=>overrides?.[o.id]?.vis!==false).map(o=>{
+    const e=overrides?.[o.id],s=e?.s??1,n={...withText(o,e),x:o.x+(e?.dx||0),y:o.y+(e?.dy||0),size:o.size*s,w:o.w*s,strokeW:(+o.strokeW||0)*s};
+    if(n.tail)n.tail={x:n.x+(n.tail.x-o.x)*s,y:n.y+(n.tail.y-o.y)*s};return n;
+  });
+}
+
 function drawGuides(ctx) {
   if ((P.aspect || '9:16') !== '9:16') return; // 쇼츠·릴스 UI 영역은 세로 화면에서만 의미가 있다
   ctx.save(); ctx.fillStyle = 'rgba(181,67,47,.16)'; ctx.strokeStyle = 'rgba(231,144,127,.6)'; ctx.lineWidth = 2; ctx.setLineDash([12, 10]);
@@ -3825,6 +3885,9 @@ function tabText(p) {
     ${list.length ? `<div class="olist">${list.map(x => `<button type="button" class="oi ${x.id === selOv ? 'on' : ''}" data-ov="${x.id}"><b>${KINDS[x.kind]}${x.voice ? (voiceStale(x) ? ' ⚠' : ' 🔊') : ''}</b><span>${esc(x.text || '(빈 텍스트)')}</span><small>${(+x.start).toFixed(1)}s</small></button>`).join('')}</div>` : '<span class="note">아직 없습니다.</span>'}</div>
   ${o ? `
   <div class="box grp">
+    <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px"><span class="lbl">말풍선 합치기</span>
+    ${canJoinBubble(o) ? `<div class="row"><select id="bubbleJoinTarget" aria-label="합칠 말풍선" style="flex:1"><option value="">합칠 말풍선 선택</option>${p.overlays.filter(x=>x!==o&&canJoinBubble(x)&&(!o.bubbleGroup||x.bubbleGroup!==o.bubbleGroup)).map(x=>`<option value="${x.id}">${esc(KINDS[x.kind]+': '+(x.text||'(빈 텍스트)').slice(0,28))}</option>`).join('')}</select><button type="button" class="b sm" id="bubbleJoin">합치기</button></div>${o.bubbleGroup?'<button type="button" class="b ghost sm" id="bubbleUnjoin">이 말풍선 분리</button>':''}<p class="note">모양이 달라도 연결됩니다. 겹친 내부 테두리는 지우고, 떨어진 몸통은 연결합니다. 배경·테두리는 목록에서 먼저 나온 말풍선을 따릅니다. 대사·등장 시간·음성은 각각 유지됩니다.</p>`:'<span class="note">자막과 이미지 말풍선은 연결 대상에서 제외됩니다.</span>'}
+    </div>
     <textarea data-f="text" rows="3" id="ovText" placeholder="텍스트 (줄바꿈 가능)"></textarea>
     <div class="row"><button type="button" class="b ghost sm" id="spellBtn">✓ 맞춤법 검사</button><button type="button" class="b ghost sm" id="polishBtn">✍ 문장 다듬기</button></div>
     <div id="polishOut" hidden class="box"><div class="lbl">제안</div><div id="polishTxt" style="white-space:pre-wrap;margin:4px 0 8px"></div><div class="row"><button type="button" class="b sm" id="polishOk">적용</button><button type="button" class="b ghost sm" id="polishNo">취소</button></div></div>
@@ -3966,7 +4029,7 @@ document.addEventListener('paste', e => {
   const source = makeClip.item, ids = [source.assetId, source.shapeImg, source.voice?.assetId].filter(Boolean);
   if (ids.some(id => !assets.has(id))) { e.preventDefault(); toast('복사한 요소의 파일을 찾을 수 없습니다. 다시 복사해 주세요.'); return; }
   e.preventDefault(); stop(); histSnap();
-  const item = JSON.parse(JSON.stringify(source)); item.id = uid();
+  const item = JSON.parse(JSON.stringify(source)); item.id = uid(); delete item.bubbleGroup;
   item.start = clamp(+item.start || 0, 0, Math.max(0, panelDur(p) - .2));
   if (+item.dur > 0) item.dur = Math.min(+item.dur, panelDur(p) - item.start);
   if (item.kind === 'layer') { item.name = (item.name || '이미지') + ' 복사'; (p.layers ||= []).push(item); selLayer = item.id; selOv = null; tab = 'layer'; }
@@ -4287,7 +4350,7 @@ async function renderOverlaysCanvas(list, maxSide = 0) {
   const k = maxSide && Math.max(W, H) > maxSide ? maxSide / Math.max(W, H) : 1, c = document.createElement('canvas');
   c.width = Math.round(W * k); c.height = Math.round(H * k);
   const g = c.getContext('2d'); g.scale(k, k);
-  list.forEach(o => drawOverlay(g, o, 0, { selected: true }));
+  drawOverlayList(g,list,0,{all:true});
   return c;
 }
 
@@ -4647,6 +4710,11 @@ function ovFrameBox(it, o, r) { // 말풍선 몸통의 화면(캔버스) 좌표:
   return { cx: xf.ox + (b.cx + (e && e.dx ? e.dx * W : 0)) * xf.kc, cy: xf.oy + (b.cy + (e && e.dy ? e.dy * H : 0)) * xf.kc, hw: b.rx * s * xf.kc, hh: b.ry * s * xf.kc, xf };
 }
 function drawCutOvs(ctx, it, parts, xf, rx, ry, rw, rh) {
+  if(ovList(it).some(o=>o.bubbleGroup)){
+    const list=printBubbleList(ovList(it),it.ov);ctx.save();
+    if(!ovList(it).some(o=>ovMoved(it.ov?.[o.id]))){ctx.beginPath();ctx.rect(rx,ry,rw,rh);ctx.clip();}
+    ctx.translate(xf.ox,xf.oy);ctx.scale(xf.kc,xf.kc);drawOverlayList(ctx,list,0,{all:true});ctx.restore();return;
+  }
   ovList(it).forEach(o => {
     const e = it.ov && it.ov[o.id]; if (e && e.vis === false) return;
     const part = parts.ovs.get(ovKey(o, e)) || parts.last.get(o.id); if (!part) return;
@@ -5570,12 +5638,7 @@ function drawSrcCut(sp, p, ov, maxSide) {
     c.width = Math.round(sw * k); c.height = Math.round(sh * k);
     const g = c.getContext('2d'); g.scale(k, k);
     drawPanel(g, p, 0, { still: true, overlays: false });
-    p.overlays.forEach(o => {
-      const e = ov && ov[o.id]; if (e && e.vis === false) return;
-      const s = e && e.s != null ? e.s : 1;
-      g.save(); g.translate(o.x * sw + (e && e.dx ? e.dx * sw : 0), o.y * sh + (e && e.dy ? e.dy * sh : 0)); g.scale(s, s); g.translate(-o.x * sw, -o.y * sh);
-      drawOverlay(g, withText(o, e), 0, { selected: true }); g.restore();
-    });
+    drawOverlayList(g,printBubbleList(p.overlays,ov),0,{all:true});
     return c;
   } finally { W = oW; H = oH; }
 }
@@ -5767,6 +5830,9 @@ function bindText(p, el) {
   }));
   $$('[data-ov]', el).forEach(b => (b.onclick = () => { selOv = b.dataset.ov; const o = selOverlay(); scrubT = Math.min(panelDur(p), (+o.start || 0) + 0.8); renderInspector(); requestDraw(); }));
   const o = selOverlay(); if (!o) return;
+  const join=$('#bubbleJoin',el),unjoin=$('#bubbleUnjoin',el);
+  if(join)join.onclick=()=>{const target=p.overlays.find(x=>x.id===$('#bubbleJoinTarget',el).value);if(!target)return toast('합칠 말풍선을 선택하세요');linkBubbles(p,o,target);toast('말풍선을 연결했습니다. 위치를 옮겨 구도를 조절하세요.');};
+  if(unjoin)unjoin.onclick=()=>unlinkBubble(p,o);
   const endIn = $('#ovEnd', el);
   let endAbs = +o.dur > 0 ? (+o.start || 0) + (+o.dur) : 0;
   endIn.value = endAbs ? +endAbs.toFixed(2) : 0;
@@ -5836,7 +5902,7 @@ function bindText(p, el) {
   const vd = $('#vDel', el); if (vd) vd.onclick = () => { const id = o.voice.assetId; o.voice = null; o._vst = ''; dropAssetIfUnused(id); save(); renderInspector(); };
   const tc = $('#tailChk', el); if (tc) tc.onchange = () => { o.tail = tc.checked ? { x: o.x - 0.08, y: o.y + 0.1 } : null; save(); requestDraw(); };
   $('#ovNow', el).onclick = () => { o.start = +scrubT.toFixed(1); save(); renderInspector(); requestDraw(); };
-  $('#ovDup', el).onclick = () => { const n = { ...JSON.parse(JSON.stringify(o)), id: uid(), y: clamp(o.y + 0.08, 0, 1), start: +(o.start + 0.8).toFixed(1) }; if (n.tail) n.tail.y = clamp(n.tail.y + 0.08, 0, 1); p.overlays.push(n); selOv = n.id; save(); renderInspector(); renderPanels(); requestDraw(); };
+  $('#ovDup', el).onclick = () => { const n = { ...JSON.parse(JSON.stringify(o)), id: uid(), y: clamp(o.y + 0.08, 0, 1), start: +(o.start + 0.8).toFixed(1) }; delete n.bubbleGroup; if (n.tail) n.tail.y = clamp(n.tail.y + 0.08, 0, 1); p.overlays.push(n); selOv = n.id; save(); renderInspector(); renderPanels(); requestDraw(); };
   $('#ovDel', el).onclick = () => deleteOverlay(p, o);
 }
 function deleteOverlay(p, o) { p.overlays = p.overlays.filter(x => x !== o); selOv = null; save(); renderInspector(); renderPanels(); requestDraw(); }

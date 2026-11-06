@@ -122,10 +122,10 @@ async function psdPrepare(p) {
   await loadFontsNow(); await psdPrepareFontNames();
   for (const id of [curAsset(p), ...(p.layers || []).map(l => l.assetId), ...p.overlays.map(o => o.shapeImg)].filter(Boolean)) if (assets.has(id)) await waitImg(id);
 }
-function psdOverlay(b, o, name) {
+function psdOverlay(b, o, name, textOnly = false) {
   const L = layoutOv(b.ctx, o), x = o.x * W, y = o.y * H;
   const tip = o.tail && ['speech', 'thought', 'shout'].includes(o.kind) && !(o.shapeImg && assets.has(o.shapeImg)) ? { x: o.tail.x * W - x, y: o.tail.y * H - y } : null;
-  b.raster(name + ' 말풍선', g => { g.translate(x, y); drawShape(g, o, L, tip); });
+  if (!textOnly) b.raster(name + ' 말풍선', g => { g.translate(x, y); drawShape(g, o, L, tip); });
   const first = b.layers.length;
   b.letters(name + ' 텍스트', g => { g.translate(x, y); drawText(g, o, L, Infinity); });
   if (o.kind === 'caption') {
@@ -134,13 +134,19 @@ function psdOverlay(b, o, name) {
     b.layers.slice(first).forEach(l => { l.effects = { scale: 1, dropShadow: [{ enabled: true, blendMode: 'multiply', color: { r: 0, g: 0, b: 0 }, opacity: .55, useGlobalLight: false, angle: 0, distance: { units: 'Pixels', value: 0 }, size: { units: 'Pixels', value: 7 * scale }, choke: { units: 'Pixels', value: 0 }, noise: 0, contour: { name: 'Linear', curve: [{ x: 0, y: 0 }, { x: 255, y: 255 }] }, antialiased: false, present: true, showInDialog: true, layerConceals: true }], stroke: [{ enabled: true, position: 'outside', fillType: 'color', blendMode: 'normal', opacity: 1, size: { units: 'Pixels', value: Math.max(2, (+o.strokeW || 4) * 2.2) * scale / 2 }, color: { r: rgb[0], g: rgb[1], b: rgb[2] } }] }; });
   }
 }
+function psdOverlayList(b,list,name='') {
+  bubbleBatches(list).forEach((batch,i)=>{
+    if(batch.length>1){b.raster(name+' 연결 말풍선 '+(i+1),g=>{const c=joinedBubbleShape(batch,0,{all:true});if(c)g.drawImage(c,0,0);});batch.forEach((o,j)=>psdOverlay(b,o,name+' '+(i+1)+'-'+(j+1),true));}
+    else psdOverlay(b,batch[0],name+' '+(i+1));
+  });
+}
 function psdCut(b, p, name) {
   b.raster(name + ' 그림', g => drawPanel(g, { ...p, layers: [], overlays: [] }, 0, { still: true, overlays: false }));
   (p.layers || []).forEach((l, i) => { if (l.vis) b.raster(name + (l.ink ? ' 효과음 ' : ' 이미지 ') + (l.name || i + 1), g => drawLayer(g, l, 0, { still: true })); });
 }
 async function exportCutPsd(p) {
   await psdPrepare(p); const b = psdBuilder(W, H); psdCut(b, p, '컷');
-  p.overlays.forEach((o, i) => psdOverlay(b, o, String(i + 1)));
+  psdOverlayList(b,p.overlays,'컷');
   return b.blob();
 }
 async function exportPrintPsd() {
@@ -162,7 +168,12 @@ async function exportPrintPsd() {
         if (it.vis === false) continue;
         const f = itemFrac(it, job.kind), rx = f.x * pw, ry = f.y * ph, rw = f.w * pw, rh = f.h * ph;
         g.save(); if (M) { g.beginPath(); g.rect(0, 0, pw, ph); g.clip(); }
-        const ovLayers = (xf, label) => ovList(it).forEach((original, i) => { // 칸 위의 말풍선(옮겨 온 것 포함)을 편집 가능한 레이어로
+        const ovLayers = (xf, label) => {
+          if(ovList(it).some(o=>o.bubbleGroup)){
+            g.save();if(!ovList(it).some(o=>ovMoved(it.ov?.[o.id]))){g.beginPath();g.rect(rx,ry,rw,rh);g.clip();}
+            g.translate(xf.ox,xf.oy);g.scale(xf.kc,xf.kc);psdOverlayList(b,printBubbleList(ovList(it),it.ov),label);g.restore();return;
+          }
+          ovList(it).forEach((original, i) => { // 칸 위의 말풍선(옮겨 온 것 포함)을 편집 가능한 레이어로
           const e = it.ov && it.ov[original.id]; if (e && e.vis === false) return;
           const o = withText(original, e), s = e && e.s != null ? e.s : 1;
           g.save(); if (!ovMoved(e)) { g.beginPath(); g.rect(rx, ry, rw, rh); g.clip(); }
@@ -170,6 +181,7 @@ async function exportPrintPsd() {
           g.scale(xf.kc * s, xf.kc * s); g.translate(-o.x * W, -o.y * H);
           psdOverlay(b, o, label + ' ' + (i + 1)); g.restore();
         });
+        };
         if (it.type === 'text') {
           b.raster('글상자 배경', c => drawTextItem(c, { ...it, text: '' }, rx, ry, rw, rh, k));
           b.letters('글상자', c => drawTextItem(c, { ...it, bgOp: 0 }, rx, ry, rw, rh, k));
