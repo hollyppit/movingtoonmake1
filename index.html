@@ -444,7 +444,8 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
         <div class="row" id="bulkBtns" hidden>
           <button type="button" class="b ghost sm" id="bkGen" title="선택한 컷의 이미지를 만듭니다 (이미 이미지가 있으면 새 버전이 추가됩니다)">이미지 생성</button>
           <button type="button" class="b ghost sm" id="bkRegen" title="선택한 컷을 각 컷의 ‘재생성 방식’대로 다시 만듭니다">↻ 재생성</button>
-          <button type="button" class="b sm" id="bkVid" title="선택한 컷을 클링으로 영상화합니다. 동시에 4컷씩 진행합니다">영상 생성 (4컷씩)</button>
+          <button type="button" class="b ghost sm" id="bkFit" title="선택한 컷의 이미지를 지금 화면 비율에 맞춥니다">📐 비율 맞추기</button>
+          <button type="button" class="b sm" id="bkVid"title="선택한 컷을 클링으로 영상화합니다. 동시에 4컷씩 진행합니다">영상 생성 (4컷씩)</button>
           <button type="button" class="b ghost sm" id="bkCancel" hidden>대기 취소</button>
         </div>
         <div class="st" id="bulkSt"></div>
@@ -464,6 +465,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <span id="tc" class="tc">0.0 / 4.0s</span>
       <label class="allseek" title="전체 영상에서 보고 싶은 구간으로 이동 (재생 중에도 끌면 그 지점부터 이어서 재생)">전체 <input type="range" id="scrubAll" min="0" max="1000" value="0" aria-label="전체 시간"> <span id="tcAll" class="tc">0.0s</span></label>
       <button type="button" class="b ghost sm" id="imgEdit" aria-pressed="false" title="컷 안에서 이미지를 끌어 옮기고 크기를 바꿉니다 (Esc로 끝내기)">🖼 이동·크기</button>
+      <button type="button" class="b ghost sm" id="fitOpen" title="이 컷·체크한 컷·전체 컷의 이미지를 지금 화면 비율에 맞춥니다 (꽉 채우기 / 흐린 배경 / AI 확장)">📐 비율 맞추기</button>
       <button type="button" class="b ghost sm" id="makeInkOpen">✏ 효과음 펜</button>
       <label class="chk"><input type="checkbox" id="guides"> 쇼츠 안전영역</label>
     </div>
@@ -2236,7 +2238,7 @@ async function genSheet(c) {
   c._busy = false; save(); renderChars();
 }
 
-function resetFraming(p) { p.adj = { ...ADJ0 }; p.zoom = 1; p.fx = 0.5; p.fy = 0.5; p.ix = 0; p.iy = 0; }
+function resetFraming(p) { p.adj = { ...ADJ0 }; p.zoom = 1; p.fx = 0.5; p.fy = 0.5; p.ix = 0; p.iy = 0; p.bgFill = null; }
 
 /* 보정·크롭을 반영한 9:16 정지 화면(말풍선 제외) */
 async function bakePanel(p, type = 'image/png', q) {
@@ -2379,6 +2381,140 @@ $('#bkGen').onclick = () => bulkImages('gen');
 $('#bkRegen').onclick = () => bulkImages('regen');
 $('#bkVid').onclick = bulkVideos;
 $('#bkCancel').onclick = () => { if (bulkImg) bulkImg.cancel = true; vq.length = 0; renderBulk(); toast('대기 중인 컷을 취소했습니다. 이미 시작된 작업은 끝까지 진행됩니다'); };
+
+/* =========================================================
+   비율 맞추기: 컷 이미지를 지금 제작 화면 비율(W×H)에 맞춘다
+   - fill: 꽉 채우기 (넘치는 가장자리는 잘림) · 무료
+   - fit : 그림 전체 보이기 + 남는 공간은 같은 그림을 흐리게 · 무료
+   - ai  : 모자란 영역을 AI가 그려 넣은 새 이미지 → 새 버전 (원본은 이전 버전으로 남음)
+   ========================================================= */
+const GM_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+const nearestGmAspect = r => GM_RATIOS.reduce((best, s) => { const [a, b] = s.split(':').map(Number), [c, d] = best.split(':').map(Number); return Math.abs(Math.log(a / b / r)) < Math.abs(Math.log(c / d / r)) ? s : best; }, '1:1');
+const oaSizeFor = r => (r > 1.2 ? '1536x1024' : r < 0.83 ? '1024x1536' : '1024x1024');
+const aspectLabel = () => (P.aspect === 'custom' ? W + '×' + H : P.aspect || '9:16');
+async function fitInfo(p) {
+  const id = curAsset(p); if (!id) return null;
+  try { const im = await waitImg(id), iw = im.naturalWidth, ih = im.naturalHeight; return { iw, ih, off: Math.abs(Math.log(iw / ih / (W / H))) > 0.03 }; } catch (e) { return null; }
+}
+function applyFit(p, mode, iw, ih) {
+  p.fx = 0.5; p.fy = 0.5; p.ix = 0; p.iy = 0;
+  if (mode === 'fit') { p.zoom = +(Math.min(W / iw, H / ih) / Math.max(W / iw, H / ih)).toFixed(4); p.bgFill = 'blur'; }
+  else { p.zoom = 1; p.bgFill = null; }
+}
+async function aiExpand(p) {
+  const id = curAsset(p); if (!id) return false;
+  if (p._ebusy) return false;
+  const label = aspectLabel();
+  p._ebusy = true; p._est = `AI 확장 중… (${label})`; refreshPanel(p);
+  let ok = false;
+  try {
+    const im = await waitImg(id), iw = im.naturalWidth, ih = im.naturalHeight, r = W / H, L = 1536;
+    const cw = r >= 1 ? L : Math.round(L * r), ch = r >= 1 ? Math.round(L / r) : L;
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch; const g = c.getContext('2d');
+    const sc = Math.max(cw / iw, ch / ih), sf = Math.min(cw / iw, ch / ih);
+    g.filter = `blur(${Math.round(Math.min(cw, ch) * 0.05)}px) brightness(0.85)`; // 빈 영역 자리표시: 흐린 같은 그림(색감 힌트)
+    g.drawImage(im, (cw - iw * sc) / 2, (ch - ih * sc) / 2, iw * sc, ih * sc); g.filter = 'none';
+    const dw = iw * sf, dh = ih * sf; g.drawImage(im, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+    const wide = dw < cw - 2, side = wide ? 'left and right' : 'top and bottom';
+    const pct = Math.round((wide ? dw / cw : dh / ch) * 100);
+    const base = await toApiImage(await canvasBlob(c, 'image/jpeg', 0.92), 1536);
+    const plan = refPlan(p.chars);
+    const prompt = [
+      `Outpaint the FIRST attached image so that it becomes one complete ${r > 1.05 ? 'horizontal' : r < 0.95 ? 'vertical' : 'square'} ${label} frame.`,
+      `Only the sharp central part (about ${pct}% of the ${wide ? 'width' : 'height'}) is the real artwork. The blurry bands on the ${side} are placeholders only: replace them with a natural, fully detailed continuation of the same scene (background, scenery, sky, floor, props, and the cut-off parts of characters), matching perspective, lighting, colors, line work and rendering seamlessly with no visible seam.`,
+      'Keep the original central artwork exactly as it is: same characters, faces, poses, composition, colors and art style. Do not zoom, crop, shift or reframe it, and do not add new characters.',
+      P.style.prompt.trim() ? 'Art style: ' + P.style.prompt.trim() : '',
+      plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
+      NO_TEXT,
+    ].filter(Boolean).join('\n\n');
+    const res = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan))], purpose: 'AI 확장', prov: p.prov, size: oaSizeFor(r), aspect: nearestGmAspect(r) });
+    const nid = await addResult(res);
+    p.versions.push({ assetId: nid, src: res.provider, at: Date.now(), prompt: 'AI 확장 (' + label + ')', edit: true });
+    const adj = p.adj; p.cur = p.versions.length - 1; resetFraming(p); p.adj = adj; // 원본 이미지로 확장했으므로 색 보정은 유지
+    p._est = res.fellBack ? `✓ ${PROV[res.first]} 실패 → ${PROV[res.provider]}로 확장 (${label})` : `✓ ${PROV[res.provider]}로 ${label} 확장 — 이전 이미지는 버전에 남아 있습니다`;
+    ok = true;
+  } catch (e) { p._est = '실패:\n' + e.message; }
+  p._ebusy = false; save(); refreshPanel(p);
+  return ok;
+}
+async function bulkExpand(todo) {
+  if (bulkImg) return toast('다른 일괄 작업이 진행 중입니다');
+  bulkImg = { total: todo.length, done: 0, fail: 0, cancel: false, label: 'AI 확장' }; renderBulk();
+  let i = 0;
+  const worker = async () => { while (!bulkImg.cancel && i < todo.length) { const ok = await aiExpand(todo[i++]); bulkImg.done++; if (!ok) bulkImg.fail++; renderBulk(); } };
+  await Promise.all(Array.from({ length: Math.min(BULK_IMG_PAR, todo.length) }, worker));
+  const r = bulkImg; bulkImg = null; renderBulk(); requestDraw();
+  toast(`AI 확장 끝 — 성공 ${r.done - r.fail}개${r.fail ? ' · 실패 ' + r.fail + '개 (각 컷 이미지 탭에서 확인)' : ''}${r.cancel ? ' · 남은 컷은 취소됨' : ''}`, 6000);
+}
+async function openFitDialog(opt = {}) {
+  stop();
+  const withImg = P.panels.filter(curAsset);
+  if (!withImg.length) return toast('이미지가 있는 컷이 없습니다');
+  const info = new Map(); await Promise.all(withImg.map(async p => info.set(p.id, await fitInfo(p))));
+  const cur = selPanel(), num = p => P.panels.indexOf(p) + 1;
+  const scopes = { cur: cur && curAsset(cur) ? [cur] : [], sel: withImg.filter(p => SELECT.has(p.id)), all: withImg };
+  let scope = scopes[opt.scope]?.length ? opt.scope : scopes.sel.length > 1 ? 'sel' : scopes.cur.length ? 'cur' : 'all';
+  let mode = opt.mode || 'fit';
+  const offAll = withImg.filter(p => info.get(p.id)?.off).length;
+  document.getElementById('fitDialog')?.remove();
+  const dlg = document.createElement('dialog'); dlg.id = 'fitDialog';
+  const radio = (name, v, on, dis, html) => `<label class="chk" style="align-items:flex-start;gap:8px"><input type="radio" name="${name}" value="${v}" ${on ? 'checked' : ''} ${dis ? 'disabled' : ''}><span>${html}</span></label>`;
+  dlg.innerHTML = `<form><div class="dlg-h"><h3>📐 화면 비율에 맞추기 — ${esc(aspectLabel())} (${W}×${H})</h3></div><div class="dlg-b grp">
+    <p class="note" style="margin:0">이미지가 있는 컷 ${withImg.length}개 중 <b>${offAll}개</b>가 지금 화면 비율과 다릅니다.</p>
+    <div class="grp"><span class="lbl">적용할 컷</span>
+      ${radio('fitScope', 'cur', scope === 'cur', !scopes.cur.length, scopes.cur.length ? `지금 컷 (컷 ${num(cur)})` : '지금 컷 (이미지 없음)')}
+      ${radio('fitScope', 'sel', scope === 'sel', !scopes.sel.length, `체크한 컷 (${scopes.sel.length}개)`)}
+      ${radio('fitScope', 'all', scope === 'all', false, `전체 컷 (${withImg.length}개)`)}
+    </div>
+    <div class="grp"><span class="lbl">맞추는 방법</span>
+      ${radio('fitMode', 'fill', mode === 'fill', false, '<b>꽉 채우기</b> — 빈 곳 없이 화면을 채우고, 넘치는 가장자리는 잘립니다 · 무료·즉시')}
+      ${radio('fitMode', 'fit', mode === 'fit', false, '<b>전체 보이기 + 흐린 배경</b> — 그림이 잘리지 않고, 남는 공간은 같은 그림을 흐리게 깔아 채웁니다 · 무료·즉시')}
+      ${radio('fitMode', 'ai', mode === 'ai', false, '<b>AI 확장</b> — 모자란 위·아래(또는 좌·우)를 AI가 이어 그린 새 이미지를 만듭니다. 원본은 이전 버전으로 남습니다 · 유료')}
+    </div>
+    <div class="st" id="fitSum" style="white-space:pre-line"></div>
+    <div class="row"><button type="button" class="b ghost" id="fitCancel">취소</button><button type="submit" class="b" id="fitGo">적용</button></div>
+  </div></form>`;
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove());
+  const plan = () => {
+    const target = scopes[scope], off = target.filter(p => info.get(p.id)?.off);
+    const aiTodo = off.filter(p => !p._ebusy), cost = aiTodo.reduce((s, p) => s + imgCost(p), 0);
+    return { target, off, aiTodo, cost };
+  };
+  const upd = () => {
+    const { target, off, aiTodo, cost } = plan(), go = $('#fitGo', dlg);
+    if (mode === 'ai') {
+      $('#fitSum', dlg).textContent = aiTodo.length
+        ? `AI 확장 ${aiTodo.length}컷 · 호출 ${aiTodo.length}회 · 약 $${cost.toFixed(2)}${aiTodo.length > 1 ? ` (${BULK_IMG_PAR}컷씩 순서대로)` : ''}${target.length - aiTodo.length ? `\n이미 비율이 맞거나 작업 중인 ${target.length - aiTodo.length}컷은 건너뜁니다.` : ''}`
+        : '고른 컷은 모두 이미 화면 비율이 맞습니다. AI 확장이 필요 없습니다.';
+      go.disabled = !aiTodo.length || !!bulkImg; go.textContent = aiTodo.length ? `AI 확장 (약 $${cost.toFixed(2)})` : '적용';
+      if (bulkImg) $('#fitSum', dlg).textContent += '\n다른 일괄 작업이 끝난 뒤에 실행할 수 있습니다.';
+    } else {
+      $('#fitSum', dlg).textContent = `${target.length}컷에 적용합니다 (비율이 다른 컷 ${off.length}개). 직접 옮기거나 키운 이미지 위치·크기는 초기화되고, 색 보정은 유지됩니다. 되돌리기(↶)로 취소할 수 있습니다.`;
+      go.disabled = !target.length; go.textContent = '적용';
+    }
+  };
+  dlg.addEventListener('change', e => { if (e.target.name === 'fitScope') scope = e.target.value; if (e.target.name === 'fitMode') mode = e.target.value; upd(); });
+  $('#fitCancel', dlg).onclick = () => { dlg.close(); dlg.remove(); };
+  $('form', dlg).onsubmit = e => {
+    e.preventDefault();
+    const { target, aiTodo } = plan();
+    dlg.close(); dlg.remove();
+    if (mode === 'ai') { if (aiTodo.length) bulkExpand(aiTodo); return; }
+    histSnap();
+    target.forEach(p => { const f = info.get(p.id); if (f) applyFit(p, mode, f.iw, f.ih); });
+    save(); renderPanels(); refreshInspector(); requestDraw();
+    toast(`${target.length}컷을 ${mode === 'fill' ? '꽉 채우기' : '전체 보이기 + 흐린 배경'}로 맞췄습니다`);
+  };
+  upd(); dlg.showModal();
+}
+/* 화면 비율을 바꾼 뒤 비율이 다른 컷이 있으면 맞추기 창을 띄운다 */
+async function offerFit() {
+  const withImg = P.panels.filter(curAsset); if (!withImg.length) return;
+  const infos = await Promise.all(withImg.map(fitInfo));
+  if (infos.some(f => f?.off)) openFitDialog({ scope: 'all' });
+}
+$('#fitOpen').onclick = () => openFitDialog();
+$('#bkFit').onclick = () => openFitDialog({ scope: 'sel' });
 
 async function startKling(p) {
   if (!isServer() && (!S.klAK || !S.klSK)) return toast('설정에서 클링 Access Key·Secret Key를 넣으세요 (또는 서버 모드)');
@@ -2721,6 +2857,12 @@ function drawPanel(ctx, p, lt, opt = {}) {
   const img = id ? getImg(id) : null;
   ctx.filter = filt(p.adj);
   const ex = (+p.ix || 0) * W, ey = (+p.iy || 0) * H; // 컷 안에서 끌어 옮긴 이미지 위치
+  if (p.bgFill === 'blur' && (vid || img)) { // 전체 보이기: 남는 공간에 같은 그림을 흐리게 깐다
+    const bf = filt(p.adj), k = Math.round(Math.min(W, H) * 0.035);
+    ctx.filter = (bf === 'none' ? '' : bf + ' ') + `blur(${k}px) brightness(0.72)`;
+    if (vid) drawCover(ctx, vid, vid.videoWidth, vid.videoHeight, 1.1, 0.5, 0.5); else drawCover(ctx, img, img.naturalWidth, img.naturalHeight, 1.1, 0.5, 0.5);
+    ctx.filter = filt(p.adj);
+  }
   if (vid) drawCover(ctx, vid, vid.videoWidth, vid.videoHeight, +p.zoom || 1, +p.fx, +p.fy, ex, ey);
   else if (img) {
     const m = opt.still || opt.noMotion ? { z: +p.zoom || 1, fx: +p.fx, fy: +p.fy, ox: 0, oy: 0 } : motionAt(p, lt);
@@ -3585,7 +3727,8 @@ function tabFix(p) {
     ${sl('색조', 'adj.h', -180, 180, 1, '°')}${sl('따뜻함', 'adj.warm', 0, 100, 1, '%')}${sl('흐림', 'adj.blur', 0, 12, 0.5, 'px')}${sl('비네팅', 'adj.vig', 0, 90, 1, '%')}
     <span class="lbl">구도 — 컷 화면의 ‘🖼 이미지 이동·크기’로 끌어서도 조절할 수 있습니다</span>
     ${sl('이미지 크기', 'zoom', 0.3, 4, 0.01, '×')}${sl('가로 위치', 'fx', 0, 1, 0.01)}${sl('세로 위치', 'fy', 0, 1, 0.01)}
-    <div class="row"><button type="button" class="b ghost sm" id="adjReset">보정 초기화</button><button type="button" class="b sm" id="bakeBtn" ${curAsset(p) ? '' : 'disabled'}>보정 결과를 새 버전으로 굽기</button></div>
+    <label class="chk"><input type="checkbox" id="bgBlurChk" ${p.bgFill === 'blur' ? 'checked' : ''}> 빈 공간을 같은 그림의 흐린 배경으로 채우기</label>
+    <div class="row"><button type="button" class="b ghost sm" id="fitOpen2">📐 화면 비율에 맞추기</button><button type="button" class="b ghost sm" id="adjReset">보정 초기화</button><button type="button" class="b sm" id="bakeBtn" ${curAsset(p) ? '' : 'disabled'}>보정 결과를 새 버전으로 굽기</button></div>
     <p class="note">클링에는 이 탭의 보정·크롭이 반영된 화면이 그대로 전송됩니다. 굽기를 하면 보정값이 이미지에 고정되고 슬라이더는 초기화됩니다.</p>`)}
   </div>`;
 }
@@ -3616,6 +3759,8 @@ function bindFix(p, el) {
   $$('[data-cam]', el).forEach(b => (b.onclick = () => aiVariant(p, 'cam', CAMERA.find(c => c.k === b.dataset.cam))));
   $$('[data-lit]', el).forEach(b => (b.onclick = () => aiVariant(p, 'lit', LIGHTS.find(c => c.k === b.dataset.lit))));
   $('#adjReset', el).onclick = () => { resetFraming(p); save(); renderInspector(); requestDraw(); };
+  $('#bgBlurChk', el).onchange = e => { p.bgFill = e.target.checked ? 'blur' : null; save(); requestDraw(); };
+  $('#fitOpen2', el).onclick = () => openFitDialog({ scope: 'cur' });
   $('#bakeBtn', el).onclick = () => bakeToVersion(p);
 }
 
@@ -6567,7 +6712,7 @@ function openCanvasSize() {
   document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); $('#canvasSizeCancel', dialog).onclick = () => dialog.close();
   $('form', dialog).onsubmit = event => { event.preventDefault(); const w = +$('#canvasWidth', dialog).value, h = +$('#canvasHeight', dialog).value;
     if (![w,h].every(v => Number.isInteger(v) && v >= 64 && v <= 8192) || w*h > 32000000) { $('#canvasSizeError', dialog).textContent = '가로·세로 범위와 전체 픽셀 수를 확인해 주세요.'; return; }
-    histSnap(); P.aspect = 'custom'; P.canvasSize = [w,h]; applyAspect(); save(); histSnap(); renderAll(); dialog.close(); toast('제작 크기: ' + w + '×' + h + 'px');
+    histSnap(); P.aspect = 'custom'; P.canvasSize = [w,h]; applyAspect(); save(); histSnap(); renderAll(); dialog.close(); toast('제작 크기: ' + w + '×' + h + 'px'); offerFit();
   };
   dialog.showModal();
 }
@@ -6576,8 +6721,8 @@ $('#projBtn').onclick = () => openProjectManager();
 $('#canvasSizeBtn').onclick = openCanvasSize;
 $('#aspectSel').onchange = e => {
   if (e.target.value === 'custom') { e.target.value = P.aspect; openCanvasSize(); return; }
-  if (P.panels.some(p => curAsset(p)) && !confirm('화면 비율을 바꾸면 기존 이미지는 새 비율에 맞춰 잘려서 보입니다. 이미지는 새 비율로 다시 만드는 것을 권합니다. 바꿀까요?')) { e.target.value = P.aspect || '9:16'; return; }
   P.aspect = e.target.value; applyAspect(); save(); renderAll(); toast('화면 비율: ' + e.target.value);
+  offerFit(); // 비율이 다른 컷이 있으면 꽉 채우기 / 흐린 배경 / AI 확장 중에 고르게 한다
 };
 
 function renderAll() { applyAspect(); if (typeof view !== 'undefined' && view === 'print') renderPrint(); $('#title').value = P.title; renderStyle(); renderChars(); renderPanels(); renderTabs(); renderInspector(); updateCost(); prepareFonts(); requestDraw(); }
