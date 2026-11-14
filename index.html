@@ -64,6 +64,24 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .timeline-dock .timeline-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .timeline-dock h3, .timeline-dock .note { margin: 0; }
 #timelineBody { flex: 1; min-height: 0; }
+/* 컷 띠: 전체 컷을 길이만큼의 블록으로 — 누르면 선택, 오른쪽 끝을 끌면 길이 조절 */
+.cut-strip { flex: none; overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel-2); padding: 4px; user-select: none; }
+.cut-strip .cs-in { display: flex; gap: 2px; height: 46px; position: relative; }
+.cut-strip .cs-b { position: relative; flex: none; height: 100%; border-radius: 4px; overflow: hidden; background: #3a3426 center/cover no-repeat; border: 2px solid transparent; cursor: pointer; box-sizing: border-box; }
+.cut-strip .cs-b.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.cut-strip .cs-b .cs-l { position: absolute; left: 3px; bottom: 2px; right: 12px; font-size: .68rem; color: #fff; text-shadow: 0 1px 2px #000, 0 0 3px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.cut-strip .cs-b .cs-h { position: absolute; top: 0; right: 0; bottom: 0; width: 10px; cursor: ew-resize; background: rgba(180,138,44,.75); }
+.cut-strip .cs-b .cs-h::after { content: ''; position: absolute; left: 3px; right: 3px; top: 14px; bottom: 14px; border-left: 1.5px solid #fff; border-right: 1.5px solid #fff; }
+.cut-strip .cs-b.drag { outline: 2px dashed var(--gold); }
+.cut-strip .cs-b .cs-w { position: absolute; right: 12px; top: 2px; font-size: .7rem; pointer-events: none; }
+.otl .cut-out { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, rgba(36,33,26,.10) 0 6px, rgba(36,33,26,.18) 6px 12px); pointer-events: none; z-index: 3; }
+.cs-tip { position: fixed; z-index: 60; background: #24211A; color: #fff; font-size: .74rem; padding: 3px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+/* 컷 타임라인 오른쪽 끝: 컷 길이 손잡이 */
+.otl .cut-end { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; z-index: 4; pointer-events: none; }
+.otl .cut-end b { pointer-events: auto; cursor: ew-resize; }
+.otl .cut-end::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--gold); }
+.otl .cut-end b { position: absolute; left: 0; top: 2px; width: 14px; height: 22px; border-radius: 3px; background: var(--gold); }
+.otl .cut-end b::after { content: ''; position: absolute; left: 4px; right: 4px; top: 6px; bottom: 6px; border-left: 1.5px solid #fff; border-right: 1.5px solid #fff; }
 .timeline-dock .otl { height: 100%; max-height: none; padding: 28px 10px 8px; }
 .timeline-dock .otl .ruler { left: 10px; right: 10px; height: 24px; font-size: .75rem; }
 .timeline-dock .otl .row-t { height: 36px; }
@@ -567,7 +585,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </nav>
     <div id="insp"></div>
   </aside>
-  <section class="timeline-dock" aria-label="컷 타임라인"><div class="timeline-head"><h3>타임라인</h3><span class="note">막대를 끌어 이동 · 양 끝을 끌어 등장·사라짐 조절 · 눈금자를 눌러 재생 위치 이동 · Ctrl+C / Ctrl+V 복사·붙여넣기</span></div><div id="timelineBody"><div class="otl" id="otl" tabindex="0" aria-label="타임라인: 요소 선택 후 Ctrl+C, Ctrl+V로 복사·붙여넣기"></div></div></section>
+  <section class="timeline-dock" aria-label="컷 타임라인"><div class="timeline-head"><h3>타임라인</h3><span class="note">막대를 끌어 이동 · 양 끝을 끌어 등장·사라짐 조절 · 눈금자를 눌러 재생 위치 이동 · Ctrl+C / Ctrl+V 복사·붙여넣기 · 위 컷 띠의 오른쪽 끝을 끌어 컷 길이 조절</span></div><div class="cut-strip" id="cutStrip" aria-label="컷 띠: 누르면 컷 선택, 오른쪽 끝을 끌면 컷 길이 조절"></div><div id="timelineBody"><div class="otl" id="otl" tabindex="0" aria-label="타임라인: 요소 선택 후 Ctrl+C, Ctrl+V로 복사·붙여넣기"></div></div></section>
 </div>
 
 <!-- 설정 -->
@@ -1268,7 +1286,7 @@ function newOverlay(kind, p) {
   if (kind === 'flash') Object.assign(base, { text: '번쩍!', w: 0.7, anim: 'shake', strokeW: 3, flashLen: 3, flashGap: 1, y: 0.3, tail: null });
   if (kind === 'thought') Object.assign(base, { text: '속마음…', anim: 'fade', y: 0.24, tail: { x: 0.4, y: 0.36 } });
   if (kind === 'shout') Object.assign(base, { text: '멈춰!', w: 0.7, anim: 'shake', strokeW: 5, y: 0.3, tail: { x: 0.36, y: 0.42 } });
-  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'typewriter' });
+  if (kind === 'narration') Object.assign(base, { text: '그날, 모든 것이 달라졌다.', font: 'nanummyeongjo', w: 0.78, y: 0.12, color: '#EBD9AA', fill: '#080A11', fillA: 0.86, stroke: '#CDB27A', strokeW: 2, anim: 'fade' });
   if (kind === 'caption') Object.assign(base, { text: '자막', font: 'nanummyeongjo', w: 0.86, y: 0.8, color: '#ffffff', fill: '#000000', fillA: 0, stroke: '#000000', strokeW: 4, anim: 'slideUp' });
   return base;
 }
@@ -4546,8 +4564,73 @@ function renderPanels() {
     el.appendChild(li);
   });
   $('#totalNote').textContent = `컷 ${P.panels.length}개 · 전체 ${totalDur().toFixed(1)}초`;
-  renderBulk();
+  renderBulk(); renderCutStrip();
 }
+/* ---- 컷 길이 끌기 (컷 띠·컷 타임라인 공용) ---- */
+/* 달라붙는 지점: 글을 다 읽는 시각, 마지막 음성이 끝나는 시각 */
+function cutLenMagnets(p) {
+  const m = [], up = v => Math.ceil(v * 10 - 1e-6) / 10;
+  const need = readNeed(p); if (need > 0) m.push({ t: up(need + 0.6), lab: '글 다 읽힘' });
+  const ve = Math.max(0, ...p.overlays.filter(o => o.voice && +o.voice.dur > 0).map(o => (+o.start || 0) + +o.voice.dur));
+  if (ve > 0) m.push({ t: up(ve + 0.3), lab: '음성 끝' });
+  return m.filter(x => x.t >= DUR_MIN && x.t <= DUR_MAX);
+}
+/* 끄는 동안 p.dur 를 바꾸고 onMove(새 길이) 를 부른다. secPerPx 는 끌기 시작할 때 고정된 축척 */
+function dragCutLen(p, ev, secPerPx, cap, onMove, onEnd) {
+  ev.preventDefault(); ev.stopPropagation(); stop();
+  const d0 = panelDur(p), x0 = ev.clientX, ms = cutLenMagnets(p);
+  try { cap.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
+  const tip = document.createElement('div'); tip.className = 'cs-tip'; document.body.appendChild(tip);
+  let moved = false;
+  const move = e => {
+    if (Math.abs(e.clientX - x0) > 2) moved = true; else if (!moved) return;
+    let v = Math.round((d0 + (e.clientX - x0) * secPerPx) * 10) / 10, lab = '';
+    const near = Math.max(0.05, 8 * secPerPx); // 화면에서 8px 안이면 달라붙는다
+    let best = null; ms.forEach(m => { if (Math.abs(m.t - v) <= near && (!best || Math.abs(m.t - v) < Math.abs(best.t - v))) best = m; });
+    if (best) { v = best.t; lab = ' · ' + best.lab; } else if (Math.abs(v - Math.round(v)) <= Math.min(0.15, near)) v = Math.round(v);
+    v = +clamp(v, DUR_MIN, DUR_MAX).toFixed(1); p.dur = v;
+    const hidden = p.overlays.filter(o => String(o.text || '').trim() && (+o.start || 0) >= v).length;
+    const need = readNeed(p);
+    tip.textContent = `컷 길이 ${v.toFixed(1)}초 (${v - d0 >= 0 ? '+' : ''}${(v - d0).toFixed(1)})${lab}${v === DUR_MAX ? ' · 최대' : v === DUR_MIN ? ' · 최소' : ''}${hidden ? ` · ⚠ 글 ${hidden}개가 컷 밖` : !lab && need > v ? ' · 글 읽을 시간 부족' : ''}`;
+    tip.style.left = Math.min(innerWidth - tip.offsetWidth - 8, e.clientX + 14) + 'px'; tip.style.top = Math.max(4, e.clientY - 40) + 'px';
+    onMove(v); requestDraw();
+  };
+  const up = () => {
+    cap.removeEventListener('pointermove', move); cap.removeEventListener('pointerup', up); cap.removeEventListener('pointercancel', up);
+    tip.remove();
+    const changed = moved && panelDur(p) !== d0;
+    if (changed) { scrubT = clamp(scrubT, 0, panelDur(p) - 0.001); save(); }
+    onEnd?.(changed);
+    renderPanels(); renderInspector(); requestDraw();
+  };
+  cap.addEventListener('pointermove', move); cap.addEventListener('pointerup', up); cap.addEventListener('pointercancel', up);
+}
+/* 컷 띠: 모든 컷을 길이만큼의 블록으로. 누르면 선택, 오른쪽 끝을 끌면 길이 조절 */
+function renderCutStrip() {
+  const el = $('#cutStrip'); if (!el) return;
+  const n = P.panels.length, W = Math.max(200, el.clientWidth - 10 - 2 * (n - 1));
+  const pps = Math.max(16, W / Math.max(1, totalDur())); // 초당 px — 컷이 많으면 가로 스크롤
+  const keep = el.scrollLeft;
+  el.innerHTML = '<div class="cs-in">' + P.panels.map((p, i) => {
+    const id = curAsset(p), d = panelDur(p), short = readNeed(p) > d + 0.01;
+    return `<div class="cs-b${p.id === sel ? ' on' : ''}" data-pid="${p.id}" style="width:${(d * pps).toFixed(1)}px;${id ? `background-image:url('${assetURL(id)}')` : ''}" title="컷 ${i + 1} · ${d.toFixed(1)}초 — 누르면 선택, 오른쪽 끝을 끌면 길이 조절${short ? ' · 글 읽을 시간이 부족합니다' : ''}">` +
+      `<span class="cs-l">${i + 1} · <b>${d.toFixed(1)}s</b></span>${short ? '<span class="cs-w" title="글 읽을 시간이 부족합니다">⚠</span>' : ''}<span class="cs-h" role="slider" aria-label="컷 ${i + 1} 길이" aria-valuemin="${DUR_MIN}" aria-valuemax="${DUR_MAX}" aria-valuenow="${d.toFixed(1)}" tabindex="-1"></span></div>`;
+  }).join('') + '</div>';
+  el.scrollLeft = keep;
+  const on = $('.cs-b.on', el);
+  if (on && (on.offsetLeft < el.scrollLeft || on.offsetLeft + on.offsetWidth > el.scrollLeft + el.clientWidth)) el.scrollLeft = on.offsetLeft - 20;
+  $$('.cs-b', el).forEach(b => {
+    const p = P.panels.find(x => x.id === b.dataset.pid); if (!p) return;
+    b.onpointerdown = ev => {
+      if (ev.button !== 0) return;
+      if (!ev.target.closest('.cs-h')) { ev.preventDefault(); if (p.id !== sel) selectPanel(p.id); return; }
+      b.classList.add('drag');
+      const lab = $('.cs-l b', b);
+      dragCutLen(p, ev, 1 / pps, b, v => { b.style.width = (v * pps).toFixed(1) + 'px'; lab.textContent = v.toFixed(1) + 's'; if (p.id === sel) drawTimeline(p); }, () => b.classList.remove('drag'));
+    };
+  });
+}
+addEventListener('resize', () => { clearTimeout(renderCutStrip._t); renderCutStrip._t = setTimeout(renderCutStrip, 150); });
 function selectPanel(id) {
   stop(); sel = id; selOv = null;
   const p = selPanel();
@@ -5045,12 +5128,13 @@ function renderMonitor(p) {
     (k === 'voice' ? ['narr', 'dlg'] : [k]).forEach(setGroupGain); renderMonitor(p);
   }));
 }
-function drawTimeline(p) {
+function drawTimeline(p, view) {
   renderMonitor(p);
   const box = $('#otl'); if (!box) return;
-  const D = panelDur(p), pct = t => (t / D * 100).toFixed(3) + '%';
-  const step = D > 10 ? 2 : 1, ticks = [];
-  for (let t = 0; t <= D + 0.001; t += step) ticks.push(t);
+  // view: 컷 길이를 끄는 동안만 컷보다 넓은 범위를 보여 준다 (늘릴 자리)
+  const D = panelDur(p), V = Math.max(D, +view || 0), pct = t => (t / V * 100).toFixed(3) + '%';
+  const step = V > 10 ? 2 : 1, ticks = [];
+  for (let t = 0; t <= V + 0.001; t += step) ticks.push(t);
   const list = tlItems(p).sort((a, b) => a.start - b.start);
   box.innerHTML = '<div class="ruler">' + ticks.map(t => '<i style="left:' + pct(t) + '">' + t + 's</i>').join('') + '</div>' +
     list.map(o => {
@@ -5060,16 +5144,18 @@ function drawTimeline(p) {
         const audible = voiceAudible(o), w = Math.min(1, (o.voice.dur || 0) / Math.max(0.05, en - st)), over = st + (o.voice.dur || 0) > D + 0.01;
         return { icon: !audible ? '🔇 ' : voiceStale(o) ? '⚠ ' : '🔊 ', html: '<span class="vo' + (audible ? '' : ' mute') + (over ? ' over' : '') + '" style="width:' + (w * 100).toFixed(2) + '%"></span>', tip: ` · 음성 ${(o.voice.dur || 0).toFixed(1)}초${audible ? '' : ' (음소거)'}${over ? ' · 컷보다 김' : ''}${emoOn(o) ? ' · 🎭 ' + (o.emo.emotion || '') : ''}` };
       })() : null;
-      return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc((o.text || '') + (vo ? vo.tip : '')) + '">' +
+      return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / V * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc((o.text || '') + (vo ? vo.tip : '')) + '">' +
         '<span class="grip l"></span><span class="lab">' + (o.timeLock && o.kind !== 'layer' ? '📌' : '') + (vo ? vo.icon : '') + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + (o.speaker && o.speaker !== 'base' ? ' · ' + speakerOf(o).label : '') + ' ' + (o.text || '')) + '</span><span class="grip r"></span>' + (vo ? vo.html : '') + '</div></div>';
     }).join('') +
     cutTracks(p).map(({ t, st, en, cutL, cutR }) => {
       const g = trackGroup(t), on = !t.mute && lvl(mixOf()[g]) > 0 && monOf()[g];
-      return '<div class="row-t row-a"><div class="bar-a ' + g + (on ? '' : ' mute') + (cutL ? ' cl' : '') + (cutR ? ' cr' : '') + (t.id === selAud ? ' on' : '') + '" data-aid="' + t.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%" title="' + esc(t.name) + ' — 누르면 배경음악 탭에서 편집 · 🔊 를 누르면 음소거">' +
+      return '<div class="row-t row-a"><div class="bar-a ' + g + (on ? '' : ' mute') + (cutL ? ' cl' : '') + (cutR ? ' cr' : '') + (t.id === selAud ? ' on' : '') + '" data-aid="' + t.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / V * 100).toFixed(3) + '%" title="' + esc(t.name) + ' — 누르면 배경음악 탭에서 편집 · 🔊 를 누르면 음소거">' +
         '<span class="amute" role="button" aria-label="' + (t.mute ? '음소거 풀기' : '음소거') + '">' + (t.mute ? '🔇' : '🔊') + '</span><span class="lab">' + (g === 'sfx' ? '✨ ' : '🎵 ') + esc(t.name) + (on ? '' : ' (꺼짐)') + '</span></div></div>';
     }).join('') +
     (list.length ? '' : '<div class="timeline-empty">레이어나 말풍선을 추가하면 여기에 표시됩니다.</div>') +
-    '<div class="ph" style="left:' + timelinePosition(scrubT, D) + '"><b></b></div><div class="tip" hidden></div>';
+    (V > D ? '<div class="cut-out" style="left:' + timelinePosition(D, V) + '"></div>' : '') +
+    '<div class="cut-end" style="left:' + timelinePosition(D, V) + '"><b title="끌어서 컷 길이 조절 (' + D.toFixed(1) + '초)" role="slider" aria-label="컷 길이" aria-valuenow="' + D.toFixed(1) + '"></b></div>' +
+    '<div class="ph" style="left:' + timelinePosition(scrubT, V) + '"><b></b></div><div class="tip" hidden></div>';
 }
 function bindTimeline(p, el) {
   drawTimeline(p);
@@ -5083,6 +5169,12 @@ function bindTimeline(p, el) {
     if (ev.button !== 0) return;
     ev.preventDefault(); box.focus({ preventScroll: true });
     const rect = box.getBoundingClientRect();
+    if (ev.target.closest('.cut-end')) { // 컷 끝 손잡이: 끄는 동안 늘릴 자리까지 보이게 넓힌 축척으로
+      const d0 = D(), V = Math.min(DUR_MAX, Math.max(d0 * 1.5, d0 + 3));
+      drawTimeline(p, V);
+      dragCutLen(p, ev, V / Math.max(40, rect.width - 20), box, () => drawTimeline(p, V));
+      return;
+    }
     const ab = ev.target.closest('.bar-a');
     if (ab) { // 효과음·배경음악 줄: 🔊 = 음소거, 그 밖 = 배경음악 탭에서 편집
       const t = audTracks().find(x => x.id === ab.dataset.aid); if (!t) return;
