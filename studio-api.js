@@ -625,6 +625,8 @@ const EDIT_TOOLS = [
   { name: 'compose_bgm', description: '이야기 전개에 맞춘 배경음악 설계를 시작한다(사용자가 설계안을 확인한 뒤 작곡). 배경음악이 없거나 사용자가 원할 때.', input_schema: { type: 'object', properties: {
     hint: { type: 'string', description: '원하는 음악 느낌(선택)' } } } },
 ];
+/* 효과음·배경음악 도구 — ‘알아서 전체 편집’·‘한 번에 완성’에서는 빼고, 나중에 따로 넣는다 */
+const AUDIO_FX_TOOLS = ['add_sfx', 'plan_sfx', 'compose_bgm'];
 export async function handleEdit(req, env) {
   if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
   const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
@@ -634,6 +636,7 @@ export async function handleEdit(req, env) {
     const instruction = String(b.instruction || '').trim().slice(0, 1000);
     if (!instruction) return json({ error: '지시 내용이 필요합니다' }, 400);
     const sm = b.summary;
+    const noFx = !!b.noAudioFx; // 전체 편집: 효과음·배경음악 제외
     if (!sm || !Array.isArray(sm.panels) || !sm.panels.length || sm.panels.length > 120) return json({ error: '타임라인 요약(컷 1~120개)이 필요합니다' }, 400);
     const history = (Array.isArray(b.history) ? b.history : []).slice(-8).filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.text === 'string' && h.text).map(h => ({ role: h.role, content: h.text.slice(0, 600) }));
     const system = '당신은 세로형 숏폼 "무빙툰"(컷 이미지 + 말풍선·자막 + 음악) 타임라인을 다루는 영상 편집자입니다. 사용자가 현재 타임라인 요약(JSON)과 수정 지시를 보냅니다. ' +
@@ -648,17 +651,18 @@ export async function handleEdit(req, env) {
       '감정은 emotion_presets 중 가장 가까운 것을 고르고, 미묘한 말투는 note에 구체적으로 적습니다. 캐릭터 나이·성격(cast desc)과 장면 흐름에 맞게, 과장하지 말고 자연스럽게. 사용자가 음성을 새로 만들어 달라고 했을 때만 remake:true를 씁니다(크레딧이 듭니다). ' +
       '(9) 전체 편집("알아서 전체 편집/다듬어", 자동 모드): 영상 전체를 완성도 있게 만듭니다 — ① 어색하거나 빠진 감정·말투를 set_dub로 다듬고 ② 음성이 없거나 ⚠인 대사가 있으면 make_voices ③ 그다음 sync_to_voices로 대사 타이밍과 컷 길이를 음성에 맞추고 ④ 장면에 소리가 비어 있으면 plan_sfx(그림과 이야기 흐름을 보는 효과음 설계)로 꼭 필요한 환경음·효과음만 — 특정 소리를 콕 집어 넣으라는 요청에만 add_sfx ⑤ 배경음악 트랙이 없으면 compose_bgm ⑥ 자막·말풍선 색·크기·전환이 들쭉날쭉하면 정리. ' +
       '이미 잘 된 것은 건드리지 말고, 크레딧이 드는 make_voices·add_sfx·plan_sfx·compose_bgm은 적용 전에 사용자가 한 번 확인합니다. ' +
-      '(10) 이야기 흐름 분석([이야기 흐름])이 주어지면 그것이 기준입니다: 감정·말투는 각 대사가 속한 구간의 분위기·긴장도와 캐릭터 감정 흐름에 맞추고, 긴장도가 오르는 구간은 점점 강하게, 해소·여운 구간은 힘을 빼서 에피소드 전체가 하나의 감정선으로 이어지게 합니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
+      '(10) 이야기 흐름 분석([이야기 흐름])이 주어지면 그것이 기준입니다: 감정·말투는 각 대사가 속한 구간의 분위기·긴장도와 캐릭터 감정 흐름에 맞추고, 긴장도가 오르는 구간은 점점 강하게, 해소·여운 구간은 힘을 빼서 에피소드 전체가 하나의 감정선으로 이어지게 합니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '') +
+      (noFx ? ' [효과음·배경음악 제외] 이번 편집에서는 효과음·환경음·배경음악을 만들거나 설계하지 않습니다(④·⑤ 단계 생략 — 사용자가 나중에 따로 넣습니다). 기존 오디오 트랙도 건드리지 않습니다.' : '');
     const arcT = arcText(sm.arc); // 이야기 흐름 분석이 있으면 모든 판단의 기준으로 앞에 둔다
     const user = (arcT ? arcT + '\n(위 이야기 흐름과 캐릭터 감정선에 맞춰 판단하세요)\n\n' : '') + '현재 타임라인:\n' + JSON.stringify({ ...sm, arc: undefined }).slice(0, 150000) + '\n\n지시: ' + instruction;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 12000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 12000, system, tools: noFx ? EDIT_TOOLS.filter(t => !AUDIO_FX_TOOLS.includes(t.name)) : EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
     const blocks = j.content || [];
-    const ops = blocks.filter(c => c.type === 'tool_use' && c.input && typeof c.input === 'object').slice(0, 60).map(c => ({ tool: c.name, ...c.input }));
+    const ops = blocks.filter(c => c.type === 'tool_use' && c.input && typeof c.input === 'object' && !(noFx && AUDIO_FX_TOOLS.includes(c.name))).slice(0, 60).map(c => ({ tool: c.name, ...c.input }));
     let message = blocks.filter(c => c.type === 'text').map(c => c.text).join('').trim().slice(0, 800);
     const cut = j.stop_reason === 'max_tokens'; // 응답이 길이 한도에서 잘리면 마지막 도구 호출이 빠진다
     if (cut) message = (message ? message + '\n' : '') + '※ 응답이 길어 일부만 적용했습니다. 같은 요청을 한 번 더 보내면 나머지를 이어서 처리합니다.';

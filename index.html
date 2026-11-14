@@ -51,13 +51,43 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .ib:hover { color: var(--gold); border-color: var(--line); }
 
 /* 레이아웃 */
-.app { display: grid; grid-template-columns: 290px minmax(0, 1fr) 370px; height: calc(100vh - var(--studio-header-height, 56px)); grid-template-rows: minmax(0, 1fr) clamp(150px, 23vh, 230px); }
+.app { position: relative; --lw: 290px; --rw: 370px; --tlh: clamp(220px, 32vh, 340px); display: grid; grid-template-columns: var(--lwE, var(--lw)) minmax(0, 1fr) var(--rwE, var(--rw)); height: calc(100vh - var(--studio-header-height, 56px)); grid-template-rows: minmax(0, 1fr) var(--tlhE, var(--tlh)); }
+.app > .left { grid-column: 1; grid-row: 1; } .app > .center { grid-column: 2; grid-row: 1; } .app > .right { grid-column: 3; grid-row: 1; } .app > .timeline-dock { grid-row: 2; }
+/* 화면 나누기: 경계선을 끌어 크기 조절, 버튼으로 접기 */
+.app.hideL > .left, .app.hideR > .right { display: none; }
+.app.hideTl #cutStrip, .app.hideTl #timelineBody, .app.hideStrip #cutStrip { display: none; }
+.split { position: absolute; z-index: 6; touch-action: none; }
+.split.v { top: 0; bottom: var(--tlhE, var(--tlh)); width: 8px; cursor: col-resize; }
+#spL { left: calc(var(--lwE, var(--lw)) - 4px); } #spR { right: calc(var(--rwE, var(--rw)) - 4px); }
+.app.hideL #spL { left: 0; } .app.hideR #spR { right: 0; }
+.split.h { left: 0; right: 0; height: 8px; cursor: row-resize; bottom: calc(var(--tlhE, var(--tlh)) - 4px); }
+.split:hover, .split.drag, .split:focus-visible { background: rgba(180,138,44,.35); outline: none; }
+.split .sp-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 18px; height: 48px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink-2); font-size: .7rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.split:hover .sp-btn, .split:focus-within .sp-btn, .app.hideL #spL .sp-btn, .app.hideR #spR .sp-btn { opacity: 1; }
+.app.hideL #spL .sp-btn { left: 0; transform: translate(0, -50%); border-radius: 0 9px 9px 0; }
+.app.hideR #spR .sp-btn { left: auto; right: 0; transform: translate(0, -50%); border-radius: 9px 0 0 9px; }
+.timeline-head .tl-tools { margin-left: auto; display: flex; gap: 6px; align-self: center; }
+.app.hideTl .timeline-dock { padding-bottom: 8px; }
 .col { overflow: auto; min-width: 0; min-height: 0; }
 .left { border-right: 1px solid var(--line-2); background: var(--bg-2); }
 .right { border-left: 1px solid var(--line-2); background: var(--bg-2); }
 .sec { padding: 16px; border-bottom: 1px solid var(--line-2); display: grid; gap: 8px; }
 .sec-h { display: flex; align-items: center; justify-content: space-between; }
 .sec-h h3 { margin: 0; }
+/* 왼쪽 섹션: 제목을 눌러 접기, 아래 손잡이를 끌어 높이 조절 */
+.left .sec[data-sk] > .sec-h { position: sticky; top: 0; z-index: 3; background: var(--bg-2); margin: -6px -16px 0; padding: 6px 16px 4px; }
+.left .sec[data-sk] > .sec-h h3 { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; flex: 1; }
+.left .sec[data-sk] > .sec-h h3::before { content: '▾'; font-size: .75em; color: var(--ink-3); width: 1em; transition: transform .15s; }
+.left .sec.fold > .sec-h h3::before { transform: rotate(-90deg); }
+.left .sec.fold > :not(.sec-h) { display: none; }
+.left .sec.fold { padding-bottom: 12px; }
+.left .sec.sized { overflow-y: auto; }
+.left .sec.sized > .sec-h { top: -16px; }
+.left .sec.sized.fold { height: auto !important; overflow: visible; }
+.sec-rz { height: 8px; margin-top: -8px; position: relative; z-index: 4; cursor: row-resize; touch-action: none; }
+.sec-rz:hover, .sec-rz.drag, .sec-rz:focus-visible { background: rgba(180,138,44,.35); outline: none; }
+.sec-rz::after { content: ''; position: absolute; left: 50%; top: 3px; width: 32px; height: 2px; margin-left: -16px; border-radius: 1px; background: var(--line); }
+.sec.fold + .sec-rz { display: none; }
 
 
 .timeline-dock { grid-column: 1 / -1; min-width: 0; min-height: 0; padding: 10px 20px 12px; border-top: 2px solid var(--gold); background: var(--bg-2); display: flex; flex-direction: column; gap: 8px; }
@@ -78,6 +108,15 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .cs-tip { position: fixed; z-index: 60; background: #24211A; color: #fff; font-size: .74rem; padding: 3px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
 /* 녹음 버튼: 녹음 중엔 빨갛게 깜빡 */
 .chip.rec { font-weight: 600; }
+/* 미리보기 아래 이 컷 더빙 편집 */
+.pv-dub { width: min(820px, 100%); max-height: 34vh; overflow-y: auto; flex: none; background: var(--panel); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 12px; }
+.center.dub-stack > .stage-wrap { min-height: 240px; }
+/* 가운데가 넓으면 더빙 편집을 미리보기 오른쪽에 세워서 그림이 줄어들지 않게 */
+.center.dub-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 46%); column-gap: 16px; row-gap: 12px; justify-items: center; align-items: center; }
+.center.dub-side > * { grid-column: 1; }
+.center.dub-side > .stage-wrap { align-self: stretch; height: 100%; }
+.center.dub-side > .pv-dub { grid-column: 2; grid-row: 1 / -1; align-self: stretch; max-height: none; width: 100%; }
+.pv-dub .grp.dub { margin: 0; }
 [data-rec].danger { background: var(--cinnabar); border-color: var(--cinnabar); color: #fff; animation: recBlink 1.2s ease-in-out infinite; }
 @keyframes recBlink { 50% { opacity: .7; } }
 /* 컷 타임라인 오른쪽 끝: 컷 길이 손잡이 */
@@ -325,7 +364,8 @@ ol.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--
 .menu-pop hr { border: 0; border-top: 1px solid var(--line-2); margin: 4px 0; width: 100%; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(255, 255, 255, .97); border: 1px solid var(--line); padding: 10px 18px; border-radius: 999px; z-index: 100; max-width: calc(100vw - 32px); font-size: .86rem; box-shadow: 0 10px 40px rgba(60, 45, 10, .2); }
 
-@media (max-width: 1200px) { .app { grid-template-columns: 250px minmax(0, 1fr) 330px; } }
+@media (max-width: 1200px) { .app { --lw: 250px; --rw: 330px; } }
+@media (max-width: 980px) { .split { display: none; } .app.hideL > .left, .app.hideR > .right { display: block; } }
 @media (max-width: 980px) {
   .bar { height: auto; flex-wrap: wrap; padding: 10px 16px; }
   .bar-r { flex-wrap: wrap; }
@@ -530,19 +570,21 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 
 <div class="app">
   <aside class="col left" aria-label="프로젝트 구성">
-    <section class="sec">
-      <h3>화풍 고정</h3>
+    <section class="sec" data-sk="style">
+      <div class="sec-h"><h3>화풍 고정</h3></div>
       <textarea id="stylePrompt" rows="3" placeholder="모든 컷에 공통으로 붙는 화풍 설명"></textarea>
       <div class="refs" id="styleRefs"></div>
       <div class="row"><label class="b ghost sm">화풍 레퍼런스 추가<input type="file" accept="image/*" multiple id="styleUp" hidden></label></div>
       <p class="note">내가 그린 기준 컷을 넣으면 기본 GPT 그림체에서 내 그림체 쪽으로 끌어옵니다.</p>
     </section>
-    <section class="sec">
+    <div class="sec-rz" data-rz="style"></div>
+    <section class="sec" data-sk="chars">
       <div class="sec-h"><h3>캐릭터</h3><button type="button" class="b ghost sm" id="addChar">+ 추가</button></div>
       <div id="narrBox" class="grp"></div>
       <div id="charList" class="grp"></div>
     </section>
-    <section class="sec">
+    <div class="sec-rz" data-rz="chars"></div>
+    <section class="sec" data-sk="cuts">
       <div class="sec-h"><h3>컷</h3><span><label class="b ghost sm" title="이미지를 여러 장 고르면 파일 이름 순서대로 컷이 자동으로 만들어집니다">이미지로 컷 만들기<input type="file" accept="image/*" id="cutsUp" multiple hidden></label> <button type="button" class="b ghost sm" id="addPanel">+ 컷</button></span></div>
       <div class="bulk" id="bulkBar">
         <div class="row"><label class="chk"><input type="checkbox" id="selAll"> 전체 선택</label><span class="note" id="selCnt" style="margin:0"></span></div>
@@ -559,6 +601,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <ol id="panelList" class="plist"></ol>
       <p class="note" id="totalNote"></p>
     </section>
+    <div class="sec-rz" data-rz="cuts"></div>
   </aside>
 
   <main class="col center">
@@ -575,6 +618,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <label class="chk"><input type="checkbox" id="guides"> 쇼츠 안전영역</label>
     </div>
     <div class="monitor" id="monitor" role="group" aria-label="미리듣기 소리"></div>
+    <div class="pv-dub" id="pvDub" hidden></div>
   </main>
 
   <aside class="col right" aria-label="편집">
@@ -589,7 +633,10 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </nav>
     <div id="insp"></div>
   </aside>
-  <section class="timeline-dock" aria-label="컷 타임라인"><div class="timeline-head"><h3>타임라인</h3><span class="note">막대를 끌어 이동 · 양 끝을 끌어 등장·사라짐 조절 · 눈금자를 눌러 재생 위치 이동 · Ctrl+C / Ctrl+V 복사·붙여넣기 · 위 컷 띠의 오른쪽 끝을 끌어 컷 길이 조절</span></div><div class="cut-strip" id="cutStrip" aria-label="컷 띠: 누르면 컷 선택, 오른쪽 끝을 끌면 컷 길이 조절"></div><div id="timelineBody"><div class="otl" id="otl" tabindex="0" aria-label="타임라인: 요소 선택 후 Ctrl+C, Ctrl+V로 복사·붙여넣기"></div></div></section>
+  <div class="split v" id="spL" role="separator" aria-orientation="vertical" aria-label="왼쪽 창 너비 (끌기·←→ · 두 번 누르면 원래대로)" tabindex="0" title="끌어서 너비 조절 · 두 번 누르면 원래대로"><button type="button" class="sp-btn" id="spLBtn" aria-label="왼쪽 창 접기">◀</button></div>
+  <div class="split v" id="spR" role="separator" aria-orientation="vertical" aria-label="오른쪽 창 너비 (끌기·←→ · 두 번 누르면 원래대로)" tabindex="0" title="끌어서 너비 조절 · 두 번 누르면 원래대로"><button type="button" class="sp-btn" id="spRBtn" aria-label="오른쪽 창 접기">▶</button></div>
+  <div class="split h" id="spT" role="separator" aria-orientation="horizontal" aria-label="타임라인 높이 (끌기·↑↓ · 두 번 누르면 원래대로)" tabindex="0" title="끌어서 타임라인 높이 조절 · 두 번 누르면 원래대로"></div>
+  <section class="timeline-dock" aria-label="컷 타임라인"><div class="timeline-head"><h3>타임라인</h3><span class="tl-tools"><button type="button" class="b ghost sm" id="tlStrip">컷 띠 접기</button><button type="button" class="b ghost sm" id="tlFold">▾ 타임라인 접기</button></span><span class="note">막대를 끌어 이동 · 양 끝을 끌어 등장·사라짐 조절 · 눈금자를 눌러 재생 위치 이동 · Ctrl+C / Ctrl+V 복사·붙여넣기 · 위 컷 띠의 오른쪽 끝을 끌어 컷 길이 조절 · 타임라인 윗선을 끌어 높이 조절</span></div><div class="cut-strip" id="cutStrip" aria-label="컷 띠: 누르면 컷 선택, 오른쪽 끝을 끌면 컷 길이 조절"></div><div id="timelineBody"><div class="otl" id="otl" tabindex="0" aria-label="타임라인: 요소 선택 후 Ctrl+C, Ctrl+V로 복사·붙여넣기"></div></div></section>
 </div>
 
 <!-- 설정 -->
@@ -671,7 +718,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
         <label>말투 지시 (OpenAI gpt-4o-mini-tts · Gemini)<input type="text" data-s="ttsInstr"></label>
         <div class="g2">
           <label>목소리 변환 모델 (일레븐랩스)<input type="text" data-s="stsModel" list="stsModels"></label>
-          <label>목소리 변환 때 배경 잡음<select data-s="stsDenoise"><option value="">그대로 두기</option><option value="1">없애기</option></select></label>
+          <label title="마이크 녹음은 미리보기의 🧹 잡음 제거 스위치를 따릅니다 (기본 켬)">파일로 변환할 때 배경 잡음<select data-s="stsDenoise"><option value="">그대로 두기</option><option value="1">없애기</option></select></label>
           <label>목소리 변환 1분당 추정 비용(USD)<input type="number" step="0.01" data-s="cSts"></label>
           <label>효과음 1개당 추정 비용(USD)<input type="number" step="0.01" data-s="cSfx"></label>
           <label>배경음악 1분당 추정 비용(USD)<input type="number" step="0.01" data-s="cMusic"></label>
@@ -711,7 +758,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
-  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiWizard" title="콘티·스케치 그림부터: 이야기 흐름 → 그림 완성(스케치는 그리기, 인물이 된 컷은 배경만+후보정) → 대본 채우기 → 목소리·효과음·음악까지 한 번에">🎬 한 번에 완성</button><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
+  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiWizard" title="콘티·스케치 그림부터: 이야기 흐름 → 그림 완성(스케치는 그리기, 인물이 된 컷은 배경만+후보정) → 대본 채우기 → 목소리·감정·음성·타이밍까지 한 번에 (효과음·배경음악은 나중에 따로)">🎬 한 번에 완성</button><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 자막 정리까지 알아서 전체 편집합니다. 효과음·배경음악은 넣지 않습니다(배경음악 탭이나 AI 편집 대화로 따로). 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
   <details class="ai-cap" id="aiFill"><summary>📝 대본으로 컷 채우기</summary>
     <p class="note" style="margin:4px 0">대본 전체를 붙여 넣으면 AI 가 컷 그림을 보고 나레이션·말풍선·생각·외침·자막으로 나눠 알맞은 컷과 자리에 넣습니다. 지문은 장면 메모로 들어갑니다. 적용 전에 미리보기에서 고칠 수 있습니다.</p>
     <textarea id="fillScript" rows="6" placeholder="예)&#10;나레이션: 백 년도 더 된 옛날, 무주의 산속.&#10;백운: 앉아라. 긴 이야기가 될 테니..&#10;(다설이가 고개를 갸웃한다)&#10;다설이: 네?!"></textarea>
@@ -838,7 +885,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="fillSt" style="flex:1"></span>
     <button type="button" class="b ghost sm" id="fillRedo">↻ 다시 나누기</button>
     <button type="button" class="b sm" id="fillApply">적용</button>
-    <button type="button" class="b sm" id="fillApplyFull" title="적용한 뒤 목소리·감정·음성·타이밍·효과음·배경음악까지 이어서">적용하고 ✨ 전체 편집</button>
+    <button type="button" class="b sm" id="fillApplyFull" title="적용한 뒤 목소리·감정·음성·타이밍까지 이어서 (효과음·배경음악 제외)">적용하고 ✨ 전체 편집</button>
     <button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
@@ -3248,7 +3295,11 @@ function stsInfo(o) {
 }
 function stsTarget(o) { return stsInfo(o).voice; }
 /* 녹음(blob 또는 이미 있는 asset id) → 읽는 사람 목소리로 바꿔 대사 음성으로 넣는다 */
-async function stsVoice(p, o, src) {
+/* 마이크 녹음은 배경 잡음 제거가 기본 (S.recDenoise === false 일 때만 끔), 올린 파일은 설정의 ‘목소리 변환 때 배경 잡음’을 따른다 */
+const recDenoiseOn = () => S.recDenoise !== false;
+async function stsVoice(p, o, src, mic) {
+  if (mic == null) mic = typeof src === 'string' && o.voice?.sts?.src === src ? !!o.voice.sts.mic : false; // 같은 녹음으로 다시 변환 → 처음 방식 그대로
+  const denoise = mic ? recDenoiseOn() : !!S.stsDenoise;
   if (!isServer()) return toast('목소리 변환은 서버 모드에서만 됩니다');
   const info = stsInfo(o), voice = info.voice;
   if (!voice) return toast(`‘${info.label}’의 녹음 변환 목소리가 없습니다 — 캐릭터 카드(나레이터 목소리)의 ‘🎙 녹음 변환 목소리’에서 일레븐랩스 목소리를 고르세요`, 5000);
@@ -3263,13 +3314,13 @@ async function stsVoice(p, o, src) {
     const srcId = typeof src === 'string' ? src : await addAsset(src);
     const a = assets.get(srcId); if (!a) throw new Error('원본 녹음을 찾지 못했습니다');
     const key = await ensureKey(srcId, a.blob);
-    const r = await srvJSON('/api/tts', { op: 'sts', key, voice, model: S.stsModel, denoise: !!S.stsDenoise }, { signal: sig });
+    const r = await srvJSON('/api/tts', { op: 'sts', key, voice, model: S.stsModel, denoise }, { signal: sig });
     if (sig.aborted) throw new Error('aborted');
     const id = await addAsset(await fetchKey(r.key)); P.keys[id] = r.key;
     const buf = await audioBuf(id);
     pushVoiceHist(o);
-    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice }, made: madeSnap(o) };
-    o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초`;
+    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice, ...(mic ? { mic: true } : {}), ...(denoise ? { denoise: true } : {}) }, made: madeSnap(o) };
+    o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초${denoise ? ' · 잡음 제거' : ''}`;
     { const n = syncNote(syncCut(p)); if (n) o._vst += ' · ' + n; } // 녹음은 설정과 상관없이 타임라인을 녹음 길이에 맞춘다
     if (REC.toast) toast(o._vst, 4000);
     logCall({ kind: '목소리 변환', provider: 'tts', ok: true, cost: (buf?.duration || 0) / 60 * (+S.cSts || 0) });
@@ -3299,7 +3350,7 @@ async function toggleRecord(p, o) {
     const blob = new Blob(REC.chunks, { type: mr.mimeType || 'audio/webm' }), sec = (Date.now() - REC.t0) / 1000;
     clearInterval(REC.iv); REC.mr = null; REC.o = null; recUI();
     if (sec < 0.4 || !blob.size) return toast('녹음이 너무 짧습니다');
-    REC.toast = true; await stsVoice(p, o, blob); REC.toast = false; recUI();
+    REC.toast = true; await stsVoice(p, o, blob, true); REC.toast = false; recUI();
   };
   mr.start(); recUI(); toast(`⏺ 녹음 중 — 대사를 읽고 다시 누르면 ‘${info.label}’ 목소리로 바꿉니다`, 3500);
   REC.iv = setInterval(() => $$('[data-recsec]').forEach(e => (e.textContent = ((Date.now() - REC.t0) / 1000).toFixed(0) + '초')), 250);
@@ -3482,7 +3533,7 @@ function voiceEditorHTML(t) {
     <label><span class="lbl">말투 (OpenAI·Gemini)</span><input type="text" class="vIns" placeholder="${esc(t === P.narrTts && (!S.ttsInstr || S.ttsInstr === '차분하고 또렷한 한국어 내레이션') ? '이야기하듯 (아래 스타일에서 고르기)' : S.ttsInstr)}"></label>
     ${r.engine !== 'eleven' ? `<label style="grid-column:1/-1"><span class="lbl">🎙 녹음 변환 목소리 (일레븐랩스)${t.stsVoice ? ' · ' + esc(voiceName(t.stsVoice)) : ''}${t.stsVoice && t.stsClone ? (t.stsClone.from === r.voice && t.stsClone.engine === r.engine ? ' · 🧬 복제' : ' · ⚠ 원래 목소리가 바뀜 — 다시 복제하세요') : ''}</span><span class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" class="vSts" style="flex:1;min-width:0" list="${VLIST.eleven}" data-vl="eleven" placeholder="내 녹음을 바꿀 목소리 — 비슷한 목소리를 🔍 찾기로"><button type="button" class="b ghost sm vStsFind" title="일레븐랩스 목소리 목록에서 찾기">🔍 찾기</button><button type="button" class="ib vStsTry" title="이 목소리 샘플 듣기">▶</button></span><span class="row" style="gap:4px;margin-top:4px"><button type="button" class="b sm vClone" title="지금 ${esc(TTS_ENG[r.engine] || r.engine)} 목소리로 샘플 문장을 만들어 일레븐랩스에 닮은 목소리를 복제하고, 녹음 변환 목소리로 정합니다">🧬 지금 목소리를 일레븐랩스로 복제</button></span><span class="note" style="margin:2px 0 0">${esc(TTS_ENG[r.engine] || r.engine)}는 녹음을 다른 목소리로 바꾸지 못해서, 🎙 녹음한 내 목소리는 이 일레븐랩스 목소리로 바뀝니다. 글 대사는 그대로 ${esc(TTS_ENG[r.engine] || r.engine)}로 읽습니다.</span></label>` : ''}
   </div>
-  <div class="row"><button type="button" class="b ghost sm vTry">▶ 샘플 듣기</button><span class="st vTrySt"></span></div>`;
+  <div class="row" style="flex-wrap:wrap;gap:6px;align-items:center"><button type="button" class="b ghost sm vTry">▶ 샘플 듣기</button><button type="button" class="b ghost sm vTryDl" title="이 목소리로 샘플 문장을 만들어 파일로 받습니다 (방금 들은 샘플이 있으면 그대로 받기)">⬇ 샘플 목소리 다운</button><span class="st vTrySt"></span></div>`;
 }
 function bindVoiceEditor(el, t, sampleText, onChange, findOpts) {
   const q = s => el.querySelector(s), vv = q('.vVoice'), sp = q('.vSpd'), ins = q('.vIns');
@@ -3512,19 +3563,33 @@ function bindVoiceEditor(el, t, sampleText, onChange, findOpts) {
       catch (e) { st.textContent = '실패: ' + e.message; st.className = 'st vTrySt err'; }
     };
   }
+  /* 샘플: 같은 목소리 설정이면 한 번 만든 것을 듣기·받기에 함께 쓴다 (크레딧 아끼기) */
+  const sample = async () => {
+    const rv = resolveTts(t), sig = JSON.stringify([rv, sampleText]), hit = VSAMPLE.get(t);
+    if (hit && hit.sig === sig) return hit;
+    const r = await ttsBlob(sampleText, false, rv);
+    logCall({ kind: '음성', provider: 'tts', ok: true, cost: sampleText.length / 1000 * (+S.cTts || 0) });
+    const out = { sig, blob: r.blob, name: `샘플_${fileBit(findOpts?.name || '', 20) ? fileBit(findOpts.name, 20) + '_' : ''}${TTS_ENG[rv.engine] || rv.engine}_${fileBit(voiceName(rv.voice), 30)}.${audExt(r.blob)}` };
+    VSAMPLE.set(t, out); return out;
+  };
+  const busy = (b, on, label) => { b.disabled = on; if (label) b.textContent = label; };
   q('.vTry').onclick = async () => {
-    const st = q('.vTrySt'), b = q('.vTry'); b.disabled = true; st.textContent = '만드는 중…'; st.className = 'st vTrySt';
+    const st = q('.vTrySt'), b = q('.vTry'); busy(b, true); st.textContent = '만드는 중…'; st.className = 'st vTrySt';
     try {
-      const r = await ttsBlob(sampleText, false, resolveTts(t));
-      const buf = await actx().decodeAudioData(await r.blob.arrayBuffer());
-      const c = actx(), s = c.createBufferSource(); s.buffer = buf; s.connect(c.destination); s.start();
-      const rv = resolveTts(t); st.innerHTML = '<button type="button" class="ib vTryDl" title="이 샘플을 파일로 받기">⬇ 샘플 받기</button>';
-      st.querySelector('.vTryDl').onclick = () => download(r.blob, `샘플_${TTS_ENG[rv.engine] || rv.engine}_${fileBit(voiceName(rv.voice), 30)}.${audExt(r.blob)}`);
-      logCall({ kind: '음성', provider: 'tts', ok: true, cost: sampleText.length / 1000 * (+S.cTts || 0) });
+      const smp = await sample();
+      const c = actx(), s = c.createBufferSource(); s.buffer = await c.decodeAudioData(await smp.blob.arrayBuffer()); s.connect(c.destination); s.start();
+      st.textContent = '▶ ' + voiceName(resolveTts(t).voice);
     } catch (e) { st.textContent = '실패: ' + e.message; st.className = 'st vTrySt err'; }
-    b.disabled = false;
+    busy(b, false);
+  };
+  q('.vTryDl').onclick = async () => {
+    const st = q('.vTrySt'), b = q('.vTryDl'); busy(b, true, '⬇ 만드는 중…'); st.className = 'st vTrySt';
+    try { const smp = await sample(); download(smp.blob, smp.name); st.textContent = '⬇ ' + smp.name; }
+    catch (e) { st.textContent = '실패: ' + e.message; st.className = 'st vTrySt err'; }
+    busy(b, false, '⬇ 샘플 목소리 다운');
   };
 }
+const VSAMPLE = new WeakMap();
 /* v = resolveTts() 결과 { engine, voice, model, instr, speed } */
 async function ttsBlob(text, force, v, signal) {
   v = v || resolveTts();
@@ -3577,7 +3642,8 @@ const GEN = { name: '', done: 0, total: 0, stop: false };
 const isCancel = (o, e) => o._abort?.signal.aborted || e?.name === 'AbortError' || /aborted|abort/i.test(e?.message || '');
 function cancelVoice(o) { o._abort?.abort(); }
 function stopGen() { GEN.stop = true; P.panels.forEach(p => p.overlays.forEach(o => o._abort?.abort())); toast('만들기를 멈춥니다…'); }
-function genUI() { if (document.querySelector('#dlgCast[open]')) renderCast(); castCount(); if (tab === 'cut' || tab === 'text') renderInspector(); }
+function genUI() { if (document.querySelector('#dlgCast[open]')) renderCast(); castCount(); if (tab === 'cut' || tab === 'text' || S.pvDub) renderInspector(); }
+const dubVisible = () => tab === 'cut' || !!S.pvDub;
 /* 일괄 만들기: 하나씩 차례로, 중지하면 남은 것은 건너뛴다 */
 async function runGen(name, list, fn) {
   if (GEN.name) return toast('다른 일괄 만들기가 진행 중입니다 — 먼저 멈추거나 끝날 때까지 기다려 주세요');
@@ -5218,14 +5284,35 @@ function cutTracks(p) {
   return audTracks().map(t => { const sp = trackSpan(t), a = Math.max(sp.gs, s.start), b = Math.min(sp.ge, s.start + s.dur); return b > a ? { t, st: a - s.start, en: b - s.start, cutL: sp.gs < s.start, cutR: sp.ge > s.start + s.dur } : null; }).filter(Boolean);
 }
 /* 미리보기 아래 ‘미리듣기’ 줄: 이 컷에 있는 소리 개수 + 미리보기에서만 끄고 켜기 */
+/* 미리보기 아래 ‘이 컷 더빙 편집’: 컷 설정 탭의 더빙 편집기와 같은 것을 미리보기 바로 아래에 연다 */
+function pvDubMode() {
+  const c = $('.app > .center'); if (!c) return;
+  const on = !!S.pvDub, side = on && c.clientWidth >= 700;
+  c.classList.toggle('dub-side', side); c.classList.toggle('dub-stack', on && !side);
+  c.style.gridTemplateRows = side ? `minmax(0, 1fr) repeat(${c.children.length - 2}, auto)` : '';
+}
+addEventListener('resize', () => { clearTimeout(pvDubMode._t); pvDubMode._t = setTimeout(() => { pvDubMode(); fitStage(); }, 120); });
+function renderPvDub(p) {
+  const el = $('#pvDub'); if (!el) return;
+  el.hidden = !S.pvDub; pvDubMode();
+  if (!S.pvDub) { el.innerHTML = ''; return; }
+  const a = document.activeElement; if (el.contains(a) && a.matches('input[type=text], textarea')) return; // 말투를 적는 중이면 다시 그리지 않는다
+  if (tab === 'cut') { el.innerHTML = '<p class="note" style="margin:0">이 컷 더빙은 오른쪽 ‘컷 설정’ 탭에 열려 있습니다.</p>'; return; }
+  const top = el.scrollTop; el.innerHTML = dubHTML(p); bindDub(p, el); el.scrollTop = top;
+}
 function renderMonitor(p) {
   const el = $('#monitor'); if (!el || !p) return;
   const m = monOf(), tr = cutTracks(p);
   const n = { voice: p.overlays.filter(o => o.voice).length, sfx: tr.filter(x => trackGroup(x.t) === 'sfx').length, bgm: tr.filter(x => trackGroup(x.t) === 'bgm').length, clip: usesClip(p) && !p.clipMute ? 1 : 0 };
   const ro = REC.mr ? REC.o : (() => { const o = selOverlay(); return o && o.kind !== 'layer' && String(o.text || '').trim() ? o : null; })();
-  el.innerHTML = recBtnHTML(ro, 'chip rec', true) + '<span class="note" style="margin:0">🔈 미리듣기</span>' + Object.entries(MON).filter(([k]) => k !== 'clip' || n.clip).map(([k, lab]) =>
+  el.innerHTML = recBtnHTML(ro, 'chip rec', true) + `<button type="button" class="chip mon ${recDenoiseOn() ? '' : 'off'}" id="recDn" aria-pressed="${recDenoiseOn()}" title="녹음을 목소리로 바꿀 때 배경 잡음(에어컨·키보드·울림)을 없앱니다. 조용한 곳이면 꺼서 숨소리·작은 소리까지 살릴 수 있습니다.">${recDenoiseOn() ? '🧹 잡음 제거' : '잡음 제거 꺼짐'}</button>` + '<span class="note" style="margin:0">🔈 미리듣기</span>' + Object.entries(MON).filter(([k]) => k !== 'clip' || n.clip).map(([k, lab]) =>
     `<button type="button" class="chip mon ${m[k] ? '' : 'off'}" data-mon="${k}" aria-pressed="${m[k]}" title="${m[k] ? '미리보기에서 끄기' : '미리보기에서 켜기'} (내보내기에는 영향 없음)">${m[k] ? '' : '🔇 '}${lab} <b>${n[k]}</b></button>`).join('') +
     (Object.values(m).some(v => !v) ? '<span class="note" style="margin:0">· 꺼 둔 소리는 미리보기에서만 안 들립니다</span>' : '');
+  const nl = dubLines(p).length;
+  el.insertAdjacentHTML('beforeend', `<button type="button" class="chip" id="pvDubBtn" aria-expanded="${!!S.pvDub}" aria-controls="pvDub" title="이 컷 대사의 읽는 사람·감정·말투·음성을 미리보기 바로 아래에서 고치고 들어 봅니다">🎙 이 컷 더빙 편집 <b>${nl}</b> ${S.pvDub ? '▴' : '▾'}</button>`);
+  $('#pvDubBtn', el).onclick = () => { S.pvDub = !S.pvDub; saveSettings(); renderMonitor(p); requestAnimationFrame(fitStage); if (S.pvDub && $('.center.dub-stack')) $('#pvDub').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); };
+  renderPvDub(p);
+  $('#recDn', el).onclick = () => { S.recDenoise = !recDenoiseOn(); saveSettings(); renderMonitor(p); toast(recDenoiseOn() ? '🧹 녹음 잡음 제거를 켰습니다 (다음 녹음부터)' : '녹음 잡음 제거를 껐습니다 — 숨소리·작은 소리까지 그대로 바뀝니다'); };
   const rb = $('[data-rec]', el); if (rb) rb.onclick = () => { const rp = (REC.mr && P.panels.find(x => x.overlays.includes(REC.o))) || p; toggleRecord(rp, REC.mr ? REC.o : ro); };
   $$('[data-mon]', el).forEach(b => (b.onclick = () => {
     const k = b.dataset.mon; S.mon = { ...monOf(), [k]: !monOf()[k] }; saveSettings();
@@ -7434,7 +7521,7 @@ function renderWiz() {
         <label class="chk"><input type="checkbox" id="wzArc" ${o.arc ? 'checked' : ''}> 📖 이야기 흐름·감정선 분석</label>
         <label class="chk"><input type="checkbox" id="wzArt" ${o.art ? 'checked' : ''}> 🖌 그림 완성 — AI 아트 디렉팅 확인 후 생성 (컷당 약 $${(+S.cOa || 0.05).toFixed(2)})</label>
         <label class="chk"><input type="checkbox" id="wzFill" ${o.fill ? 'checked' : ''}> 📝 대본으로 나레이션·말풍선 채우기 (아래 대본이 있을 때)</label>
-        <label class="chk"><input type="checkbox" id="wzFull" ${o.full ? 'checked' : ''}> ✨ 전체 편집 — 목소리·감정·음성·타이밍·효과음·배경음악</label></div>
+        <label class="chk"><input type="checkbox" id="wzFull" ${o.full ? 'checked' : ''}> ✨ 전체 편집 — 목소리·감정·음성·타이밍 (효과음·배경음악은 나중에 따로)</label></div>
       <label class="grp"><span class="lbl">대본 (선택)</span><textarea id="wzScript" rows="6" placeholder="대본을 붙여 넣으면 그림이 완성된 뒤 컷에 나눠 넣습니다. 비워 두면 이미 있는 글을 씁니다.">${esc(o.script)}</textarea></label>
       <p class="note">캐릭터 카드에 레퍼런스 그림이 있으면 얼굴·의상이 훨씬 안정적입니다. 크레딧이 드는 단계는 시작 전에 비용을 보여 주고 확인합니다. 모든 결과는 버전으로 남아 되돌릴 수 있습니다.</p>`;
     const sync = () => { o.scope = $('#wzScope').value; o.arc = $('#wzArc').checked; o.art = $('#wzArt').checked; o.fill = $('#wzFill').checked; o.full = $('#wzFull').checked; o.script = $('#wzScript').value; };
@@ -8186,17 +8273,17 @@ async function dubPlay(p, list) {
   dubStop(); const my = ++DUB.tok;
   for (const o of list) {
     if (DUB.tok !== my) return;
-    DUB.playing = o.id; if (tab === 'cut') renderInspector();
+    DUB.playing = o.id; if (dubVisible()) renderInspector();
     const ok = await playBuf(o.voice.assetId, o.voice.vol, s => (DUB.src = s));
     if (!ok) break;
     if (DUB.tok === my) await new Promise(r => setTimeout(r, 250));
   }
-  if (DUB.tok === my) { DUB.playing = null; DUB.src = null; if (tab === 'cut') renderInspector(); }
+  if (DUB.tok === my) { DUB.playing = null; DUB.src = null; if (dubVisible()) renderInspector(); }
 }
-function dubStop() { DUB.tok++; try { DUB.src?.stop(); } catch (e) { /* 멈춤 */ } const was = DUB.playing; DUB.src = null; DUB.playing = null; if (was && tab === 'cut') renderInspector(); }
+function dubStop() { DUB.tok++; try { DUB.src?.stop(); } catch (e) { /* 멈춤 */ } const was = DUB.playing; DUB.src = null; DUB.playing = null; if (was && dubVisible()) renderInspector(); }
 async function dubMake(p, o) {
   dubStop(); const pr = genVoice(p, o, !!o.voice && !voiceStale(o)); renderInspector(); await pr;
-  if (tab === 'cut') renderInspector();
+  if (dubVisible()) renderInspector();
   if (o.voice && !/^실패/.test(o._vst || '')) dubPlay(p, [o]);
 }
 function bindDub(p, el) {
@@ -8781,14 +8868,15 @@ function aiSay(cls, text) {
   $('#aiLog').appendChild(d); $('#aiLog').scrollTop = 1e9; return d;
 }
 let aiBusy = false;
-async function aiSend(instruction, auto = false) {
+async function aiSend(instruction, auto = false, opts = {}) {
   if (aiBusy || !instruction) return;
   if (!isServer()) return aiSay('bot err', 'AI 편집은 서버 모드에서만 쓸 수 있습니다. 설정에서 서버 모드로 연결하세요.');
   aiBusy = true; $('#aiSend').disabled = true;
   aiSay('me', instruction);
   const wait = aiSay('bot', '편집안을 만드는 중…');
   try {
-    const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat, auto });
+    const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat, auto, ...(opts.noAudioFx ? { noAudioFx: true } : {}) });
+    if (opts.noAudioFx && d.ops) d.ops = d.ops.filter(o => !['add_sfx', 'plan_sfx', 'compose_bgm'].includes(o.tool)); // 효과음·배경음악은 나중에 따로
     wait.remove();
     let note = '', jobs = null;
     if (d.ops && d.ops.length) {
@@ -8873,7 +8961,7 @@ $('#aiFull').onclick = async () => {
   if (isServer() && !arcFresh()) { aiSay('bot', '📖 먼저 이야기 전체 흐름과 감정선을 분석합니다… (30초~1분)'); await ensureArc({ quiet: true }); if (P.arc?.beats?.length) aiSay('bot', `📖 ${P.arc.beats.length}개 구간으로 나눴습니다: ${P.arc.beats.map(b => b.name).join(' → ')}`); }
   aiSendFull();
 };
-const aiSendFull = () => aiSend('영상 전체를 알아서 완성도 있게 편집해줘(전체 편집). 나레이터·캐릭터 목소리는 이미 정해져 있으니 그대로 두고, 어색하거나 빠진 감정·말투를 장면과 캐릭터에 맞게 자연스럽게 다듬은 뒤, 음성이 없거나 ⚠인 대사는 만들고, 대사 타이밍과 컷 길이를 음성에 맞춰줘. 소리가 비어 있는 장면엔 꼭 필요한 환경음·효과음만 넣고, 배경음악이 없으면 설계를 시작해. 자막·말풍선 스타일이 들쭉날쭉하면 정리해. 컷 순서·그림·글 내용은 바꾸지 마. 질문하지 말고 바로 적용해.', true);
+const aiSendFull = () => aiSend('영상 전체를 알아서 완성도 있게 편집해줘(전체 편집). 나레이터·캐릭터 목소리는 이미 정해져 있으니 그대로 두고, 어색하거나 빠진 감정·말투를 장면과 캐릭터에 맞게 자연스럽게 다듬은 뒤, 음성이 없거나 ⚠인 대사는 만들고, 대사 타이밍과 컷 길이를 음성에 맞춰줘. 효과음·환경음·배경음악은 나중에 따로 넣을 거니까 만들지도 설계하지도 마. 자막·말풍선 스타일이 들쭉날쭉하면 정리해. 컷 순서·그림·글 내용은 바꾸지 마. 질문하지 말고 바로 적용해.', true, { noAudioFx: true });
 $('#aiAuto').onclick = () => aiSend('타임라인 전체를 보고 읽기 쉽게 알아서 다듬어줘. 글 읽는 시간이 모자란 컷은 맞추고, 말풍선 등장 타이밍이 겹치거나 너무 빠르면 정리해. 컷 순서·그림·글 내용·음악은 건드리지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiForm').onsubmit = e => { e.preventDefault(); const v = $('#aiIn').value.trim(); if (!v) return; $('#aiIn').value = ''; aiSend(v); };
 $('#aiIn').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#aiForm').requestSubmit(); } };
@@ -9080,6 +9168,79 @@ function openCanvasSize() {
   dialog.showModal();
 }
 new ResizeObserver(fitStage).observe($('#stageWrap')); window.addEventListener('resize', fitStage);
+/* ---- 화면 나누기: 왼쪽·오른쪽 창 너비와 아래 타임라인 높이를 끌어서 조절하고 접는다 (설정에 기억) ---- */
+function layOf() { return Object.assign({ lw: 0, rw: 0, tlh: 0, hideL: false, hideR: false, hideStrip: false, hideTl: false }, S.layout || {}); }
+function applyLayout() {
+  const L = layOf(), app = $('.app'); if (!app) return;
+  const st = app.style, set = (k, v) => (v ? st.setProperty(k, v) : st.removeProperty(k));
+  set('--lwE', L.hideL ? '0px' : L.lw ? L.lw + 'px' : '');
+  set('--rwE', L.hideR ? '0px' : L.rw ? L.rw + 'px' : '');
+  set('--tlhE', L.hideTl ? '46px' : L.tlh ? L.tlh + 'px' : '');
+  ['hideL', 'hideR', 'hideStrip', 'hideTl'].forEach(k => app.classList.toggle(k, !!L[k]));
+  $('#spLBtn').textContent = L.hideL ? '▶' : '◀'; $('#spLBtn').setAttribute('aria-label', L.hideL ? '왼쪽 창 펼치기' : '왼쪽 창 접기'); $('#spLBtn').title = L.hideL ? '왼쪽 창 펼치기' : '왼쪽 창 접기';
+  $('#spRBtn').textContent = L.hideR ? '◀' : '▶'; $('#spRBtn').setAttribute('aria-label', L.hideR ? '오른쪽 창 펼치기' : '오른쪽 창 접기'); $('#spRBtn').title = L.hideR ? '오른쪽 창 펼치기' : '오른쪽 창 접기';
+  $('#tlStrip').textContent = L.hideStrip ? '컷 띠 펼치기' : '컷 띠 접기'; $('#tlStrip').hidden = !!L.hideTl;
+  $('#tlFold').textContent = L.hideTl ? '▴ 타임라인 펼치기' : '▾ 타임라인 접기';
+  $('#tlStrip').setAttribute('aria-pressed', String(!L.hideStrip)); $('#tlFold').setAttribute('aria-expanded', String(!L.hideTl));
+  clearTimeout(applyLayout._t); applyLayout._t = setTimeout(() => { renderCutStrip(); pvDubMode(); fitStage(); }, 60);
+}
+function setLayout(patch, keep) { S.layout = { ...layOf(), ...patch }; if (!keep) saveSettings(); applyLayout(); }
+function bindSplit(id, axis, calc, reset, key) {
+  const el = $('#' + id);
+  el.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0 || ev.target.closest('button')) return;
+    ev.preventDefault(); try { el.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
+    el.classList.add('drag'); document.body.style.cursor = axis === 'x' ? 'col-resize' : 'row-resize';
+    const mv = e => setLayout(calc(e, $('.app').getBoundingClientRect()), true);
+    const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); el.classList.remove('drag'); document.body.style.cursor = ''; saveSettings(); };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  });
+  el.addEventListener('dblclick', e => { if (!e.target.closest('button')) setLayout(reset); });
+  el.addEventListener('keydown', e => { const d = key(e.key, e.shiftKey ? 60 : 20); if (d) { e.preventDefault(); setLayout(d); } });
+}
+const LAY = { minL: 180, minR: 260, minC: 320 };
+bindSplit('spL', 'x', (e, r) => { const w = e.clientX - r.left; if (w < 110) return { hideL: true }; return { hideL: false, lw: Math.round(clamp(w, LAY.minL, r.width - (layOf().hideR ? 0 : layOf().rw || 370) - LAY.minC)) }; },
+  { lw: 0, hideL: false }, (k, d) => { const L = layOf(), cur = L.hideL ? 0 : L.lw || $('.app > .left').offsetWidth; return k === 'ArrowLeft' ? (cur - d < 110 ? { hideL: true } : { lw: cur - d }) : k === 'ArrowRight' ? { hideL: false, lw: Math.max(LAY.minL, cur + d) } : null; });
+bindSplit('spR', 'x', (e, r) => { const w = r.right - e.clientX; if (w < 140) return { hideR: true }; return { hideR: false, rw: Math.round(clamp(w, LAY.minR, r.width - (layOf().hideL ? 0 : layOf().lw || 290) - LAY.minC)) }; },
+  { rw: 0, hideR: false }, (k, d) => { const L = layOf(), cur = L.hideR ? 0 : L.rw || $('.app > .right').offsetWidth; return k === 'ArrowRight' ? (cur - d < 140 ? { hideR: true } : { rw: cur - d }) : k === 'ArrowLeft' ? { hideR: false, rw: Math.max(LAY.minR, cur + d) } : null; });
+bindSplit('spT', 'y', (e, r) => { const h = r.bottom - e.clientY; if (h < 80) return { hideTl: true }; return { hideTl: false, tlh: Math.round(clamp(h, 120, r.height - 200)) }; },
+  { tlh: 0, hideTl: false }, (k, d) => { const L = layOf(), cur = L.hideTl ? 46 : L.tlh || $('.timeline-dock').offsetHeight; return k === 'ArrowUp' ? { hideTl: false, tlh: Math.max(120, cur + d) } : k === 'ArrowDown' ? (cur - d < 80 ? { hideTl: true } : { tlh: cur - d }) : null; });
+$('#spLBtn').onclick = () => setLayout({ hideL: !layOf().hideL });
+$('#spRBtn').onclick = () => setLayout({ hideR: !layOf().hideR });
+$('#tlStrip').onclick = () => setLayout({ hideStrip: !layOf().hideStrip });
+$('#tlFold').onclick = () => setLayout({ hideTl: !layOf().hideTl });
+applyLayout();
+/* ---- 왼쪽 섹션 (화풍 고정·캐릭터·컷): 제목을 눌러 접고, 아래 손잡이를 끌어 높이를 정한다 (설정에 기억) ---- */
+const SEC_NAMES = { style: '화풍 고정', chars: '캐릭터', cuts: '컷' };
+function secOf(k) { return { fold: false, h: 0, ...(S.secUi?.[k] || {}) }; }
+function setSec(k, patch, keep) { S.secUi = { ...(S.secUi || {}), [k]: { ...secOf(k), ...patch } }; if (!keep) saveSettings(); applySec(k); }
+function applySec(k) {
+  const sec = $(`.left .sec[data-sk="${k}"]`); if (!sec) return;
+  const st = secOf(k), h3 = $('.sec-h h3', sec);
+  sec.classList.toggle('fold', !!st.fold); sec.classList.toggle('sized', !!st.h);
+  sec.style.height = st.h && !st.fold ? st.h + 'px' : '';
+  h3.setAttribute('aria-expanded', String(!st.fold)); h3.title = st.fold ? '눌러서 펼치기' : '눌러서 접기';
+  const rz = $(`.sec-rz[data-rz="${k}"]`); if (rz) rz.setAttribute('aria-valuenow', String(Math.round(sec.offsetHeight)));
+}
+Object.keys(SEC_NAMES).forEach(k => {
+  const sec = $(`.left .sec[data-sk="${k}"]`), h3 = $('.sec-h h3', sec), rz = $(`.sec-rz[data-rz="${k}"]`);
+  h3.setAttribute('role', 'button'); h3.tabIndex = 0;
+  h3.onclick = () => setSec(k, { fold: !secOf(k).fold });
+  h3.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); h3.click(); } };
+  Object.assign(rz, { tabIndex: 0, title: `끌어서 ‘${SEC_NAMES[k]}’ 높이 조절 · 두 번 누르면 원래대로` });
+  rz.setAttribute('role', 'separator'); rz.setAttribute('aria-orientation', 'horizontal'); rz.setAttribute('aria-label', SEC_NAMES[k] + ' 높이 (끌기·↑↓ · 두 번 누르면 원래대로)');
+  rz.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0) return; ev.preventDefault();
+    try { rz.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
+    const y0 = ev.clientY, h0 = sec.offsetHeight; rz.classList.add('drag'); document.body.style.cursor = 'row-resize';
+    const mv = e => setSec(k, { h: Math.round(clamp(h0 + e.clientY - y0, 90, 3000)), fold: false }, true);
+    const up = () => { rz.removeEventListener('pointermove', mv); rz.removeEventListener('pointerup', up); rz.removeEventListener('pointercancel', up); rz.classList.remove('drag'); document.body.style.cursor = ''; saveSettings(); };
+    rz.addEventListener('pointermove', mv); rz.addEventListener('pointerup', up); rz.addEventListener('pointercancel', up);
+  });
+  rz.addEventListener('dblclick', () => setSec(k, { h: 0 }));
+  rz.addEventListener('keydown', e => { const d = e.shiftKey ? 60 : 20; if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setSec(k, { h: Math.round(clamp(sec.offsetHeight + (e.key === 'ArrowDown' ? d : -d), 90, 3000)), fold: false }); } });
+  applySec(k);
+});
 $('#projBtn').onclick = () => openProjectManager();
 $('#canvasSizeBtn').onclick = openCanvasSize;
 $('#aspectSel').onchange = e => {
