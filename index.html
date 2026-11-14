@@ -405,6 +405,15 @@ header.bar { height:auto; min-height:56px; flex-wrap:wrap; padding-top:8px; padd
 header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 #localSt { font-size:.72rem; }
 </style>
+<style>
+/* 믹서: 요소 행을 누르면 펼쳐져 캐릭터별·하나씩 조절 */
+.mixer .mxg > summary { list-style:none; cursor:pointer; }
+.mixer .mxg > summary::-webkit-details-marker { display:none; }
+.mixer .mxg > summary .mxr > span[title]::before { content:'▸ '; color:var(--muted, #8a7a5a); }
+.mixer .mxg[open] > summary .mxr > span[title]::before { content:'▾ '; }
+.mixer .mxr { padding:2px 0; }
+.mixer .mxg > summary .mxr > span[title] { font-weight:600; }
+</style>
 </head>
 <body>
 <header class="bar">
@@ -456,6 +465,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </section>
     <section class="sec">
       <div class="sec-h"><h3>캐릭터</h3><button type="button" class="b ghost sm" id="addChar">+ 추가</button></div>
+      <div id="narrBox" class="grp"></div>
       <div id="charList" class="grp"></div>
     </section>
     <section class="sec">
@@ -566,8 +576,10 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       </fieldset>
       <fieldset><legend>대사 음성 (TTS)</legend>
         <div class="g2">
-          <label>엔진<select data-s="ttsEngine"><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="eleven">일레븐랩스 (서버 모드)</option></select></label>
-          <label>목소리 (OpenAI 이름 또는 일레븐랩스 voice ID)<input type="text" data-s="ttsVoice" list="ttsVoices"></label>
+          <label>기본 엔진<select data-s="ttsEngine"><option value="openai">OpenAI (GPT)</option><option value="gemini">Gemini</option><option value="google">Google Cloud TTS (서버 모드)</option><option value="eleven">일레븐랩스 (서버 모드)</option></select></label>
+          <label>OpenAI 목소리<input type="text" data-s="ttsVoice" list="ttsVoices"></label>
+          <label>일레븐랩스 voice ID<input type="text" data-s="elVoice" list="elVoices" data-vl="eleven"></label>
+          <label>Google 목소리 (ko-KR-Chirp3-HD-Kore …)<input type="text" data-s="gcVoice" list="gcVoices" data-vl="google"></label>
           <label>Gemini 목소리 (Kore, Puck, Zephyr, Charon, Aoede …)<input type="text" data-s="gmVoice" list="gmVoices"></label>
           <label>Gemini 음성 모델<input type="text" data-s="gmTtsModel"></label>
           <label>OpenAI 모델<input type="text" data-s="ttsModel" list="ttsModels"></label>
@@ -575,7 +587,15 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
           <label>속도<input type="number" step="0.05" min="0.25" max="4" data-s="ttsSpeed"></label>
           <label>1천 자당 추정 비용(USD)<input type="number" step="0.001" data-s="cTts"></label>
         </div>
-        <label>말투 지시 (OpenAI gpt-4o-mini-tts)<input type="text" data-s="ttsInstr"></label>
+        <label>말투 지시 (OpenAI gpt-4o-mini-tts · Gemini)<input type="text" data-s="ttsInstr"></label>
+        <div class="g2">
+          <label>목소리 변환 모델 (일레븐랩스)<input type="text" data-s="stsModel" list="stsModels"></label>
+          <label>목소리 변환 때 배경 잡음<select data-s="stsDenoise"><option value="">그대로 두기</option><option value="1">없애기</option></select></label>
+          <label>목소리 변환 1분당 추정 비용(USD)<input type="number" step="0.01" data-s="cSts"></label>
+          <label>효과음 1개당 추정 비용(USD)<input type="number" step="0.01" data-s="cSfx"></label>
+          <label>배경음악 1분당 추정 비용(USD)<input type="number" step="0.01" data-s="cMusic"></label>
+        </div>
+        <p class="note">여기는 기본값입니다. 나레이터와 캐릭터마다 다른 엔진·목소리는 왼쪽 ‘캐릭터’ 칸에서 정합니다. 일레븐랩스·Google 키는 서버 환경변수(ELEVENLABS_API_KEY, GOOGLE_TTS_API_KEY)에 넣습니다.</p>
       </fieldset>
       <fieldset><legend>비용 추정 단가 (USD · 직접 수정)</legend>
         <div class="g2">
@@ -602,6 +622,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <datalist id="ttsVoices"><option value="coral"><option value="nova"><option value="shimmer"><option value="sage"><option value="alloy"><option value="ash"><option value="ballad"><option value="echo"><option value="fable"><option value="onyx"><option value="verse"></datalist>
 <datalist id="gmVoices"><option value="Kore"><option value="Puck"><option value="Zephyr"><option value="Charon"><option value="Aoede"><option value="Leda"><option value="Fenrir"><option value="Orus"><option value="Sulafat"><option value="Achird"><option value="Callirrhoe"><option value="Autonoe"><option value="Enceladus"><option value="Iapetus"><option value="Umbriel"><option value="Algieba"><option value="Despina"><option value="Erinome"><option value="Algenib"><option value="Rasalgethi"><option value="Laomedeia"><option value="Achernar"><option value="Alnilam"><option value="Schedar"><option value="Gacrux"><option value="Pulcherrima"><option value="Zubenelgenubi"><option value="Vindemiatrix"><option value="Sadachbia"><option value="Sadaltager"></datalist>
 <datalist id="oaVoices"><option value="alloy"><option value="ash"><option value="ballad"><option value="coral"><option value="echo"><option value="fable"><option value="nova"><option value="onyx"><option value="sage"><option value="shimmer"><option value="verse"></datalist>
+<datalist id="elVoices"></datalist><datalist id="stsModels"><option value="eleven_multilingual_sts_v2"><option value="eleven_english_sts_v2"></datalist><datalist id="gcVoices"><option value="ko-KR-Chirp3-HD-Kore"><option value="ko-KR-Chirp3-HD-Charon"><option value="ko-KR-Chirp3-HD-Aoede"><option value="ko-KR-Chirp3-HD-Puck"><option value="ko-KR-Neural2-A"><option value="ko-KR-Neural2-C"></datalist>
 <datalist id="ttsModels"><option value="gpt-4o-mini-tts"><option value="tts-1-hd"><option value="tts-1"></datalist>
 <datalist id="klModels"><option value="kling-v2-1"><option value="kling-v2-1-master"><option value="kling-v2-5-turbo"><option value="kling-v1-6"></datalist>
 
@@ -646,6 +667,25 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-h"><h3>생성 기록 · 비용 · 거부율</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
   <div class="dlg-b" id="logBody"></div>
   <div class="dlg-f"><button type="button" class="b danger sm" id="logClear">기록 지우기</button><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
+<dialog id="dlgCast">
+  <div class="dlg-h"><h3>목소리 배정 — 대사를 여러 개 골라 읽는 사람을 정하세요</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b">
+    <div class="row" style="flex-wrap:wrap;gap:6px">
+      <select id="castScope"><option value="cur">이 컷만</option><option value="all">모든 컷</option></select>
+      <select id="castFilter"><option value="">모든 종류</option><option value="speech">말풍선류</option><option value="narration">나레이션·자막</option><option value="none">읽는 사람 미지정(자동)</option></select>
+      <button type="button" class="b ghost sm" id="castAll">전체 선택</button><button type="button" class="b ghost sm" id="castNone">선택 해제</button>
+    </div>
+    <p class="note">Shift+클릭으로 범위를 고를 수 있습니다.</p>
+    <div id="castList" style="max-height:52vh;overflow:auto;border:1px solid var(--line-2);border-radius:6px"></div>
+  </div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px">
+    <select id="castWho" style="flex:1;min-width:140px"></select>
+    <button type="button" class="b sm" id="castApply">선택한 대사에 적용</button>
+    <button type="button" class="b ghost sm" id="castGen">선택한 대사 음성 만들기</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button>
+  </div>
 </dialog>
 
 <!-- 내보내기 -->
@@ -911,7 +951,7 @@ function rgba(hex, a) {
 const S_DEF = {
   mode: /^https?:$/.test(location.protocol) && !/^(localhost|127\.|\[::1\])/.test(location.hostname) ? 'server' : 'direct', apiBase: '',
   provider: 'auto', maxRefs: 6,
-  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', gmVoice: 'Kore', gmTtsModel: 'gemini-2.5-flash-preview-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', autoFit: true, cTts: 0.015,
+  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', gmVoice: 'Kore', gmTtsModel: 'gemini-2.5-flash-preview-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', elVoice: '', gcVoice: 'ko-KR-Chirp3-HD-Kore', stsModel: 'eleven_multilingual_sts_v2', stsDenoise: '', cSts: 0.2, cSfx: 0.08, cMusic: 0.8, musicModel: 'music_v1', autoFit: true, cTts: 0.015,
   oaKey: '', oaModel: 'gpt-image-2', oaSize: '1024x1536', oaQuality: 'medium',
   gmKey: '', gmModel: 'gemini-2.5-flash-image', gmAspect: '9:16',
   klAK: '', klSK: '', klBase: 'https://api-singapore.klingai.com', klModel: 'kling-v2-1', klFetchProxy: '',
@@ -919,6 +959,8 @@ const S_DEF = {
 };
 let S = { ...S_DEF };
 try { Object.assign(S, JSON.parse(localStorage.getItem('mms-settings') || '{}')); } catch (e) { /* 저장소 차단 */ }
+/* 예전에는 ttsVoice 칸 하나에 일레븐랩스 voice ID 도 넣었다 → elVoice 로 옮긴다 */
+if (!S.elVoice && S.ttsVoice && !/^(alloy|ash|ballad|coral|echo|fable|nova|onyx|sage|shimmer|verse)$/.test(S.ttsVoice)) { S.elVoice = S.ttsVoice; S.ttsVoice = 'coral'; }
 function saveSettings() { try { localStorage.setItem('mms-settings', JSON.stringify(S)); } catch (e) { toast('브라우저 저장소가 막혀 설정이 이번 세션에만 유지됩니다'); } }
 const hasKey = p => (p === 'openai' ? !!S.oaKey : p === 'gemini' ? !!S.gmKey : !!(S.klAK && S.klSK));
 const isServer = () => S.mode === 'server';
@@ -1029,7 +1071,7 @@ function referencedIds() {
   P.panels.forEach(p => {
     p.versions.forEach(v => ids.add(v.assetId)); p.clips.forEach(c => ids.add(c.assetId));
     (p.dirRefs || []).forEach(i => ids.add(i)); (p.mixRefs || []).forEach(i => ids.add(i)); if (p.sketch) ids.add(p.sketch.assetId);
-    p.overlays.forEach(o => o.voice && ids.add(o.voice.assetId));
+    p.overlays.forEach(o => { if (o.voice) { ids.add(o.voice.assetId); if (o.voice.sts?.src) ids.add(o.voice.sts.src); } }); // 목소리 변환은 원본 녹음도 남겨 다시 변환할 수 있게 한다
   });
   if (P.bgm) ids.add(P.bgm);
   (P.audio || []).forEach(t => ids.add(t.assetId));
@@ -1080,14 +1122,15 @@ function defaultProject() {
   return {
     v: 1, title: '새 무빙툰', aspect: '9:16',
     style: { prompt: 'Korean webtoon style, clean confident line art, cel shading with soft gradients, cinematic lighting, rich but controlled colors', refs: [] },
-    chars: [], panels: [p], bgm: null, bgmVol: 0.8, audio: [], log: [], keys: {}, bubbles: [], fonts: [],
+    chars: [], panels: [p], bgm: null, bgmVol: 0.8, audio: [], log: [], keys: {}, bubbles: [], fonts: [], narrTts: {},
   };
 }
 function migrate(pr) {
   const d = defaultProject();
-  pr = Object.assign({ title: d.title, aspect: '9:16', style: d.style, chars: [], panels: [], bgm: null, bgmVol: 0.8, log: [], keys: {}, bubbles: [], fonts: [] }, pr);
+  pr = Object.assign({ title: d.title, aspect: '9:16', style: d.style, chars: [], panels: [], bgm: null, bgmVol: 0.8, log: [], keys: {}, bubbles: [], fonts: [], narrTts: {} }, pr);
   pr.style = Object.assign({ prompt: '', refs: [] }, pr.style);
-  pr.chars = pr.chars.map(c => Object.assign({ id: uid(), name: '', desc: '', refs: [] }, c));
+  pr.narrTts = Object.assign({}, pr.narrTts);
+  pr.chars = pr.chars.map(c => Object.assign({ id: uid(), name: '', desc: '', refs: [], tts: {} }, c));
   pr.panels = pr.panels.map(p => {
     const n = Object.assign(newPanel(), p);
     n.adj = Object.assign({ ...ADJ0 }, p.adj);
@@ -1097,7 +1140,7 @@ function migrate(pr) {
     return n;
   });
   if (!pr.panels.length) pr.panels.push(newPanel());
-  pr.audio = (pr.audio || []).map(t => Object.assign({ id: uid(), name: '배경음악', start: 0, trimIn: 0, len: 0, vol: 0.8, fadeIn: 0, fadeOut: 0.5, loop: false, duck: true, srcDur: 0 }, t));
+  pr.audio = (pr.audio || []).map(t => Object.assign({ id: uid(), name: '배경음악', start: 0, trimIn: 0, len: 0, vol: 0.8, fadeIn: 0, fadeOut: 0.5, loop: false, duck: true, srcDur: 0, mute: false }, t, { kind: t.kind || (/^효과음/.test(t.name || '') ? 'sfx' : 'bgm') }));
   if (pr.bgm) { // 예전의 단일 배경음악(영상 전체 반복, 끝에서 1.2초 페이드)을 트랙 하나로 옮긴다
     pr.audio.unshift({ id: uid(), assetId: pr.bgm, name: '배경음악', start: 0, trimIn: 0, len: 0, vol: +pr.bgmVol || 0.8, fadeIn: 0, fadeOut: 1.2, loop: true, duck: true, srcDur: 0 });
     pr.bgm = null;
@@ -2757,22 +2800,127 @@ function renderLog() {
 /* =========================================================
    대사 음성 (TTS) — 서버 모드는 관리자 페이지와 같은 /api/tts 를 쓴다
    ========================================================= */
+/* ---- 목소리 배역: 대사마다 ‘누가 읽는지’(speaker)를 정하고, 그 사람의 목소리 설정(tts)을 쓴다 ----
+   o.speaker: '' = 자동(나레이션·자막 → 나레이터, 나머지 → 기본) · 'narr' = 나레이터 · 'base' = 기본 · 캐릭터 id
+   목소리 설정 { engine, voice, instr, speed } — 빈 칸은 설정 화면의 기본값을 따른다 */
+const TTS_ENG = { openai: 'OpenAI', gemini: 'Gemini', google: 'Google TTS', eleven: '일레븐랩스' };
+const TTS_SRV_ONLY = new Set(['google', 'eleven']);
+const VLIST = { openai: 'ttsVoices', gemini: 'gmVoices', google: 'gcVoices', eleven: 'elVoices' };
+const engDefaults = eng => eng === 'gemini' ? { voice: S.gmVoice, model: S.gmTtsModel }
+  : eng === 'eleven' ? { voice: S.elVoice, model: S.elModel }
+  : eng === 'google' ? { voice: S.gcVoice, model: '' }
+  : { voice: S.ttsVoice, model: S.ttsModel };
+function speakerOf(o) {
+  const sp = o.speaker || '', c = sp && sp !== 'narr' && sp !== 'base' ? P.chars.find(x => x.id === sp) : null;
+  if (c) return { label: c.name || '이름 없음', tts: c.tts || {} };
+  if (sp === 'narr' || (!sp && (o.kind === 'narration' || o.kind === 'caption'))) return { label: '나레이터', tts: P.narrTts || {} };
+  return { label: '기본 목소리', tts: {} };
+}
+function resolveTts(t) {
+  t = t || {};
+  const engine = t.engine || S.ttsEngine, d = engDefaults(engine);
+  return { engine, voice: String(t.voice || '').trim() || d.voice, model: d.model, instr: String(t.instr || '').trim() || S.ttsInstr, speed: +t.speed || +S.ttsSpeed || 1 };
+}
+const voiceProfile = o => { const s = speakerOf(o); return Object.assign(resolveTts(s.tts), { label: s.label }); };
+const hasOwnTts = t => !!(t && (t.engine || String(t.voice || '').trim() || String(t.instr || '').trim() || +t.speed));
 /* 문장·목소리 설정 서명: 음성을 만든 뒤 바뀌었는지(다시 만들어야 하는지) 알려 준다 */
-const voiceSig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.gmVoice, S.gmTtsModel, S.ttsModel, S.ttsInstr, S.ttsSpeed, S.elModel].join('|')).toString(36);
-const voiceStale = o => !!(o.voice && o.voice.sig !== voiceSig(o));
-/* ov = 캐릭터별 덮어쓰기 { voice, instr, speed } — 없으면 설정의 값을 쓴다 */
-async function ttsBlob(text, force, ov) {
-  const eng = ov?.engine || S.ttsEngine, other = eng !== S.ttsEngine; // 캐릭터가 설정과 다른 엔진을 고르면 설정의 목소리 값은 쓰지 않는다
-  const gmV = ov?.voice || (other ? 'Kore' : S.gmVoice), oaV = ov?.voice || (other ? (eng === 'openai' ? 'coral' : '') : S.ttsVoice), ins = String(ov?.instr?.trim() || S.ttsInstr), spd = +(ov?.speed || S.ttsSpeed) || 1;
+const voiceSig = o => { const v = voiceProfile(o); return hash([o.text.trim(), v.engine, v.voice, v.model, v.instr, v.speed].join('|')).toString(36); };
+const legacySig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.gmVoice, S.gmTtsModel, S.ttsModel, S.ttsInstr, S.ttsSpeed, S.elModel].join('|')).toString(36);
+const voiceStale = o => !!(o.voice && (o.voice.sts ? o.voice.sts.voice !== stsTarget(o) : o.voice.sig !== voiceSig(o) && (hasOwnTts(speakerOf(o).tts) || o.voice.sig !== legacySig(o))));
+/* 목소리 변환(일레븐랩스 Speech to Speech)의 대상 voice ID: 읽는 사람이 일레븐랩스면 그 목소리, 아니면 설정의 일레븐랩스 기본 목소리 */
+function stsTarget(o) { const v = voiceProfile(o); return v.engine === 'eleven' && v.voice ? v.voice : (S.elVoice || ''); }
+/* 녹음(blob 또는 이미 있는 asset id) → 읽는 사람 목소리로 바꿔 대사 음성으로 넣는다 */
+async function stsVoice(p, o, src) {
+  if (!isServer()) return toast('목소리 변환은 서버 모드에서만 됩니다');
+  const voice = stsTarget(o);
+  if (!voice) return toast('읽는 사람의 엔진을 일레븐랩스로 정하거나, 설정에 일레븐랩스 기본 voice ID 를 넣어 주세요', 4500);
+  o._vbusy = true; o._vst = '목소리 바꾸는 중…'; refreshPanel(p);
+  try {
+    const srcId = typeof src === 'string' ? src : await addAsset(src);
+    const a = assets.get(srcId); if (!a) throw new Error('원본 녹음을 찾지 못했습니다');
+    const key = await ensureKey(srcId, a.blob);
+    const r = await srvJSON('/api/tts', { op: 'sts', key, voice, model: S.stsModel, denoise: !!S.stsDenoise });
+    const id = await addAsset(await fetchKey(r.key)); P.keys[id] = r.key;
+    const buf = await audioBuf(id), old = o.voice?.assetId, oldSrc = o.voice?.sts?.src;
+    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice } };
+    dropAssetIfUnused(old); if (oldSrc && oldSrc !== srcId) dropAssetIfUnused(oldSrc);
+    o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초`;
+    if (S.autoFit && fitPanelToVoices(p)) o._vst += ` · 컷 길이를 ${panelDur(p).toFixed(1)}초로 늘림`;
+    logCall({ kind: '목소리 변환', provider: 'tts', ok: true, cost: (buf?.duration || 0) / 60 * (+S.cSts || 0) });
+  } catch (e) { o._vst = '실패: ' + e.message; logCall({ kind: '목소리 변환', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  o._vbusy = false; save(); refreshPanel(p); renderPanels();
+}
+/* 마이크 녹음: 한 번 누르면 시작, 다시 누르면 멈추고 변환 */
+const REC = { mr: null, chunks: [], o: null, t0: 0 };
+async function toggleRecord(p, o) {
+  if (REC.mr) { REC.mr.stop(); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { return toast('마이크를 쓸 수 없습니다: ' + e.message, 4000); }
+  const mr = new MediaRecorder(stream); REC.mr = mr; REC.chunks = []; REC.o = o; REC.t0 = Date.now();
+  mr.ondataavailable = e => e.data.size && REC.chunks.push(e.data);
+  mr.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(REC.chunks, { type: mr.mimeType || 'audio/webm' }), sec = (Date.now() - REC.t0) / 1000;
+    REC.mr = null; REC.o = null; renderInspector();
+    if (sec < 0.4 || !blob.size) return toast('녹음이 너무 짧습니다');
+    await stsVoice(p, o, blob);
+  };
+  mr.start(); renderInspector();
+}
+/* 서버/직접 모드의 목소리 목록 (일레븐랩스 내 목소리·Google 한국어 목록을 datalist 에 채운다) */
+const voiceCache = {};
+async function loadVoices(eng) {
+  if (!TTS_SRV_ONLY.has(eng) || !isServer()) return [];
+  if (!voiceCache[eng]) voiceCache[eng] = srv('/api/tts?op=voices&provider=' + eng).then(d => d.voices || []).catch(e => { delete voiceCache[eng]; toast('목소리 목록을 못 불러왔습니다: ' + e.message, 4000); return []; });
+  const list = await voiceCache[eng], dl = document.getElementById(VLIST[eng]);
+  if (dl && list.length) dl.innerHTML = list.map(v => `<option value="${esc(v.id)}" label="${esc(v.name)}">`).join('');
+  return list;
+}
+document.addEventListener('focusin', e => { const v = e.target.closest?.('[data-vl]'); if (v) loadVoices(v.dataset.vl); });
+/* 나레이터·캐릭터 카드에 들어가는 목소리 편집 칸 */
+function voiceEditorHTML(t) {
+  const eng = t.engine || '', r = resolveTts(t);
+  return `<div class="g2 vEd">
+    <label><span class="lbl">음성 엔진</span><select class="vEng"><option value="">기본 (${esc(TTS_ENG[S.ttsEngine] || S.ttsEngine)})</option>${Object.entries(TTS_ENG).map(([k, n]) => `<option value="${k}" ${eng === k ? 'selected' : ''}>${n}${TTS_SRV_ONLY.has(k) ? ' · 서버' : ''}</option>`).join('')}</select></label>
+    <label><span class="lbl">목소리</span><input type="text" class="vVoice" list="${VLIST[r.engine]}" data-vl="${r.engine}" placeholder="${esc(engDefaults(r.engine).voice || (r.engine === 'eleven' ? 'voice ID' : ''))}"></label>
+    <label><span class="lbl">속도</span><input type="number" class="vSpd" step="0.05" min="0.25" max="4" placeholder="${+S.ttsSpeed || 1}"></label>
+    <label><span class="lbl">말투 (OpenAI·Gemini)</span><input type="text" class="vIns" placeholder="${esc(S.ttsInstr)}"></label>
+  </div>
+  <div class="row"><button type="button" class="b ghost sm vTry">▶ 샘플 듣기</button><span class="st vTrySt"></span></div>`;
+}
+function bindVoiceEditor(el, t, sampleText, onChange) {
+  const q = s => el.querySelector(s), vv = q('.vVoice'), sp = q('.vSpd'), ins = q('.vIns');
+  vv.value = t.voice || ''; sp.value = t.speed || ''; ins.value = t.instr || '';
+  const done = () => { save(); onChange && onChange(); };
+  q('.vEng').onchange = e => { t.engine = e.target.value; t.voice = ''; done(); };
+  vv.oninput = () => { t.voice = vv.value.trim(); save(); };
+  vv.onchange = done;
+  sp.onchange = () => { t.speed = sp.value === '' ? 0 : +sp.value; done(); };
+  ins.oninput = () => { t.instr = ins.value; save(); };
+  ins.onchange = done;
+  q('.vTry').onclick = async () => {
+    const st = q('.vTrySt'), b = q('.vTry'); b.disabled = true; st.textContent = '만드는 중…'; st.className = 'st vTrySt';
+    try {
+      const r = await ttsBlob(sampleText, false, resolveTts(t));
+      const buf = await actx().decodeAudioData(await r.blob.arrayBuffer());
+      const c = actx(), s = c.createBufferSource(); s.buffer = buf; s.connect(c.destination); s.start();
+      st.textContent = '';
+      logCall({ kind: '음성', provider: 'tts', ok: true, cost: sampleText.length / 1000 * (+S.cTts || 0) });
+    } catch (e) { st.textContent = '실패: ' + e.message; st.className = 'st vTrySt err'; }
+    b.disabled = false;
+  };
+}
+/* v = resolveTts() 결과 { engine, voice, model, instr, speed } */
+async function ttsBlob(text, force, v) {
+  v = v || resolveTts();
+  const eng = v.engine, gmV = v.voice || 'Kore', oaV = v.voice || 'coral', ins = String(v.instr || ''), spd = +v.speed || 1;
   if (isServer()) {
-    const body = eng === 'gemini'
-      ? { provider: 'gemini', text, voice: gmV, model: S.gmTtsModel, instructions: ins, force: !!force }
-      : eng === 'eleven'
-      ? { text, voiceId: oaV, model: S.elModel, speed: spd, force: !!force }
-      : { provider: 'openai', text, voice: oaV, model: S.ttsModel, instructions: ins, speed: spd, force: !!force };
-    const r = await srvJSON('/api/tts', body);
+    if (eng === 'eleven' && !v.voice) throw new Error('일레븐랩스 voice ID 를 정해 주세요');
+    const r = await srvJSON('/api/tts', { provider: eng, text, voice: v.voice, model: v.model, instructions: ins, speed: spd, force: !!force });
     return { blob: await fetchKey(r.key), key: r.key };
   }
+  if (TTS_SRV_ONLY.has(eng)) throw new Error(TTS_ENG[eng] + ' 음성은 서버 모드에서만 만들 수 있습니다');
   if (eng === 'gemini') {
     if (!S.gmKey) throw new Error('Gemini 키가 없습니다');
     let g;
@@ -2792,7 +2940,7 @@ async function ttsBlob(text, force, ov) {
     hd.setUint32(24, 24000, true); hd.setUint32(28, 48000, true); hd.setUint16(32, 2, true); hd.setUint16(34, 16, true); w(36, 'data'); hd.setUint32(40, pcm.length, true);
     return { blob: new Blob([hd, pcm], { type: 'audio/wav' }) };
   }
-  if (eng !== 'openai') throw new Error('일레븐랩스 음성은 서버 모드에서만 만들 수 있습니다');
+  if (eng !== 'openai') throw new Error('모르는 음성 엔진: ' + eng);
   if (!S.oaKey) throw new Error('OpenAI 키가 없습니다');
   const body = { model: S.ttsModel, voice: oaV, input: text, speed: spd, response_format: 'mp3' };
   if (ins.trim() && !/^tts-1/.test(S.ttsModel)) body.instructions = ins.trim();
@@ -2806,12 +2954,12 @@ async function genVoice(p, o, force) {
   const text = (o.text || '').trim(); if (!text) return toast('텍스트가 비어 있습니다');
   o._vbusy = true; o._vst = '음성 만드는 중…'; refreshPanel(p);
   try {
-    const r = await ttsBlob(text, force);
+    const r = await ttsBlob(text, force, voiceProfile(o));
     const id = await addAsset(r.blob); if (r.key) P.keys[id] = r.key;
     const buf = await audioBuf(id);
-    const old = o.voice?.assetId;
+    const old = o.voice?.assetId, oldSrc = o.voice?.sts?.src;
     o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: voiceSig(o), vol: o.voice?.vol ?? 1 };
-    dropAssetIfUnused(old);
+    dropAssetIfUnused(old); if (oldSrc) dropAssetIfUnused(oldSrc);
     o._vst = `✓ 음성 ${o.voice.dur.toFixed(1)}초`;
     if (S.autoFit && fitPanelToVoices(p)) o._vst += ` · 컷 길이를 ${panelDur(p).toFixed(1)}초로 늘림`;
     logCall({ kind: '음성', provider: 'tts', ok: true, cost: text.length / 1000 * (+S.cTts || 0) });
@@ -2830,12 +2978,85 @@ function fitPanelToVoices(p) {
   return false;
 }
 async function genVoicesForPanel(p) {
-  const list = p.overlays.filter(o => o.text?.trim() && o.kind !== 'caption' && (!o.voice || voiceStale(o)));
+  const list = p.overlays.filter(o => o.text?.trim() && o.kind !== 'caption' && !o.voice?.sts && (!o.voice || voiceStale(o))); // 목소리 변환한 대사는 녹음을 덮어쓰지 않는다
   if (!list.length) return toast('새로 만들 음성이 없습니다 (이미 최신이거나 텍스트 없음)');
   const chars = list.reduce((a, o) => a + o.text.length, 0);
   if (!confirm(`${list.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다.`)) return;
   for (const o of list) await genVoice(p, o);
 }
+
+/* ---- 목소리 배정 창: 읽는 사람을 고른 뒤, 대사를 여러 개 체크해서 한꺼번에 적용 ---- */
+const CAST = { sel: new Set(), last: -1 };
+const castWhoOptions = () => `<option value="narr">🎙 나레이터</option><option value="base">기본 목소리</option>${P.chars.map(c => `<option value="${c.id}">${esc(c.name || '이름 없음')}</option>`).join('')}<option value="">자동 (종류에 따라)</option>`;
+function castRows() {
+  const scope = $('#castScope').value, f = $('#castFilter').value, cur = selPanel();
+  const rows = [];
+  P.panels.forEach((p, pi) => {
+    if (scope === 'cur' && p !== cur) return;
+    p.overlays.forEach(o => {
+      if (!o.text?.trim()) return;
+      const nar = o.kind === 'narration' || o.kind === 'caption';
+      if (f === 'speech' && nar) return;
+      if (f === 'narration' && !nar) return;
+      if (f === 'none' && o.speaker) return;
+      rows.push({ p, pi, o });
+    });
+  });
+  return rows.sort((a, b) => a.pi - b.pi || (+a.o.start || 0) - (+b.o.start || 0));
+}
+function renderCast() {
+  const rows = castRows(), el = $('#castList');
+  if (!rows.length) { el.innerHTML = '<p class="note" style="padding:10px">고를 대사가 없습니다.</p>'; return; }
+  el.innerHTML = rows.map((r, i) => {
+    const v = voiceProfile(r.o), k = r.p.id + ':' + r.o.id;
+    return `<label class="chk" style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px;border-bottom:1px solid var(--line-2)" data-i="${i}">
+      <input type="checkbox" data-k="${k}" ${CAST.sel.has(k) ? 'checked' : ''}>
+      <span style="flex:1;min-width:0"><span class="note" style="margin:0">${r.pi + 1}컷 · ${esc(OV_SHORT[r.o.kind] || KINDS[r.o.kind] || r.o.kind)} · ${(+r.o.start || 0).toFixed(1)}초</span><br>${esc(r.o.text.trim().slice(0, 80))}</span>
+      <span class="note" style="margin:0;white-space:nowrap">${esc(v.label)}${!r.o.speaker ? ' (자동)' : ''}${r.o.voice ? (voiceStale(r.o) ? ' · ⚠' : ' · 🔊') : ''}</span>
+    </label>`;
+  }).join('');
+  $$('input[data-k]', el).forEach((cb, i) => cb.addEventListener('click', e => {
+    if (e.shiftKey && CAST.last >= 0) {
+      const boxes = $$('input[data-k]', el), [a, b] = [Math.min(CAST.last, i), Math.max(CAST.last, i)];
+      for (let j = a; j <= b; j++) { boxes[j].checked = cb.checked; cb.checked ? CAST.sel.add(boxes[j].dataset.k) : CAST.sel.delete(boxes[j].dataset.k); }
+    } else cb.checked ? CAST.sel.add(cb.dataset.k) : CAST.sel.delete(cb.dataset.k);
+    CAST.last = i; castCount();
+  }));
+  castCount();
+}
+function castPicked() {
+  const out = [];
+  P.panels.forEach(p => p.overlays.forEach(o => { if (CAST.sel.has(p.id + ':' + o.id)) out.push({ p, o }); }));
+  return out;
+}
+function castCount() { const n = castPicked().length; $('#castApply').textContent = n ? `선택한 ${n}개에 적용` : '선택한 대사에 적용'; $('#castApply').disabled = $('#castGen').disabled = !n; }
+function openCast() {
+  CAST.sel.clear(); CAST.last = -1;
+  const so = selOverlay(); if (so && so.text?.trim()) CAST.sel.add(selPanel().id + ':' + so.id);
+  $('#castWho').innerHTML = castWhoOptions();
+  renderCast(); $('#dlgCast').showModal();
+}
+$('#castScope').onchange = $('#castFilter').onchange = () => { CAST.last = -1; renderCast(); };
+$('#castAll').onclick = () => { castRows().forEach(r => CAST.sel.add(r.p.id + ':' + r.o.id)); renderCast(); };
+$('#castNone').onclick = () => { CAST.sel.clear(); renderCast(); };
+$('#castApply').onclick = () => {
+  const who = $('#castWho').value, list = castPicked();
+  list.forEach(({ o }) => { o.speaker = who; });
+  save(); renderCast(); refreshInspector(); renderPanels();
+  const stale = list.filter(({ o }) => o.voice && voiceStale(o)).length;
+  toast(`${list.length}개 대사의 읽는 사람을 ‘${$('#castWho').selectedOptions[0].textContent.trim()}’(으)로 정했습니다${stale ? ` · 이미 만든 음성 ${stale}개는 다시 만들어야 합니다` : ''}`, 3500);
+};
+$('#castGen').onclick = async () => {
+  const list = castPicked().filter(({ o }) => o.kind !== 'caption' || o.speaker); // 자막은 읽는 사람을 직접 정했을 때만
+  const todo = list.filter(({ o }) => !o.voice?.sts && (!o.voice || voiceStale(o)));
+  const stsN = list.filter(({ o }) => o.voice?.sts && voiceStale(o)).length;
+  if (!todo.length) return toast(stsN ? `목소리 변환한 대사 ${stsN}개는 말풍선 탭의 ‘같은 녹음으로 다시 변환’으로 바꿔 주세요` : '새로 만들 음성이 없습니다 (이미 최신)', 4000);
+  const chars = todo.reduce((a, { o }) => a + o.text.length, 0);
+  if (!confirm(`${todo.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다.`)) return;
+  $('#castGen').disabled = true;
+  for (const { p, o } of todo) { await genVoice(p, o); renderCast(); }
+  $('#castGen').disabled = false; toast('음성을 만들었습니다');
+};
 
 /* ---- 오디오 엔진: 대사 음성 + 배경음악을 타임라인에 맞춰 재생하고, 내보내기 때는 녹화 스트림에도 보낸다 ---- */
 const AE = { ctx: null, bufs: new Map(), nodes: [], out: null, peaks: new Map() };
@@ -2867,22 +3088,43 @@ function trackSpan(t, srcDur = t.srcDur) {
   if (!t.loop && srcDur) len = Math.min(len, avail);
   return { gs: s, ge: s + len, avail, trim };
 }
-function stopAudio() { AE.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 이미 멈춤 */ } }); AE.nodes = []; if (AE.out) { AE.out.disconnect(); AE.out = null; } }
+/* ---- 믹서: 요소(나레이션·캐릭터 대사·효과음·배경음악·영상 소리)별 음소거·음량 ----
+   P.mix = { narr, dlg, sfx, bgm, clip: {vol, mute}, ch: { 캐릭터id: {vol, mute} } } · 각 음성/트랙에도 mute 가 있다 */
+const MIX_GROUPS = { narr: '🎙 나레이션', dlg: '💬 캐릭터 대사', sfx: '✨ 효과음', bgm: '🎵 배경음악', clip: '🎬 영상 소리' };
+const mixOf = () => { const m = P.mix || (P.mix = {}); Object.keys(MIX_GROUPS).forEach(k => (m[k] = Object.assign({ vol: 1, mute: false }, m[k]))); m.ch = m.ch || {}; return m; };
+const mixCh = id => { const m = mixOf(); return (m.ch[id] = Object.assign({ vol: 1, mute: false }, m.ch[id])); };
+/* 대사 음성이 어느 요소인지: 나레이터가 읽으면 나레이션, 아니면 캐릭터 대사(캐릭터 id 도 함께) */
+function voiceGroup(o) {
+  const sp = o.speaker || '';
+  if (sp === 'narr' || (!sp && (o.kind === 'narration' || o.kind === 'caption'))) return { g: 'narr' };
+  const c = sp && P.chars.find(x => x.id === sp);
+  return { g: 'dlg', ch: c ? c.id : '' };
+}
+const trackGroup = t => (t.kind === 'sfx' ? 'sfx' : 'bgm');
+const lvl = x => (x.mute ? 0 : clamp(isNaN(+x.vol) ? 1 : +x.vol, 0, 2));
+/* 그룹 음량을 뺀 나머지(캐릭터·개별) 배율 — 그룹 음량은 재생 중에도 바로 바뀌도록 GainNode 로 따로 건다 */
+function voiceGainNoGroup(o) { const v = voiceGroup(o); return o.voice?.mute ? 0 : clamp(o.voice?.vol ?? 1, 0, 2) * (v.g === 'dlg' ? lvl(mixCh(v.ch || '_')) : 1); }
+const voiceAudible = o => voiceGainNoGroup(o) > 0 && lvl(mixOf()[voiceGroup(o).g]) > 0;
+function setGroupGain(g) { const n = AE.grp?.[g]; if (n) n.gain.setTargetAtTime(lvl(mixOf()[g]), n.context.currentTime, 0.03); }
+function stopAudio() { AE.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 이미 멈춤 */ } }); AE.nodes = []; if (AE.out) { AE.out.disconnect(); AE.out = null; } AE.grp = null; }
 /* from~to 구간을 지금부터 재생하도록 예약. 반환값 t0 = 타임라인 from 이 소리 나는 AudioContext 시각 */
 function scheduleAudio(from, to, { bgm, dest } = {}) {
   stopAudio();
   const c = actx(), t0 = c.currentTime + 0.08, span = to - from;
   const out = c.createGain(); out.connect(c.destination); if (dest) out.connect(dest); AE.out = out;
-  const voices = [];
+  const mix = mixOf(); AE.grp = {};
+  Object.keys(MIX_GROUPS).forEach(k => { const n = c.createGain(); n.gain.value = lvl(mix[k]); n.connect(out); AE.grp[k] = n; });
+  const voices = []; // 대사가 들리는 구간 (배경음악 더킹용) — 음소거된 대사는 빼고
   timeline().forEach(s => s.p.overlays.forEach(o => {
     const buf = o.voice && AE.bufs.get(o.voice.assetId); if (!buf) return;
+    const gain = voiceGainNoGroup(o); if (!gain) return;
     const g = s.start + (+o.start || 0), end = Math.min(g + buf.duration, s.start + s.dur);
     if (end <= from || g >= to) return;
     const src = c.createBufferSource(); src.buffer = buf;
-    const vg = c.createGain(); vg.gain.value = clamp(o.voice.vol ?? 1, 0, 2); src.connect(vg); vg.connect(out);
+    const vg = c.createGain(); vg.gain.value = gain; src.connect(vg); vg.connect(AE.grp[voiceGroup(o).g]);
     const when = t0 + Math.max(0, g - from), off = Math.max(0, from - g);
     src.start(when, off); src.stop(t0 + (Math.min(end, to) - from));
-    AE.nodes.push(src); voices.push([when, t0 + (Math.min(end, to) - from)]);
+    AE.nodes.push(src); if (voiceAudible(o)) voices.push([when, t0 + (Math.min(end, to) - from)]);
   }));
   timeline().forEach(s => { // 영상 클립(클링 오디오 등)의 소리
     if (!usesClip(s.p) || s.p.clipMute) return;
@@ -2890,13 +3132,13 @@ function scheduleAudio(from, to, { bgm, dest } = {}) {
     const g = s.start, end = Math.min(g + buf.duration, s.start + s.dur);
     if (end <= from || g >= to) return;
     const src = c.createBufferSource(); src.buffer = buf;
-    const vg = c.createGain(); vg.gain.value = clamp(+s.p.clipVol || 1, 0, 2); src.connect(vg); vg.connect(out);
+    const vg = c.createGain(); vg.gain.value = clamp(+s.p.clipVol || 1, 0, 2); src.connect(vg); vg.connect(AE.grp.clip);
     const when = t0 + Math.max(0, g - from), off = Math.max(0, from - g);
     src.start(when, off); src.stop(t0 + (Math.min(end, to) - from));
-    AE.nodes.push(src); voices.push([when, t0 + (Math.min(end, to) - from)]);
+    AE.nodes.push(src); if (lvl(mix.clip) > 0) voices.push([when, t0 + (Math.min(end, to) - from)]);
   });
   if (bgm) audTracks().forEach(t => {
-    const bb = AE.bufs.get(t.assetId); if (!bb) return;
+    const bb = AE.bufs.get(t.assetId); if (!bb || t.mute) return;
     const { gs, ge, trim } = trackSpan(t, bb.duration), u0 = Math.max(gs, from), u1 = Math.min(ge, to);
     if (u1 <= u0) return;
     const vol = clamp(isNaN(+t.vol) ? 0.8 : +t.vol, 0, 1.5), fi = Math.max(0, +t.fadeIn || 0), fo = Math.max(0, +t.fadeOut || 0);
@@ -2916,7 +3158,7 @@ function scheduleAudio(from, to, { bgm, dest } = {}) {
       dg.gain.setTargetAtTime(0.35, Math.max(t0, a - 0.15), 0.08);
       dg.gain.setTargetAtTime(1, b + 0.1, 0.25);
     });
-    src.connect(eg); eg.connect(dg); dg.connect(out);
+    src.connect(eg); eg.connect(dg); dg.connect(AE.grp[trackGroup(t)]);
     src.start(at(u0), off); src.stop(at(u1));
     AE.nodes.push(src);
   });
@@ -3468,7 +3710,14 @@ function renderStyle() {
   const el = $('#styleRefs'); el.innerHTML = '';
   P.style.refs.forEach((id, i) => el.appendChild(refThumb(id, false, () => { P.style.refs.splice(i, 1); dropAssetIfUnused(id); save(); renderStyle(); })));
 }
+function renderNarr() {
+  const el = $('#narrBox'); if (!el) return;
+  el.innerHTML = `<div class="card"><div class="row"><strong style="flex:1">🎙 나레이터 목소리</strong><button type="button" class="b sm" id="castOpen">목소리 배정…</button></div>${voiceEditorHTML(P.narrTts)}<p class="note">나레이션·자막은 자동으로 나레이터가 읽습니다. ‘목소리 배정’에서 여러 대사를 골라 한꺼번에 읽는 사람을 바꿀 수 있습니다.</p></div>`;
+  bindVoiceEditor(el, P.narrTts, '그날, 모든 것이 달라졌다.', () => { renderNarr(); refreshInspector(); renderPanels(); });
+  $('#castOpen', el).onclick = () => openCast();
+}
 function renderChars() {
+  renderNarr();
   const el = $('#charList'); el.innerHTML = '';
   if (!P.chars.length) el.innerHTML = '<p class="note">캐릭터를 등록하면 컷마다 레퍼런스가 자동으로 첨부되어 얼굴·의상이 덜 흔들립니다.</p>';
   P.chars.forEach(c => {
@@ -3476,6 +3725,7 @@ function renderChars() {
     d.innerHTML = `
       <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
       <textarea class="ds" rows="3" placeholder="외형: 나이대, 얼굴형, 머리 모양·색, 눈, 의상, 체형, 상징 색"></textarea>
+      <details class="vBox"${hasOwnTts(c.tts) ? ' open' : ''}><summary>🔊 목소리 · ${esc((() => { const v = resolveTts(c.tts); return (TTS_ENG[v.engine] || v.engine) + ' ' + (v.voice || '(없음)'); })())}</summary>${voiceEditorHTML(c.tts || (c.tts = {}))}</details>
       <div class="refs"></div>
       <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple hidden></label><button type="button" class="b ghost sm gen" ${c._busy ? 'disabled' : ''}>${c._busy ? '생성 중…' : '시트 생성'}</button></div>
       <div class="st ${/^실패/.test(c._st || '') ? 'err' : ''}">${esc(c._st || '')}</div>`;
@@ -3493,6 +3743,7 @@ function renderChars() {
     c.refs.forEach((id, i) => refs.appendChild(refThumb(id, i === 0, () => { c.refs.splice(i, 1); dropAssetIfUnused(id); save(); renderChars(); })));
     d.querySelector('input[type=file]').onchange = async e => { for (const f of e.target.files) c.refs.push(await addAsset(f)); save(); renderChars(); };
     d.querySelector('.gen').onclick = () => genSheet(c);
+    bindVoiceEditor(d.querySelector('.vBox'), c.tts, `안녕하세요, 저는 ${c.name || '이 캐릭터'}예요. 잘 부탁해요!`, () => { renderChars(); refreshInspector(); renderPanels(); });
     el.appendChild(d);
   });
 }
@@ -3984,11 +4235,23 @@ function tabText(p) {
     ${o.kind === 'flash' ? sl('가시 길이', 'flashLen', 0.2, 3, 0.05, '×') + sl('가시 간격', 'flashGap', 0.4, 3, 0.05, '×') : ''}
     ${bubbleUI(o)}
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">
-      <span class="lbl">대사 음성 · ${S.ttsEngine === 'eleven' ? '일레븐랩스' : S.ttsEngine === 'gemini' ? 'Gemini' : 'OpenAI'} ${esc(S.ttsEngine === 'gemini' ? S.gmVoice : S.ttsVoice)}${isServer() ? ' · 서버' : ''}</span>
+      ${(() => { const v = voiceProfile(o); return `<span class="lbl">대사 음성 · ${esc(v.label)} — ${esc(TTS_ENG[v.engine] || v.engine)} ${esc(v.voice || '(목소리 없음)')}${isServer() ? ' · 서버' : ''}</span>`; })()}
+      <label><span class="lbl">읽는 사람</span><select id="vSpk">
+        <option value="" ${!o.speaker ? 'selected' : ''}>자동 (${o.kind === 'narration' || o.kind === 'caption' ? '나레이터' : '기본 목소리'})</option>
+        <option value="narr" ${o.speaker === 'narr' ? 'selected' : ''}>나레이터</option>
+        <option value="base" ${o.speaker === 'base' ? 'selected' : ''}>기본 목소리</option>
+        ${P.chars.map(c => `<option value="${c.id}" ${o.speaker === c.id ? 'selected' : ''}>${esc(c.name || '이름 없음')}</option>`).join('')}
+      </select></label>
       <div class="row">
-        <button type="button" class="b ghost sm" id="vGen" ${o._vbusy ? 'disabled' : ''}>${o._vbusy ? '만드는 중…' : !o.voice ? '🔊 음성 만들기' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>
-        ${o.voice ? '<button type="button" class="b ghost sm" id="vPlay">▶ 듣기</button><button type="button" class="b danger sm" id="vDel">음성 빼기</button>' : ''}
+        <button type="button" class="b ghost sm" id="vGen" ${o._vbusy ? 'disabled' : ''}>${o._vbusy ? '만드는 중…' : !o.voice ? '🔊 음성 만들기' : o.voice.sts ? '🔊 글로 새로 만들기(녹음 대신)' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>
+        ${o.voice ? `<button type="button" class="b ghost sm" id="vPlay">▶ 듣기</button><button type="button" class="b ghost sm" id="vMute" aria-pressed="${!!o.voice.mute}">${o.voice.mute ? '🔇 음소거됨' : '🔊 음소거'}</button><button type="button" class="b danger sm" id="vDel">음성 빼기</button>` : ''}
       </div>
+      <div class="row" style="flex-wrap:wrap">
+        <button type="button" class="b ghost sm" id="vRec" ${o._vbusy || (REC.mr && REC.o !== o) ? 'disabled' : ''} title="내가 연기한 녹음을 읽는 사람의 일레븐랩스 목소리로 바꿉니다">${REC.mr && REC.o === o ? '⏹ 녹음 멈추고 변환' : '🎤 녹음해서 목소리 변환'}</button>
+        <label class="b ghost sm" title="녹음 파일을 읽는 사람의 일레븐랩스 목소리로 바꿉니다">📁 파일로 변환<input type="file" accept="audio/*" id="vStsFile" hidden></label>
+        ${o.voice?.sts ? `<button type="button" class="b ghost sm" id="vStsAgain" ${o._vbusy ? 'disabled' : ''}>🔁 같은 녹음으로 다시 변환</button><button type="button" class="ib" id="vStsSrc" title="원본 녹음 듣기">▶ 원본</button>` : ''}
+      </div>
+      ${o.voice?.sts ? `<span class="note">목소리 변환 음성 · 대상 ${esc(o.voice.sts.voice)}${voiceStale(o) ? ' · ⚠ 읽는 사람의 목소리가 바뀌었습니다' : ''}</span>` : ''}
       ${o.voice ? sl('음성 볼륨', 'voice.vol', 0, 2, 0.05, '×') : ''}
       <div class="st ${stCls(o._vst)}" id="vSt">${esc(o._vst || (o.voice ? `음성 ${o.voice.dur.toFixed(1)}초${voiceStale(o) ? ' · 문장이나 목소리 설정이 바뀌어 지금 음성과 다릅니다' : ''}` : ''))}</div>
     </div>
@@ -5882,7 +6145,12 @@ function parseLine(raw, forced) {
   else if ((m = t.match(/^(외침|소리)\s*[:：]\s*/))) { kind = 'shout'; t = t.slice(m[0].length); }
   else if (/^[（(].*[)）]$/.test(t)) { kind = 'thought'; t = t.replace(/^[（(]\s*|\s*[)）]$/g, ''); }
   else if (/[!！]\s*$/.test(t) && [...t].length <= 16) kind = 'shout';
-  return { kind: forced && forced !== 'auto' ? forced : kind, text: t };
+  /* ‘캐릭터이름: 대사’ → 그 캐릭터가 읽는다 */
+  let speaker = kind === 'narration' ? '' : undefined;
+  const cm = kind !== 'narration' && kind !== 'caption' && t.match(/^([^:：]{1,20})\s*[:：]\s*/);
+  const ch = cm && P.chars.find(c => c.name && c.name.trim() === cm[1].trim());
+  if (ch) { speaker = ch.id; t = t.slice(cm[0].length); if (/[!！]\s*$/.test(t) && [...t].length <= 16 && kind === 'speech') kind = 'shout'; }
+  return { kind: forced && forced !== 'auto' ? forced : kind, text: t, speaker };
 }
 function addDialogues(p, lines, forced) {
   const items = lines.map(l => parseLine(l, forced)).filter(x => x.text);
@@ -5891,6 +6159,7 @@ function addDialogues(p, lines, forced) {
   let side = p.overlays.filter(o => ROUNDK.includes(o.kind)).length;
   items.forEach(it => {
     const o = newOverlay(it.kind, p); o.text = it.text;
+    if (it.speaker) o.speaker = it.speaker;
     if (ROUNDK.includes(it.kind)) {
       const right = side % 2 === 1, row = Math.floor(side / 2);
       o.x = right ? 0.64 : 0.36; o.y = clamp(0.2 + row * 0.15 + (right ? 0.07 : 0), 0.12, 0.66); side++;
@@ -5985,12 +6254,21 @@ function bindText(p, el) {
     const off = $('#bubOff', el); if (off) off.onclick = () => { o.shapeImg = null; save(); renderInspector(); requestDraw(); };
     $$('[data-bub]', el).forEach(b => (b.onclick = () => { o.shapeImg = b.dataset.bub; getImg(o.shapeImg); save(); renderInspector(); requestDraw(); }));
   }
-  $('#vGen', el).onclick = () => genVoice(p, o, !!o.voice && !voiceStale(o));
+  $('#vGen', el).onclick = () => { if (o.voice?.sts && !confirm('목소리 변환한 음성을 글 읽기(TTS) 음성으로 바꿉니다. 원본 녹음은 지워집니다. 계속할까요?')) return; genVoice(p, o, !!o.voice && !voiceStale(o)); };
+  $('#vSpk', el).onchange = e => { o.speaker = e.target.value; save(); renderInspector(); renderPanels(); };
+  $('#vRec', el).onclick = () => toggleRecord(p, o);
+  $('#vStsFile', el).onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) await stsVoice(p, o, f); };
+  const sa = $('#vStsAgain', el); if (sa) sa.onclick = () => stsVoice(p, o, o.voice.sts.src);
+  const ss = $('#vStsSrc', el); if (ss) ss.onclick = async () => {
+    const b = await audioBuf(o.voice.sts.src); if (!b) return toast('원본 녹음을 읽지 못했습니다');
+    const c = actx(), s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start();
+  };
   const vp = $('#vPlay', el); if (vp) vp.onclick = async () => {
     const b = await audioBuf(o.voice.assetId); if (!b) return toast('음성을 읽지 못했습니다');
     const c = actx(), s = c.createBufferSource(), g = c.createGain(); g.gain.value = o.voice.vol ?? 1; s.buffer = b; s.connect(g); g.connect(c.destination); s.start();
   };
-  const vd = $('#vDel', el); if (vd) vd.onclick = () => { const id = o.voice.assetId; o.voice = null; o._vst = ''; dropAssetIfUnused(id); save(); renderInspector(); };
+  const vm = $('#vMute', el); if (vm) vm.onclick = () => { o.voice.mute = !o.voice.mute; save(); renderInspector(); };
+  const vd = $('#vDel', el); if (vd) vd.onclick = () => { const id = o.voice.assetId, src = o.voice.sts?.src; o.voice = null; o._vst = ''; dropAssetIfUnused(id); if (src) dropAssetIfUnused(src); save(); renderInspector(); };
   const tc = $('#tailChk', el); if (tc) tc.onchange = () => { o.tail = tc.checked ? { x: o.x - 0.08, y: o.y + 0.1 } : null; save(); requestDraw(); };
   $('#ovNow', el).onclick = () => { o.start = +scrubT.toFixed(1); save(); renderInspector(); requestDraw(); };
   $('#ovDup', el).onclick = () => { const n = { ...JSON.parse(JSON.stringify(o)), id: uid(), y: clamp(o.y + 0.08, 0, 1), start: +(o.start + 0.8).toFixed(1) }; delete n.bubbleGroup; if (n.tail) n.tail.y = clamp(n.tail.y + 0.08, 0, 1); p.overlays.push(n); selOv = n.id; save(); renderInspector(); renderPanels(); requestDraw(); };
@@ -6083,6 +6361,141 @@ async function addClip(p, file) {
 
 /* ---- 배경음악 탭 (프로젝트 전체: 선택한 컷과 상관없이 같은 화면) ---- */
 let selAud = null;
+/* 효과음 만들기 (일레븐랩스 Sound Effects) — [버튼 이름, 영어 설명, 길이] */
+const SFX = { text: '', dur: 0, inf: 0.3, loop: false, busy: false, st: '' };
+const SFX_PRESETS = [
+  ['문 쾅', 'a heavy wooden door slams shut, short room reverb', 1.5],
+  ['발소리', 'footsteps of one person walking on a wet concrete alley at night', 4],
+  ['빗소리', 'steady rain on a city street at night, distant traffic', 10],
+  ['천둥', 'a loud thunder crack followed by a long low rumble', 5],
+  ['심장 박동', 'tense slow heartbeat, deep and muffled', 4],
+  ['휙', 'fast whoosh swish of a quick movement', 0.8],
+  ['타격', 'cinematic punch impact hit, anime style', 0.8],
+  ['폭발', 'large explosion with debris falling', 4],
+  ['전화 진동', 'smartphone vibrating on a wooden desk', 3],
+  ['반짝', 'magical sparkle chime, bright and short', 1.5],
+  ['군중 웅성', 'indoor crowd murmur, school cafeteria ambience', 10],
+  ['긴장 드론', 'dark tense cinematic drone, low and suspenseful', 10],
+];
+/* 배경음악 만들기 (일레븐랩스 Music) — [버튼 이름, 설명] */
+const MUSIC = { text: '', dur: 0, inst: true, loop: false, busy: false, st: '' };
+const MUSIC_PRESETS = [
+  ['잔잔·감성', 'gentle emotional piano with soft strings, slow tempo, bittersweet and warm, webtoon drama underscore'],
+  ['설렘·로맨스', 'light romantic acoustic guitar and glockenspiel, playful heartbeat rhythm, sweet and bright'],
+  ['긴장·스릴러', 'dark suspenseful cinematic underscore, pulsing low synth, ticking percussion, rising tension'],
+  ['액션', 'energetic orchestral action with driving drums and brass hits, fast tempo, heroic'],
+  ['코믹', 'quirky comedic pizzicato strings and bassoon, bouncy and mischievous'],
+  ['일상·로파이', 'lo-fi hip hop beat, warm vinyl texture, relaxed everyday mood, 80 bpm'],
+  ['미스터리', 'mysterious ambient pads, music box melody, eerie and curious'],
+  ['슬픔', 'sad solo cello and piano, slow and heartbreaking, lots of space'],
+  ['판타지', 'epic fantasy orchestral theme, choir and harp, sense of wonder'],
+];
+async function genMusic() {
+  const text = MUSIC.text.trim(); if (!text) return toast('어떤 음악인지 적어 주세요');
+  if (!isServer()) return toast('배경음악 만들기는 서버 모드에서만 됩니다');
+  const dur = Math.min(600, Math.max(3, +MUSIC.dur || Math.ceil(totalDur())));
+  MUSIC.busy = true; MUSIC.st = '작곡 중…'; if (tab === 'audio') renderInspector();
+  try {
+    const r = await srvJSON('/api/tts', { op: 'music', text, duration: dur, instrumental: MUSIC.inst, model: S.musicModel || 'music_v1' });
+    const assetId = await addAsset(await fetchKey(r.key)); P.keys[assetId] = r.key;
+    const buf = await audioBuf(assetId); if (!buf) throw new Error('받은 음악을 읽지 못했습니다');
+    const t = { id: uid(), kind: 'bgm', assetId, name: ('배경음악 · ' + text).slice(0, 40), start: 0, trimIn: 0, len: 0, vol: 0.6, fadeIn: 0.5, fadeOut: 1.5, loop: MUSIC.loop, duck: true, srcDur: +buf.duration.toFixed(3) };
+    audTracks().push(t); selAud = t.id;
+    MUSIC.st = `✓ ${buf.duration.toFixed(1)}초 배경음악을 넣었습니다`;
+    logCall({ kind: '배경음악', provider: 'tts', ok: true, cost: buf.duration / 60 * (+S.cMusic || 0) });
+    save();
+  } catch (e) { MUSIC.st = '실패: ' + e.message; logCall({ kind: '배경음악', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  MUSIC.busy = false; if (tab === 'audio') renderInspector();
+}
+/* ---- 믹서 화면 ----
+   행 하나 = [음소거] 이름 [음량] [지우기]. data-mx: g(요소) · ch(캐릭터) · v(대사 음성 "컷id:대사id") · t(트랙 id) */
+function mixItems() {
+  const voices = [];
+  timeline().forEach((s, pi) => s.p.overlays.forEach(o => { if (o.voice) voices.push({ p: s.p, pi, o, vg: voiceGroup(o) }); }));
+  const tr = audTracks(), clips = P.panels.filter(p => usesClip(p) && !p.clipMute).length;
+  return { voices, narr: voices.filter(x => x.vg.g === 'narr'), dlg: voices.filter(x => x.vg.g === 'dlg'), sfx: tr.filter(t => trackGroup(t) === 'sfx'), bgm: tr.filter(t => trackGroup(t) === 'bgm'), clips };
+}
+function mixRow(kind, id, name, x, max, sub, canDel = true) {
+  const v = isNaN(+x.vol) ? 1 : +x.vol;
+  return `<div class="row mxr ${x.mute ? 'muted' : ''}" data-mx="${kind}" data-id="${esc(id)}" style="gap:6px;align-items:center;${sub ? 'padding-left:' + sub * 14 + 'px;' : ''}${x.mute ? 'opacity:.55;' : ''}">
+    <button type="button" class="ib mxMute" aria-pressed="${!!x.mute}" title="${x.mute ? '음소거 풀기' : '음소거'}">${x.mute ? '🔇' : '🔊'}</button>
+    <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+    <input type="range" class="mxVol" min="0" max="${max}" step="0.05" value="${v}" style="width:90px" aria-label="${esc(name)} 음량">
+    <span class="note mxPct" style="margin:0;width:40px;text-align:right">${Math.round(v * 100)}%</span>
+    ${canDel ? '<button type="button" class="ib del mxDel" title="지우기">🗑</button>' : '<span style="width:26px"></span>'}
+  </div>`;
+}
+function mixerHTML() {
+  const m = mixOf(), it = mixItems(), short = s => s.trim().replace(/\s+/g, ' ').slice(0, 24);
+  const vRow = x => mixRow('v', x.p.id + ':' + x.o.id, `${x.pi + 1}컷 · ${short(x.o.text || '')}`, { vol: x.o.voice.vol ?? 1, mute: x.o.voice.mute }, 2, 2);
+  const tRow = t => mixRow('t', t.id, t.name || '오디오', { vol: isNaN(+t.vol) ? 0.8 : +t.vol, mute: t.mute }, 1.5, 2);
+  const chIds = [...new Set(it.dlg.map(x => x.vg.ch || '_'))];
+  const grp = (g, n, body, canDel = true) => `<details class="mxg" data-mxg="${g}" ${MIXOPEN.has(g) ? 'open' : ''}><summary style="list-style:none">${mixRow('g', g, `${MIX_GROUPS[g]} (${n})`, m[g], 2, 0, canDel && n > 0)}</summary>${body || ''}</details>`;
+  return `<details class="grp mixer" data-sec="mixer" ${S.secOpen?.mixer === false ? '' : 'open'}><summary class="lbl">🎚 믹서 — 요소별 음소거·음량·지우기</summary>
+    ${grp('narr', it.narr.length, it.narr.map(vRow).join(''))}
+    ${grp('dlg', it.dlg.length, chIds.map(id => { const c = P.chars.find(x => x.id === id), list = it.dlg.filter(x => (x.vg.ch || '_') === id);
+      return mixRow('ch', id, `${c ? c.name || '이름 없음' : '기본 목소리'} (${list.length})`, mixCh(id), 2, 1) + list.map(vRow).join(''); }).join(''))}
+    ${grp('sfx', it.sfx.length, it.sfx.map(tRow).join(''))}
+    ${grp('bgm', it.bgm.length, it.bgm.map(tRow).join(''))}
+    ${it.clips ? grp('clip', it.clips, '', false) : ''}
+    <p class="note">요소 이름을 누르면 펼쳐져 캐릭터별·하나씩 조절할 수 있습니다. 요소 음량은 재생 중에도 바로 바뀌고, 영상 내보내기에도 그대로 들어갑니다. 🗑 은 음성·트랙 파일만 지우고 말풍선 글자는 남깁니다.</p>
+  </details>`;
+}
+const MIXOPEN = new Set();
+function mixTarget(row) {
+  const k = row.dataset.mx, id = row.dataset.id, m = mixOf();
+  if (k === 'g') return { k, x: m[id], id };
+  if (k === 'ch') return { k, x: mixCh(id), id };
+  if (k === 't') return { k, x: audTracks().find(t => t.id === id), id };
+  const [pid, oid] = id.split(':'), p = P.panels.find(q => q.id === pid), o = p?.overlays.find(q => q.id === oid);
+  return { k, x: o?.voice, id, p, o };
+}
+function dropVoice(o) { const a = o.voice?.assetId, s = o.voice?.sts?.src; o.voice = null; o._vst = ''; if (a) dropAssetIfUnused(a); if (s) dropAssetIfUnused(s); }
+function dropTrack(t) { const tr = audTracks(), i = tr.indexOf(t); if (i < 0) return; tr.splice(i, 1); if (audPrev?._id === t.id) { audPrev.pause(); audPrev = null; } dropAssetIfUnused(t.assetId); }
+function mixDelete(row) {
+  const { k, x, id, o } = mixTarget(row), it = mixItems();
+  let voices = [], tracks = [], what = '';
+  if (k === 'v') { voices = [o]; what = `이 대사 음성`; }
+  else if (k === 't') { tracks = [x]; what = `‘${x.name}’ 트랙`; }
+  else if (k === 'ch') { voices = it.dlg.filter(v => (v.vg.ch || '_') === id).map(v => v.o); what = `이 캐릭터의 대사 음성 ${voices.length}개`; }
+  else if (id === 'narr' || id === 'dlg') { voices = it[id].map(v => v.o); what = `${MIX_GROUPS[id]} 음성 ${voices.length}개`; }
+  else if (id === 'sfx' || id === 'bgm') { tracks = it[id]; what = `${MIX_GROUPS[id]} 트랙 ${tracks.length}개`; }
+  if (!voices.length && !tracks.length) return;
+  if (!confirm(`${what}을(를) 지울까요? 말풍선 글자는 남지만 음성 파일은 다시 만들어야 합니다.`)) return;
+  voices.forEach(dropVoice); tracks.forEach(dropTrack);
+  save(); renderInspector(); renderPanels(); toast(`${what}을(를) 지웠습니다`);
+}
+function bindMixer(el) {
+  $$('.mxg', el).forEach(d => d.addEventListener('toggle', () => { d.open ? MIXOPEN.add(d.dataset.mxg) : MIXOPEN.delete(d.dataset.mxg); }));
+  $$('.mxr', el).forEach(row => {
+    const stop = e => { e.preventDefault(); e.stopPropagation(); }; // summary 안의 버튼이 펼치기/접기를 건드리지 않게
+    const vol = $('.mxVol', row), pct = $('.mxPct', row);
+    $('.mxMute', row).onclick = e => { stop(e); const t = mixTarget(row); if (!t.x) return; t.x.mute = !t.x.mute; if (t.k === 'g') setGroupGain(t.id); save(); renderInspector(); };
+    vol.onclick = e => e.stopPropagation();
+    vol.onpointerdown = e => e.stopPropagation();
+    vol.oninput = () => { const t = mixTarget(row); if (!t.x) return; t.x.vol = +vol.value; pct.textContent = Math.round(t.x.vol * 100) + '%'; if (t.k === 'g') setGroupGain(t.id); };
+    vol.onchange = () => { save(); if (mixTarget(row).k === 't') drawAtlSoon(); };
+    const d = $('.mxDel', row); if (d) d.onclick = e => { stop(e); mixDelete(row); };
+  });
+}
+const drawAtlSoon = () => { if (tab === 'audio') renderInspector(); };
+async function genSfx() {
+  const text = SFX.text.trim(); if (!text) return toast('어떤 소리인지 적어 주세요');
+  if (!isServer()) return toast('효과음 만들기는 서버 모드에서만 됩니다');
+  const s = timeline().find(x => x.p.id === sel), at = +((s ? s.start : 0) + (+scrubT || 0)).toFixed(2);
+  SFX.busy = true; SFX.st = '만드는 중…'; if (tab === 'audio') renderInspector();
+  try {
+    const r = await srvJSON('/api/tts', { op: 'sfx', text, duration: +SFX.dur || 0, influence: SFX.inf, loop: SFX.loop });
+    const assetId = await addAsset(await fetchKey(r.key)); P.keys[assetId] = r.key;
+    const buf = await audioBuf(assetId); if (!buf) throw new Error('받은 효과음을 읽지 못했습니다');
+    const t = { id: uid(), kind: 'sfx', assetId, name: ('효과음 · ' + text).slice(0, 40), start: at, trimIn: 0, len: 0, vol: 0.9, fadeIn: 0, fadeOut: SFX.loop ? 0.5 : 0.1, loop: SFX.loop, duck: false, srcDur: +buf.duration.toFixed(3) };
+    audTracks().push(t); selAud = t.id;
+    SFX.st = `✓ ${buf.duration.toFixed(1)}초 효과음을 ${at.toFixed(1)}초에 넣었습니다`;
+    logCall({ kind: '효과음', provider: 'tts', ok: true, cost: +S.cSfx || 0 });
+    save();
+  } catch (e) { SFX.st = '실패: ' + e.message; logCall({ kind: '효과음', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  SFX.busy = false; if (tab === 'audio') renderInspector();
+}
 async function addAudioFiles(files) {
   const list = [...files].filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name));
   if (!list.length) return toast('오디오 파일이 아닙니다');
@@ -6090,7 +6503,7 @@ async function addAudioFiles(files) {
   for (const f of list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
     const assetId = await addAsset(f), buf = await audioBuf(assetId);
     if (!buf) { dropAssetIfUnused(assetId); toast(`‘${f.name}’ 을(를) 읽지 못했습니다`); continue; }
-    const t = { id: uid(), assetId, name: f.name.replace(/\.[^.]+$/, '').slice(0, 40), start: 0, trimIn: 0, len: 0, vol: 0.8, fadeIn: 0, fadeOut: 0.5, loop: false, duck: true, srcDur: +buf.duration.toFixed(3) };
+    const t = { id: uid(), kind: /효과음|sfx|fx/i.test(f.name) ? 'sfx' : 'bgm', assetId, name: f.name.replace(/\.[^.]+$/, '').slice(0, 40), start: 0, trimIn: 0, len: 0, vol: 0.8, fadeIn: 0, fadeOut: 0.5, loop: false, duck: true, srcDur: +buf.duration.toFixed(3) };
     audTracks().push(t); selAud = t.id; ok++;
   }
   if (!ok) return;
@@ -6100,6 +6513,30 @@ function tabAudio() {
   const tr = audTracks();
   const num = (a, t, lbl, min, max, step, hint = '') => `<label><span>${lbl}</span><input type="number" data-a="${a}" min="${min}" max="${max}" step="${step}" value="${+(+t[a]).toFixed(2) || 0}" title="${hint}"></label>`;
   return `
+  ${mixerHTML()}
+  <details class="grp sfx" data-sec="sfx" ${S.secOpen?.sfx === false ? '' : 'open'}><summary class="lbl">✨ 효과음 만들기 (일레븐랩스 · 서버 모드)</summary>
+    <div class="row" style="flex-wrap:wrap;gap:4px">${SFX_PRESETS.map((x, i) => `<button type="button" class="chip" data-sfxp="${i}">${esc(x[0])}</button>`).join('')}</div>
+    <textarea id="sfxText" rows="2" placeholder="어떤 소리인지 적으세요. 예: 비 오는 밤 골목, 멀리서 천둥 / heavy wooden door slams shut in an empty hall">${esc(SFX.text)}</textarea>
+    <div class="g2">
+      <label><span>길이(초, 0=자동 · 최대 30)</span><input type="number" id="sfxDur" min="0" max="30" step="0.5" value="${SFX.dur}"></label>
+      <label><span>설명을 얼마나 따를지 ${Math.round(SFX.inf * 100)}%</span><input type="range" id="sfxInf" min="0" max="1" step="0.05" value="${SFX.inf}"></label>
+    </div>
+    <div class="row"><label class="note"><input type="checkbox" id="sfxLoop" ${SFX.loop ? 'checked' : ''}> 끊김 없이 반복되는 소리(배경 소음용)</label></div>
+    <div class="row"><button type="button" class="b sm" id="sfxGen" ${SFX.busy ? 'disabled' : ''}>${SFX.busy ? '만드는 중…' : '효과음 만들어 지금 위치에 넣기'}</button><span class="st ${stCls(SFX.st)}">${esc(SFX.st || '')}</span></div>
+    <p class="note">지금 고른 컷의 재생 위치(${(+scrubT || 0).toFixed(1)}초)에 새 트랙으로 들어갑니다. 영어로 자세히 쓸수록 정확합니다.</p>
+  </details>
+  <details class="grp bgmgen" data-sec="bgmgen" ${S.secOpen?.bgmgen === false ? '' : 'open'}><summary class="lbl">🎵 배경음악 만들기 (일레븐랩스 · 서버 모드)</summary>
+    <div class="row" style="flex-wrap:wrap;gap:4px">${MUSIC_PRESETS.map((x, i) => `<button type="button" class="chip" data-musp="${i}">${esc(x[0])}</button>`).join('')}</div>
+    <textarea id="musText" rows="3" placeholder="분위기·장르·악기·템포를 적으세요. 예: 잔잔한 피아노와 현악, 새벽의 쓸쓸한 감정, 느린 템포 / lo-fi hip hop, warm and nostalgic, 80 bpm">${esc(MUSIC.text)}</textarea>
+    <div class="g2">
+      <label><span>길이(초, 3~600) · 영상 전체 ${totalDur().toFixed(1)}초</span><input type="number" id="musDur" min="3" max="600" step="1" value="${MUSIC.dur || Math.min(600, Math.max(3, Math.ceil(totalDur())))}"></label>
+      <label><span>모델</span><select id="musModel">${['music_v1', 'music_v2', 'music_v2_5'].map(m => `<option ${S.musicModel === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label>
+    </div>
+    <div class="row" style="flex-wrap:wrap"><label class="note"><input type="checkbox" id="musInst" ${MUSIC.inst ? 'checked' : ''}> 가사 없는 연주곡</label>
+      <label class="note"><input type="checkbox" id="musLoop" ${MUSIC.loop ? 'checked' : ''}> 영상이 더 길면 반복</label></div>
+    <div class="row"><button type="button" class="b sm" id="musGen" ${MUSIC.busy ? 'disabled' : ''}>${MUSIC.busy ? '작곡 중… (1분 넘게 걸릴 수 있음)' : '배경음악 만들어 처음부터 넣기'}</button><span class="st ${stCls(MUSIC.st)}">${esc(MUSIC.st || '')}</span></div>
+    <p class="note">영상 0초부터 새 트랙으로 들어가고, 대사가 나올 때 볼륨이 자동으로 낮아집니다. 실존 가수·곡 이름은 거절될 수 있습니다.</p>
+  </details>
   <div class="grp"><span class="lbl">배경음악·효과음 트랙 — 음원을 여러 개 쌓고, 막대를 끌어 시작 위치(싱크)를 맞춥니다</span>
     <div class="row"><label class="b">음원 올리기<input type="file" accept="audio/*" id="audUp" multiple hidden></label>
       <button type="button" class="b ghost sm" id="audHere" ${tr.length ? '' : 'disabled'}>선택한 트랙을 지금 컷 시작에 맞추기</button></div>
@@ -6120,6 +6557,8 @@ function tabAudio() {
       ${num('fadeIn', t, '페이드 인(초)', 0, 30, 0.1)}
       ${num('fadeOut', t, '페이드 아웃(초)', 0, 30, 0.1)}
     </div>
+    <div class="row"><label class="note"><input type="checkbox" data-a="mute" ${t.mute ? 'checked' : ''}> 음소거</label>
+      <label class="note">종류 <select data-a="kind"><option value="bgm" ${trackGroup(t) === 'bgm' ? 'selected' : ''}>배경음악</option><option value="sfx" ${trackGroup(t) === 'sfx' ? 'selected' : ''}>효과음</option></select></label></div>
     <div class="row"><label class="note"><input type="checkbox" data-a="loop" ${t.loop ? 'checked' : ''}> 반복 재생</label>
       <label class="note"><input type="checkbox" data-a="duck" ${t.duck !== false ? 'checked' : ''}> 대사가 나올 때 볼륨 낮추기</label>
       <span class="note">원본 ${t.srcDur ? t.srcDur.toFixed(1) + '초' : '확인 중'}</span></div>
@@ -6156,6 +6595,20 @@ function previewTrack(t) {
 }
 function bindAudio(p, el) {
   const tr = audTracks();
+  bindMixer(el);
+  $('#sfxText', el).oninput = e => { SFX.text = e.target.value; };
+  $('#sfxDur', el).onchange = e => { SFX.dur = Math.min(30, Math.max(0, +e.target.value || 0)); };
+  $('#sfxInf', el).oninput = e => { SFX.inf = +e.target.value; e.target.previousElementSibling.textContent = `설명을 얼마나 따를지 ${Math.round(SFX.inf * 100)}%`; };
+  $('#sfxLoop', el).onchange = e => { SFX.loop = e.target.checked; };
+  $$('[data-sfxp]', el).forEach(b => (b.onclick = () => { const x = SFX_PRESETS[+b.dataset.sfxp]; SFX.text = x[1]; SFX.dur = x[2]; SFX.loop = /rain|ambience|drone/.test(x[1]); renderInspector(); }));
+  $('#sfxGen', el).onclick = genSfx;
+  $('#musText', el).oninput = e => { MUSIC.text = e.target.value; };
+  $('#musDur', el).onchange = e => { MUSIC.dur = Math.min(600, Math.max(3, +e.target.value || 0)); e.target.value = MUSIC.dur; };
+  $('#musModel', el).onchange = e => { S.musicModel = e.target.value; saveSettings(); };
+  $('#musInst', el).onchange = e => { MUSIC.inst = e.target.checked; };
+  $('#musLoop', el).onchange = e => { MUSIC.loop = e.target.checked; };
+  $$('[data-musp]', el).forEach(b => (b.onclick = () => { MUSIC.text = MUSIC_PRESETS[+b.dataset.musp][1]; renderInspector(); }));
+  $('#musGen', el).onclick = genMusic;
   $('#audUp', el).onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) await addAudioFiles(fs); };
   tr.forEach(t => { if (!t.srcDur) audioBuf(t.assetId).then(b => { if (b && !t.srcDur) { t.srcDur = +b.duration.toFixed(3); save(); if (tab === 'audio') refreshInspector(); } }); });
   const pick = id => { selAud = id; $$('.aud', el).forEach(c => c.classList.toggle('sel', c.dataset.aid === id)); $$('.atl .bar', el).forEach(b => b.classList.toggle('on', b.dataset.aid === id)); };
@@ -6198,7 +6651,8 @@ function bindAudio(p, el) {
     const t = tr.find(x => x.id === inp.closest('.aud').dataset.aid), f = inp.dataset.a;
     inp.onfocus = () => pick(t.id);
     inp.onchange = () => {
-      if (inp.type === 'checkbox') t[f] = inp.checked;
+      if (inp.type === 'checkbox') { t[f] = inp.checked; if (f === 'mute') { save(); return renderInspector(); } }
+      else if (inp.tagName === 'SELECT') { t[f] = inp.value; save(); return renderInspector(); }
       else if (inp.type === 'text') t[f] = inp.value.slice(0, 40);
       else { t[f] = clamp(+inp.value || 0, +inp.min, +inp.max); if (inp.type === 'range') inp.previousElementSibling.textContent = `볼륨 ${Math.round(t.vol * 100)}%`; else inp.value = t[f]; }
       save(); drawAtl();
@@ -6538,7 +6992,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#lightb
 $('#title').oninput = e => { P.title = e.target.value; save(); };
 $('#stylePrompt').oninput = e => { P.style.prompt = e.target.value; save(); };
 $('#styleUp').onchange = async e => { for (const f of e.target.files) P.style.refs.push(await addAsset(f)); e.target.value = ''; save(); renderStyle(); };
-$('#addChar').onclick = () => { P.chars.push({ id: uid(), name: `캐릭터 ${P.chars.length + 1}`, desc: '', refs: [] }); save(); renderChars(); refreshInspector(); };
+$('#addChar').onclick = () => { P.chars.push({ id: uid(), name: `캐릭터 ${P.chars.length + 1}`, desc: '', refs: [], tts: {} }); save(); renderChars(); refreshInspector(); };
 $('#addPanel').onclick = () => {
   const p = newPanel(), cur = selPanel();
   if (cur) { p.chars = [...cur.chars]; p.trans = cur.trans; p.prov = cur.prov; }

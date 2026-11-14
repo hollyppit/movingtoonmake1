@@ -21,6 +21,8 @@ const ENV = {
   sbBucket: 'SUPABASE_BUCKET',             // 선택. 기본 studio (비공개 버킷)
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
+  eleven: 'ELEVENLABS_API_KEY',     // 일레븐랩스 음성
+  gcTts: 'GOOGLE_TTS_API_KEY',      // 선택. Google Cloud Text-to-Speech (없으면 GEMINI_API_KEY 로 시도 — 그 프로젝트에서 TTS API 를 켜야 함)
   anthropic: 'ANTHROPIC_API_KEY',   // 나레이션·대사 맞춤법 검사 / 다듬기 (Claude)
   klKey: 'KLING_API_KEY',    // 새 클링 API: 키 하나 (Authorization: Bearer 키). 있으면 이 방식을 쓴다
   klAK: 'KLING_ACCESS_KEY',  // 옛 클링 API: Access Key + Secret Key 로 JWT 서명 (KLING_API_KEY 가 없을 때)
@@ -772,19 +774,131 @@ async function geminiTts(env, b, who) {
   if (!data) return json({ error: '음성이 반환되지 않았습니다 (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '이유 불명') + ')', kind: 'empty' }, 502);
   return json({ key: await r2Put(env, pcmToWav(unb64(data)), 'audio/wav', 'wav', who) });
 }
+const ttsKind = s => (s === 429 ? 'rate' : s === 401 || s === 403 ? 'auth' : 'bad');
+const noKey = name => json({ error: name + ' 없음 (서버 환경변수에 넣어 주세요)', kind: 'auth' }, 502);
+async function openaiTts(env, b, who) {
+  const key = env[ENV.openai]; if (!key) return noKey('OPENAI_API_KEY');
+  const body = { model: b.model || 'gpt-4o-mini-tts', voice: b.voice || 'coral', input: String(b.text || '').slice(0, 4000), speed: +b.speed || 1, response_format: 'mp3' };
+  if (b.instructions && !/^tts-1/.test(body.model)) body.instructions = String(b.instructions).slice(0, 1000);
+  const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); return json({ error: j.error?.message || 'HTTP ' + r.status, kind: ttsKind(r.status) }, 502); }
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
+/* 일레븐랩스: voice ID 로 부른다. 속도는 0.7~1.2 만 받는다 */
+async function elevenTts(env, b, who) {
+  const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
+  const voice = String(b.voice || b.voiceId || '').trim(); if (!voice) return json({ error: '일레븐랩스 voice ID 가 비어 있습니다', kind: 'bad' }, 400);
+  const body = { text: String(b.text || '').slice(0, 5000), model_id: b.model || 'eleven_multilingual_v2', voice_settings: { speed: Math.min(1.2, Math.max(0.7, +b.speed || 1)) } };
+  const r = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(voice) + '?output_format=mp3_44100_128', {
+    method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body),
+  });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); const m = j.detail?.message || (typeof j.detail === 'string' ? j.detail : '') || 'HTTP ' + r.status; return json({ error: m, kind: ttsKind(r.status) }, 502); }
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
+const elErr = async r => { const j = await r.json().catch(() => ({})); const m = j.detail?.message || (typeof j.detail === 'string' ? j.detail : '') || j.error?.message || 'HTTP ' + r.status; return json({ error: m, kind: ttsKind(r.status) }, 502); };
+/* 일레븐랩스 목소리 변환(Speech to Speech): 올려 둔 녹음(key)을 다른 목소리로 바꾼다. 말투·호흡·감정은 녹음을 따른다 */
+async function elevenSts(env, b, who) {
+  const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
+  const voice = String(b.voice || '').trim(); if (!voice) return json({ error: '바꿀 일레븐랩스 voice ID 가 비어 있습니다', kind: 'bad' }, 400);
+  if (!b.key) return json({ error: '변환할 녹음 파일(key)이 없습니다' }, 400);
+  const src = await r2Get(env, String(b.key), who);
+  if (src.bytes.length > 50 * 1024 * 1024) return json({ error: '녹음 파일이 너무 큽니다 (50MB 이하)' }, 400);
+  const fd = new FormData();
+  fd.append('audio', new Blob([src.bytes], { type: src.type || 'audio/mpeg' }), 'input');
+  fd.append('model_id', String(b.model || 'eleven_multilingual_sts_v2'));
+  fd.append('remove_background_noise', b.denoise ? 'true' : 'false');
+  const vs = {};
+  if (b.stability != null && b.stability !== '') vs.stability = Math.min(1, Math.max(0, +b.stability));
+  if (b.similarity != null && b.similarity !== '') vs.similarity_boost = Math.min(1, Math.max(0, +b.similarity));
+  if (b.style != null && b.style !== '') vs.style = Math.min(1, Math.max(0, +b.style));
+  if (Object.keys(vs).length) fd.append('voice_settings', JSON.stringify(vs));
+  const r = await fetch('https://api.elevenlabs.io/v1/speech-to-speech/' + encodeURIComponent(voice) + '?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': key, Accept: 'audio/mpeg' }, body: fd });
+  if (!r.ok) return elErr(r);
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
+/* 일레븐랩스 효과음: 글 설명 → 효과음. 길이 0 = 자동 (0.5~30초) */
+async function elevenSfx(env, b, who) {
+  const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
+  const text = String(b.text || '').trim().slice(0, 1000); if (!text) return json({ error: '효과음 설명이 비어 있습니다' }, 400);
+  const body = { text, model_id: String(b.model || 'eleven_text_to_sound_v2'), prompt_influence: Math.min(1, Math.max(0, b.influence == null || b.influence === '' ? 0.3 : +b.influence)) };
+  const dur = +b.duration; if (dur > 0) body.duration_seconds = Math.min(30, Math.max(0.5, dur));
+  if (b.loop) body.loop = true;
+  const r = await fetch('https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body) });
+  if (!r.ok) return elErr(r);
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
+/* 일레븐랩스 배경음악(Music): 글 설명 → 곡. 길이 3~600초, 기본은 가사 없는 연주곡 */
+async function elevenMusic(env, b, who) {
+  const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
+  const prompt = String(b.text || '').trim().slice(0, 2000); if (!prompt) return json({ error: '음악 설명이 비어 있습니다' }, 400);
+  const model = /^music_v(1|2|2_5)$/.test(b.model || '') ? b.model : 'music_v1';
+  const body = { prompt, model_id: model, force_instrumental: b.instrumental !== false };
+  const sec = +b.duration; if (sec > 0) body.music_length_ms = Math.round(Math.min(600, Math.max(3, sec)) * 1000);
+  const r = await fetch('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body) });
+  if (!r.ok) return elErr(r);
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
+/* Google Cloud TTS: 목소리 이름(ko-KR-Chirp3-HD-Kore 등)의 앞 두 마디가 언어 코드 */
+async function googleTts(env, b, who) {
+  const key = env[ENV.gcTts] || env[ENV.gemini]; if (!key) return noKey('GOOGLE_TTS_API_KEY');
+  const name = String(b.voice || 'ko-KR-Chirp3-HD-Kore').trim(), lang = name.split('-').slice(0, 2).join('-') || 'ko-KR';
+  const r = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
+    method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input: { text: String(b.text || '').slice(0, 4000) }, voice: { languageCode: lang, name }, audioConfig: { audioEncoding: 'MP3', speakingRate: Math.min(2, Math.max(0.25, +b.speed || 1)) } }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: ttsKind(r.status) }, 502);
+  if (!j.audioContent) return json({ error: '음성이 반환되지 않았습니다', kind: 'empty' }, 502);
+  return json({ key: await r2Put(env, unb64(j.audioContent), 'audio/mpeg', 'mp3', who) });
+}
+const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
+const GEMINI_VOICES = ['Kore', 'Puck', 'Zephyr', 'Charon', 'Aoede', 'Fenrir', 'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
+/* 엔진 하나 = { synth, voices } — 새 엔진은 여기에 한 줄 더하면 된다 */
+const TTS = {
+  openai: { synth: openaiTts, voices: async () => OPENAI_VOICES.map(v => ({ id: v, name: v })) },
+  gemini: { synth: geminiTts, voices: async () => GEMINI_VOICES.map(v => ({ id: v, name: v })) },
+  eleven: {
+    synth: elevenTts,
+    voices: async env => {
+      const key = env[ENV.eleven]; if (!key) throw Object.assign(new Error('ELEVENLABS_API_KEY 없음'), { status: 502 });
+      const r = await fetch('https://api.elevenlabs.io/v2/voices?page_size=100', { headers: { 'xi-api-key': key } });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.detail?.message || 'HTTP ' + r.status), { status: 502 });
+      return (j.voices || []).map(v => ({ id: v.voice_id, name: v.name + (v.category && v.category !== 'premade' ? ' (내 목소리)' : ''), trial: v.preview_url || '' }));
+    },
+  },
+  google: {
+    synth: googleTts,
+    voices: async (env, lang) => {
+      const key = env[ENV.gcTts] || env[ENV.gemini]; if (!key) throw Object.assign(new Error('GOOGLE_TTS_API_KEY 없음'), { status: 502 });
+      const r = await fetch('https://texttospeech.googleapis.com/v1/voices?languageCode=' + encodeURIComponent(lang || 'ko-KR'), { headers: { 'x-goog-api-key': key } });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.error?.message || 'HTTP ' + r.status), { status: 502 });
+      return (j.voices || []).map(v => ({ id: v.name, name: v.name + (v.ssmlGender ? ' · ' + (v.ssmlGender === 'FEMALE' ? '여' : v.ssmlGender === 'MALE' ? '남' : '중성') : '') }))
+        .sort((a, b) => (/Chirp3/.test(b.id) - /Chirp3/.test(a.id)) || a.id.localeCompare(b.id));
+    },
+  },
+};
+/* POST {provider, text, voice, model, speed, instructions} → {key}
+   POST {op:'sts', key, voice, model?, denoise?, stability?, similarity?, style?} → {key}   (목소리 변환)
+   POST {op:'sfx', text, duration?, influence?, loop?} → {key}                              (효과음)
+   POST {op:'music', text, duration?(초), instrumental?, model?} → {key}                    (배경음악)
+   GET ?op=voices&provider= → {voices:[{id,name,trial?}]} */
 export async function handleTts(req, env) {
-  if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
   const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
   try {
+    if (req.method === 'GET') {
+      const u = new URL(req.url), eng = TTS[u.searchParams.get('provider') || ''];
+      if (u.searchParams.get('op') !== 'voices' || !eng) return json({ error: 'op=voices 와 provider(openai·gemini·google·eleven)가 필요합니다' }, 400);
+      return json({ voices: await eng.voices(env, u.searchParams.get('lang')) });
+    }
+    if (req.method !== 'POST') return json({ error: 'GET·POST만 됩니다' }, 405);
     const b = await readObject(req);
-    if (b.provider === 'gemini') return await geminiTts(env, b, who);
-    if (b.provider !== 'openai') return json({ error: '이 서버는 OpenAI·Gemini 음성만 지원합니다 (일레븐랩스 미구현)' }, 400);
-    const key = env[ENV.openai]; if (!key) return json({ error: 'OPENAI_API_KEY 없음', kind: 'auth' }, 502);
-    const body = { model: b.model || 'gpt-4o-mini-tts', voice: b.voice || 'coral', input: String(b.text || '').slice(0, 4000), speed: +b.speed || 1, response_format: 'mp3' };
-    if (b.instructions && !/^tts-1/.test(body.model)) body.instructions = String(b.instructions).slice(0, 1000);
-    const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : 'bad' }, 502); }
-    return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+    if (b.op === 'sts') return await elevenSts(env, b, who);
+    if (b.op === 'sfx') return await elevenSfx(env, b, who);
+    if (b.op === 'music') return await elevenMusic(env, b, who);
+    const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
+    const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
+    if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);
+    return await eng.synth(env, b, who);
   } catch (e) { return json({ error: e.message }, e.status || 502); }
 }
 
