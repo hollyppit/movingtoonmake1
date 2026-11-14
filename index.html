@@ -76,6 +76,10 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .cut-strip .cs-b .cs-w { position: absolute; right: 12px; top: 2px; font-size: .7rem; pointer-events: none; }
 .otl .cut-out { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, rgba(36,33,26,.10) 0 6px, rgba(36,33,26,.18) 6px 12px); pointer-events: none; z-index: 3; }
 .cs-tip { position: fixed; z-index: 60; background: #24211A; color: #fff; font-size: .74rem; padding: 3px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+/* 녹음 버튼: 녹음 중엔 빨갛게 깜빡 */
+.chip.rec { font-weight: 600; }
+[data-rec].danger { background: var(--cinnabar); border-color: var(--cinnabar); color: #fff; animation: recBlink 1.2s ease-in-out infinite; }
+@keyframes recBlink { 50% { opacity: .7; } }
 /* 컷 타임라인 오른쪽 끝: 컷 길이 손잡이 */
 .otl .cut-end { position: absolute; top: 0; bottom: 0; width: 14px; margin-left: -7px; z-index: 4; pointer-events: none; }
 .otl .cut-end b { pointer-events: auto; cursor: ew-resize; }
@@ -3235,12 +3239,23 @@ async function aiDirect(targets, { quiet, notes } = {}) {
   return done;
 }
 /* 목소리 변환(일레븐랩스 Speech to Speech)의 대상 voice ID: 읽는 사람이 일레븐랩스면 그 목소리, 아니면 설정의 일레븐랩스 기본 목소리 */
-function stsTarget(o) { const v = voiceProfile(o); return v.engine === 'eleven' && v.voice ? v.voice : (S.elVoice || ''); }
+/* 녹음을 바꿀 일레븐랩스 목소리: 읽는 사람이 일레븐랩스면 그 목소리, 아니면 카드의 ‘녹음 변환 목소리’, 둘 다 없으면 설정의 기본 목소리(대신 씀) */
+function stsInfo(o) {
+  const v = voiceProfile(o), own = String(speakerOf(o).tts?.stsVoice || '').trim();
+  if (v.engine === 'eleven' && v.voice) return { voice: v.voice, how: 'same', label: v.label };
+  if (own) return { voice: own, how: 'card', label: v.label, engine: v.engine };
+  return { voice: S.elVoice || '', how: 'fallback', label: v.label, engine: v.engine };
+}
+function stsTarget(o) { return stsInfo(o).voice; }
 /* 녹음(blob 또는 이미 있는 asset id) → 읽는 사람 목소리로 바꿔 대사 음성으로 넣는다 */
 async function stsVoice(p, o, src) {
   if (!isServer()) return toast('목소리 변환은 서버 모드에서만 됩니다');
-  const voice = stsTarget(o);
-  if (!voice) return toast('읽는 사람의 엔진을 일레븐랩스로 정하거나, 설정에 일레븐랩스 기본 voice ID 를 넣어 주세요', 4500);
+  const info = stsInfo(o), voice = info.voice;
+  if (!voice) return toast(`‘${info.label}’의 녹음 변환 목소리가 없습니다 — 캐릭터 카드(나레이터 목소리)의 ‘🎙 녹음 변환 목소리’에서 일레븐랩스 목소리를 고르세요`, 5000);
+  if (info.how === 'fallback' && !confirm(`‘${info.label}’은(는) ${TTS_ENG[info.engine] || info.engine} 목소리라 녹음을 그 목소리로 바꿀 수 없습니다.
+
+설정의 기본 일레븐랩스 목소리(${voiceName(voice)})로 바꿀까요?
+(캐릭터 카드의 ‘🎙 녹음 변환 목소리’에 비슷한 목소리를 정해 두면 다음부터 그 목소리로 바꿉니다)`)) return;
   if (o._vbusy) return;
   o._abort = new AbortController(); const sig = o._abort.signal;
   o._vbusy = true; o._vst = '목소리 바꾸는 중…'; refreshPanel(p); genUI();
@@ -3255,7 +3270,8 @@ async function stsVoice(p, o, src) {
     pushVoiceHist(o);
     o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice }, made: madeSnap(o) };
     o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초`;
-    { const n = afterVoice(p); if (n) o._vst += ' · ' + n; }
+    { const n = syncNote(syncCut(p)); if (n) o._vst += ' · ' + n; } // 녹음은 설정과 상관없이 타임라인을 녹음 길이에 맞춘다
+    if (REC.toast) toast(o._vst, 4000);
     logCall({ kind: '목소리 변환', provider: 'tts', ok: true, cost: (buf?.duration || 0) / 60 * (+S.cSts || 0) });
   } catch (e) {
     if (isCancel(o, e)) o._vst = '취소했습니다';
@@ -3264,9 +3280,15 @@ async function stsVoice(p, o, src) {
   delete o._abort; o._vbusy = false; save(); refreshPanel(p); renderPanels(); genUI();
 }
 /* 마이크 녹음: 한 번 누르면 시작, 다시 누르면 멈추고 변환 */
-const REC = { mr: null, chunks: [], o: null, t0: 0 };
+const REC = { mr: null, chunks: [], o: null, t0: 0, iv: 0, toast: false };
+function recUI() { renderInspector(); if ($('#dlgCast').open) renderCast(); }
 async function toggleRecord(p, o) {
   if (REC.mr) { REC.mr.stop(); return; }
+  if (!o || !String(o.text || '').trim()) return toast('녹음할 대사(말풍선·나레이션)를 먼저 고르세요');
+  if (!isServer()) return toast('녹음 → 목소리 변환은 서버 모드에서만 됩니다');
+  const info = stsInfo(o);
+  if (!info.voice) return toast(`‘${info.label}’의 녹음 변환 목소리가 없습니다 — 캐릭터 카드(나레이터 목소리)의 ‘🎙 녹음 변환 목소리’에서 일레븐랩스 목소리를 고르세요`, 5000);
+  stop(); dubStop(); castStop();
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
   catch (e) { return toast('마이크를 쓸 수 없습니다: ' + e.message, 4000); }
@@ -3275,11 +3297,18 @@ async function toggleRecord(p, o) {
   mr.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
     const blob = new Blob(REC.chunks, { type: mr.mimeType || 'audio/webm' }), sec = (Date.now() - REC.t0) / 1000;
-    REC.mr = null; REC.o = null; renderInspector();
+    clearInterval(REC.iv); REC.mr = null; REC.o = null; recUI();
     if (sec < 0.4 || !blob.size) return toast('녹음이 너무 짧습니다');
-    await stsVoice(p, o, blob);
+    REC.toast = true; await stsVoice(p, o, blob); REC.toast = false; recUI();
   };
-  mr.start(); renderInspector();
+  mr.start(); recUI(); toast(`⏺ 녹음 중 — 대사를 읽고 다시 누르면 ‘${info.label}’ 목소리로 바꿉니다`, 3500);
+  REC.iv = setInterval(() => $$('[data-recsec]').forEach(e => (e.textContent = ((Date.now() - REC.t0) / 1000).toFixed(0) + '초')), 250);
+}
+/* 녹음 버튼 (미리보기·더빙 편집 공용) */
+function recBtnHTML(o, cls, big) {
+  const mine = REC.mr && REC.o === o, other = REC.mr && REC.o !== o, info = o ? stsInfo(o) : null;
+  const tip = !o ? '녹음할 말풍선·나레이션을 먼저 고르세요' : mine ? '멈추고 목소리로 바꾸기' : `내 목소리로 연기해 녹음 → ‘${info.label}’${info.how === 'card' ? ' (녹음 변환 목소리 ' + voiceName(info.voice) + ')' : info.how === 'fallback' ? ' — 녹음 변환 목소리가 없어 기본 일레븐랩스 목소리로' : ''} 목소리로 바꿉니다. 타임라인은 녹음 길이에 맞춰집니다`;
+  return `<button type="button" class="${cls}${mine ? ' danger' : ''}" data-rec ${!o || other || o?._vbusy ? 'disabled' : ''} title="${esc(tip)}">${mine ? `⏹ 멈추고 변환 <span data-recsec>${((Date.now() - REC.t0) / 1000).toFixed(0)}초</span>` : big ? '🎙 녹음' + (o ? ' → ' + esc(info.label) : '') : '🎙'}</button>`;
 }
 /* 서버/직접 모드의 목소리 목록 (일레븐랩스 내 목소리·Google 한국어 목록을 datalist 에 채운다) */
 const voiceCache = {};
@@ -3412,6 +3441,7 @@ function voiceEditorHTML(t) {
     <label style="grid-column:1/-1"><span class="lbl">목소리${FINDABLE.has(r.engine) && r.voice ? ' · ' + esc(voiceName(r.voice)) : ''}</span><span class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" class="vVoice" style="flex:1;min-width:0" list="${VLIST[r.engine]}" data-vl="${r.engine}" placeholder="${esc(voiceName(engDefaults(r.engine).voice) || (r.engine === 'eleven' ? 'voice ID' : ''))}">${FINDABLE.has(r.engine) ? `<button type="button" class="b ghost sm vFind" title="${TTS_ENG[r.engine]} 목소리 목록에서 찾기">🔍 찾기</button>` : ''}</span></label>
     <label><span class="lbl">속도</span><input type="number" class="vSpd" step="0.05" min="0.25" max="4" placeholder="${+S.ttsSpeed || 1}"></label>
     <label><span class="lbl">말투 (OpenAI·Gemini)</span><input type="text" class="vIns" placeholder="${esc(t === P.narrTts && (!S.ttsInstr || S.ttsInstr === '차분하고 또렷한 한국어 내레이션') ? '이야기하듯 (아래 스타일에서 고르기)' : S.ttsInstr)}"></label>
+    ${r.engine !== 'eleven' ? `<label style="grid-column:1/-1"><span class="lbl">🎙 녹음 변환 목소리 (일레븐랩스)${t.stsVoice ? ' · ' + esc(voiceName(t.stsVoice)) : ''}</span><span class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" class="vSts" style="flex:1;min-width:0" list="${VLIST.eleven}" data-vl="eleven" placeholder="내 녹음을 바꿀 목소리 — 비슷한 목소리를 🔍 찾기로"><button type="button" class="b ghost sm vStsFind" title="일레븐랩스 목소리 목록에서 찾기">🔍 찾기</button><button type="button" class="ib vStsTry" title="이 목소리 샘플 듣기">▶</button></span><span class="note" style="margin:2px 0 0">${esc(TTS_ENG[r.engine] || r.engine)}는 녹음을 다른 목소리로 바꾸지 못해서, 🎙 녹음한 내 목소리는 이 일레븐랩스 목소리로 바뀝니다. 글 대사는 그대로 ${esc(TTS_ENG[r.engine] || r.engine)}로 읽습니다.</span></label>` : ''}
   </div>
   <div class="row"><button type="button" class="b ghost sm vTry">▶ 샘플 듣기</button><span class="st vTrySt"></span></div>`;
 }
@@ -3430,6 +3460,18 @@ function bindVoiceEditor(el, t, sampleText, onChange, findOpts) {
   sp.onchange = () => { t.speed = sp.value === '' ? 0 : +sp.value; done(); };
   ins.oninput = () => { t.instr = ins.value; save(); };
   ins.onchange = done;
+  const sv = q('.vSts'); if (sv) {
+    sv.value = t.stsVoice || '';
+    sv.oninput = () => { t.stsVoice = sv.value.trim(); save(); };
+    sv.onchange = done;
+    q('.vStsFind').onclick = e => { e.preventDefault(); openVoiceBrowser(t.stsVoice || '', id => { t.stsVoice = id; done(); }, { eng: 'eleven' }); };
+    q('.vStsTry').onclick = async () => {
+      if (!t.stsVoice) return toast('먼저 녹음 변환 목소리를 고르세요');
+      const st = q('.vTrySt'); st.textContent = '녹음 변환 목소리 샘플 만드는 중…'; st.className = 'st vTrySt';
+      try { const r = await ttsBlob(sampleText, false, { ...resolveTts({ engine: 'eleven', voice: t.stsVoice }), instr: '' }); const c = actx(), sb = c.createBufferSource(); sb.buffer = await c.decodeAudioData(await r.blob.arrayBuffer()); sb.connect(c.destination); sb.start(); st.textContent = '▶ 녹음 변환 목소리 (' + voiceName(t.stsVoice) + ')'; }
+      catch (e) { st.textContent = '실패: ' + e.message; st.className = 'st vTrySt err'; }
+    };
+  }
   q('.vTry').onclick = async () => {
     const st = q('.vTrySt'), b = q('.vTry'); b.disabled = true; st.textContent = '만드는 중…'; st.className = 'st vTrySt';
     try {
@@ -5140,9 +5182,11 @@ function renderMonitor(p) {
   const el = $('#monitor'); if (!el || !p) return;
   const m = monOf(), tr = cutTracks(p);
   const n = { voice: p.overlays.filter(o => o.voice).length, sfx: tr.filter(x => trackGroup(x.t) === 'sfx').length, bgm: tr.filter(x => trackGroup(x.t) === 'bgm').length, clip: usesClip(p) && !p.clipMute ? 1 : 0 };
-  el.innerHTML = '<span class="note" style="margin:0">🔈 미리듣기</span>' + Object.entries(MON).filter(([k]) => k !== 'clip' || n.clip).map(([k, lab]) =>
+  const ro = REC.mr ? REC.o : (() => { const o = selOverlay(); return o && o.kind !== 'layer' && String(o.text || '').trim() ? o : null; })();
+  el.innerHTML = recBtnHTML(ro, 'chip rec', true) + '<span class="note" style="margin:0">🔈 미리듣기</span>' + Object.entries(MON).filter(([k]) => k !== 'clip' || n.clip).map(([k, lab]) =>
     `<button type="button" class="chip mon ${m[k] ? '' : 'off'}" data-mon="${k}" aria-pressed="${m[k]}" title="${m[k] ? '미리보기에서 끄기' : '미리보기에서 켜기'} (내보내기에는 영향 없음)">${m[k] ? '' : '🔇 '}${lab} <b>${n[k]}</b></button>`).join('') +
     (Object.values(m).some(v => !v) ? '<span class="note" style="margin:0">· 꺼 둔 소리는 미리보기에서만 안 들립니다</span>' : '');
+  const rb = $('[data-rec]', el); if (rb) rb.onclick = () => { const rp = (REC.mr && P.panels.find(x => x.overlays.includes(REC.o))) || p; toggleRecord(rp, REC.mr ? REC.o : ro); };
   $$('[data-mon]', el).forEach(b => (b.onclick = () => {
     const k = b.dataset.mon; S.mon = { ...monOf(), [k]: !monOf()[k] }; saveSettings();
     (k === 'voice' ? ['narr', 'dlg'] : [k]).forEach(setGroupGain); renderMonitor(p);
@@ -8086,6 +8130,7 @@ function dubHTML(p) {
           <select class="dEmo" aria-label="감정" style="max-width:130px">${emoOpt(o)}</select>
           ${o.voice ? `<button type="button" class="ib dPlay" title="듣기">${DUB.playing === o.id ? '⏹' : '▶'}</button>` : ''}
           ${o._vbusy ? '<span class="note" style="margin:0">만드는 중…</span><button type="button" class="ib dStop" title="이 대사 만들기 취소">⏹</button>' : `<button type="button" class="ib dMake" title="지금 설정으로 ${o.voice ? '다시 ' : ''}만들고 바로 듣기 (크레딧 사용)">${o.voice ? '⟳' : '🔊'}▶</button>`}
+          ${recBtnHTML(o, 'ib dRec')}
           ${o.voiceHist?.length && !o._vbusy ? `<button type="button" class="ib dUndo" title="이전 음성으로 되돌리기 (${o.voiceHist.length}개 보관 · 그때의 읽는 사람·감정도 함께)">↩</button>` : ''}
           ${o.voice ? `<button type="button" class="ib dMute" title="${o.voice.mute ? '음소거 풀기' : '음소거'}">${o.voice.mute ? '🔇' : '🔈'}</button>
             <input type="range" class="dVol" min="0" max="2" step="0.05" value="${o.voice.vol ?? 1}" title="음량 ${Math.round((o.voice.vol ?? 1) * 100)}%" style="width:70px">
@@ -8139,6 +8184,7 @@ function bindDub(p, el) {
     const dp = q('.dPlay'); if (dp) dp.onclick = () => DUB.playing === o.id ? dubStop() : dubPlay(p, [o]);
     const dm = q('.dMake'); if (dm) dm.onclick = () => (o.voice?.sts ? stsVoice(p, o, o.voice.sts.src).then(() => { renderInspector(); dubPlay(p, [o]); }) : dubMake(p, o)); // 목소리 변환한 대사는 같은 녹음으로 다시 변환
     const ds = q('.dStop'); if (ds) ds.onclick = () => cancelVoice(o);
+    const dr = q('.dRec'); if (dr) dr.onclick = () => toggleRecord(p, o);
     const du = q('.dUndo'); if (du) du.onclick = () => { dubStop(); restoreVoice(p, o); renderInspector(); };
     const mu = q('.dMute'); if (mu) mu.onclick = () => { o.voice.mute = !o.voice.mute; redraw(); };
     const vo = q('.dVol'); if (vo) { vo.oninput = () => { o.voice.vol = +vo.value; vo.title = `음량 ${Math.round(o.voice.vol * 100)}%`; }; vo.onchange = () => save(); }
