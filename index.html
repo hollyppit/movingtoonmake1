@@ -187,6 +187,22 @@ pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; backgroun
 .otl .bar-t .lab { flex: 1; min-width: 0; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .otl .bar-t .grip { width: 10px; align-self: stretch; flex: none; cursor: ew-resize; background: rgba(var(--c), .85); position: relative; }
 .otl .bar-t .grip::after { content: ''; position: absolute; left: 3px; right: 3px; top: 7px; bottom: 7px; border-left: 1.5px solid #fff; border-right: 1.5px solid #fff; }
+.otl .bar-t .vo { position: absolute; left: 0; bottom: 0; height: 5px; background: rgb(var(--c)); opacity: .95; pointer-events: none; border-radius: 0 3px 0 0; }
+.otl .bar-t .vo.mute { opacity: .3; background: repeating-linear-gradient(90deg, rgb(var(--c)) 0 4px, transparent 4px 7px); }
+.otl .bar-t .vo.over { box-shadow: inset -4px 0 0 var(--cinnabar); }
+.otl .row-a { height: 26px; }
+.otl .bar-a { position: absolute; top: 2px; height: 22px; min-width: 14px; border-radius: 5px; display: flex; align-items: center; font-size: .72rem; cursor: pointer; overflow: hidden; --c: 120,90,170; background: rgba(var(--c), .22); border: 1.5px dashed rgb(var(--c)); color: var(--ink); }
+.otl .bar-a.sfx { --c: 196,120,40; }
+.otl .bar-a.bgm { --c: 90,110,170; }
+.otl .bar-a.on { background: rgba(var(--c), .45); }
+.otl .bar-a.mute { opacity: .45; }
+.otl .bar-a.cl { border-left-style: none; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.otl .bar-a.cr { border-right-style: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.otl .bar-a .amute { flex: none; padding: 0 4px; cursor: pointer; }
+.otl .bar-a .lab { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.monitor { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; padding: 4px 8px 0; }
+.monitor .chip.mon b { font-weight: 600; opacity: .7; margin-left: 2px; }
+.monitor .chip.mon.off { opacity: .55; text-decoration: line-through; }
 .otl .ph { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--cinnabar); pointer-events: none; z-index: 3; }
 .otl .ph b { position: absolute; top: 0; left: -5px; width: 12px; height: 10px; background: var(--cinnabar); clip-path: polygon(0 0, 100% 0, 50% 100%); }
 .otl .tip { position: absolute; top: 20px; transform: translateX(-50%); background: #24211A; color: #fff; font-size: .7rem; padding: 2px 8px; border-radius: 3px; white-space: nowrap; pointer-events: none; z-index: 4; }
@@ -514,6 +530,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <button type="button" class="b ghost sm" id="makeInkOpen">✏ 효과음 펜</button>
       <label class="chk"><input type="checkbox" id="guides"> 쇼츠 안전영역</label>
     </div>
+    <div class="monitor" id="monitor" role="group" aria-label="미리듣기 소리"></div>
   </main>
 
   <aside class="col right" aria-label="편집">
@@ -3361,15 +3378,20 @@ const lvl = x => (x.mute ? 0 : clamp(isNaN(+x.vol) ? 1 : +x.vol, 0, 2));
 /* 그룹 음량을 뺀 나머지(캐릭터·개별) 배율 — 그룹 음량은 재생 중에도 바로 바뀌도록 GainNode 로 따로 건다 */
 function voiceGainNoGroup(o) { const v = voiceGroup(o); return o.voice?.mute ? 0 : clamp(o.voice?.vol ?? 1, 0, 2) * (v.g === 'dlg' ? lvl(mixCh(v.ch || '_')) : 1); }
 const voiceAudible = o => voiceGainNoGroup(o) > 0 && lvl(mixOf()[voiceGroup(o).g]) > 0;
-function setGroupGain(g) { const n = AE.grp?.[g]; if (n) n.gain.setTargetAtTime(lvl(mixOf()[g]), n.context.currentTime, 0.03); }
+/* 미리듣기 전용 끄기 (내보내기에는 영향 없음): S.mon = { voice, sfx, bgm, clip } — false 면 미리보기에서만 안 들린다 */
+const MON = { voice: '💬 대사', sfx: '✨ 효과음', bgm: '🎵 배경음악', clip: '🎬 영상 소리' };
+const monOf = () => Object.assign({ voice: true, sfx: true, bgm: true, clip: true }, S.mon);
+const monKey = g => (g === 'narr' || g === 'dlg' ? 'voice' : g);
+const groupLevel = g => lvl(mixOf()[g]) * (AE.exp || monOf()[monKey(g)] ? 1 : 0);
+function setGroupGain(g) { const n = AE.grp?.[g]; if (n) n.gain.setTargetAtTime(groupLevel(g), n.context.currentTime, 0.03); }
 function stopAudio() { AE.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 이미 멈춤 */ } }); AE.nodes = []; if (AE.out) { AE.out.disconnect(); AE.out = null; } AE.grp = null; }
 /* from~to 구간을 지금부터 재생하도록 예약. 반환값 t0 = 타임라인 from 이 소리 나는 AudioContext 시각 */
 function scheduleAudio(from, to, { bgm, dest } = {}) {
   stopAudio();
   const c = actx(), t0 = c.currentTime + 0.08, span = to - from;
   const out = c.createGain(); out.connect(c.destination); if (dest) out.connect(dest); AE.out = out;
-  const mix = mixOf(); AE.grp = {};
-  Object.keys(MIX_GROUPS).forEach(k => { const n = c.createGain(); n.gain.value = lvl(mix[k]); n.connect(out); AE.grp[k] = n; });
+  const mix = mixOf(); AE.grp = {}; AE.exp = !!dest; // 내보내기 중에는 미리듣기 끄기를 무시한다
+  Object.keys(MIX_GROUPS).forEach(k => { const n = c.createGain(); n.gain.value = groupLevel(k); n.connect(out); AE.grp[k] = n; });
   const voices = []; // 대사가 들리는 구간 (배경음악 더킹용) — 음소거된 대사는 빼고
   timeline().forEach(s => s.p.overlays.forEach(o => {
     const buf = o.voice && AE.bufs.get(o.voice.assetId); if (!buf) return;
@@ -3831,7 +3853,7 @@ async function play(mode, opt = {}) {
   const segs = timeline(); let from = 0, to = segs.reduce((a, s) => a + s.dur, 0), loop = false;
   if (mode === 'all' && Number.isFinite(opt.from)) from = clamp(opt.from, 0, Math.max(0, to - 0.05)); // 전체 재생을 원하는 지점부터
   if (mode === 'panel') { const s = segs.find(s => s.p.id === sel); from = s.start; to = s.start + s.dur; loop = true; }
-  const bgm = mode === 'all';
+  const bgm = true; // ‘이 컷’ 미리보기에도 그 구간의 효과음·배경음악을 함께 튼다
   player.token = (player.token || 0) + 1; const tk = player.token;
   await preloadAudio(bgm);
   if (tk !== player.token) return; // 준비 중에 다른 재생/정지가 눌림
@@ -4521,7 +4543,26 @@ function ovEnd(p, o) { return +o.dur > 0 ? Math.min(panelDur(p), (+o.start || 0)
 const KIND_COLOR = { layer: '47,127,107', speech: '154,122,46', thought: '90,120,170', shout: '192,69,47', narration: '60,60,60', caption: '47,127,107' };
 function timelinePosition(t, d) { const fraction = clamp(t / d, 0, 1); return 'calc(' + (fraction * 100).toFixed(3) + '% + ' + (10 - fraction * 20).toFixed(3) + 'px)'; }
 function updateTimelineHead(p, t) { const ph = $('#otl .ph'); if (ph) { ph.hidden = t < 0 || t > panelDur(p); ph.style.left = timelinePosition(t, panelDur(p)); } }
+/* 이 컷에 걸친 효과음·배경음악 트랙 (컷 기준 시각으로) */
+function cutTracks(p) {
+  const s = timeline().find(x => x.p.id === p.id); if (!s) return [];
+  return audTracks().map(t => { const sp = trackSpan(t), a = Math.max(sp.gs, s.start), b = Math.min(sp.ge, s.start + s.dur); return b > a ? { t, st: a - s.start, en: b - s.start, cutL: sp.gs < s.start, cutR: sp.ge > s.start + s.dur } : null; }).filter(Boolean);
+}
+/* 미리보기 아래 ‘미리듣기’ 줄: 이 컷에 있는 소리 개수 + 미리보기에서만 끄고 켜기 */
+function renderMonitor(p) {
+  const el = $('#monitor'); if (!el || !p) return;
+  const m = monOf(), tr = cutTracks(p);
+  const n = { voice: p.overlays.filter(o => o.voice).length, sfx: tr.filter(x => trackGroup(x.t) === 'sfx').length, bgm: tr.filter(x => trackGroup(x.t) === 'bgm').length, clip: usesClip(p) && !p.clipMute ? 1 : 0 };
+  el.innerHTML = '<span class="note" style="margin:0">🔈 미리듣기</span>' + Object.entries(MON).filter(([k]) => k !== 'clip' || n.clip).map(([k, lab]) =>
+    `<button type="button" class="chip mon ${m[k] ? '' : 'off'}" data-mon="${k}" aria-pressed="${m[k]}" title="${m[k] ? '미리보기에서 끄기' : '미리보기에서 켜기'} (내보내기에는 영향 없음)">${m[k] ? '' : '🔇 '}${lab} <b>${n[k]}</b></button>`).join('') +
+    (Object.values(m).some(v => !v) ? '<span class="note" style="margin:0">· 꺼 둔 소리는 미리보기에서만 안 들립니다</span>' : '');
+  $$('[data-mon]', el).forEach(b => (b.onclick = () => {
+    const k = b.dataset.mon; S.mon = { ...monOf(), [k]: !monOf()[k] }; saveSettings();
+    (k === 'voice' ? ['narr', 'dlg'] : [k]).forEach(setGroupGain); renderMonitor(p);
+  }));
+}
 function drawTimeline(p) {
+  renderMonitor(p);
   const box = $('#otl'); if (!box) return;
   const D = panelDur(p), pct = t => (t / D * 100).toFixed(3) + '%';
   const step = D > 10 ? 2 : 1, ticks = [];
@@ -4530,8 +4571,18 @@ function drawTimeline(p) {
   box.innerHTML = '<div class="ruler">' + ticks.map(t => '<i style="left:' + pct(t) + '">' + t + 's</i>').join('') + '</div>' +
     list.map(o => {
       const c = KIND_COLOR[o.kind] || KIND_COLOR.speech, st = +o.start || 0, en = ovEnd(p, o), open = !(+o.dur > 0);
-      return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc(o.text || '') + '">' +
-        '<span class="grip l"></span><span class="lab">' + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + ' ' + (o.text || '')) + '</span><span class="grip r"></span></div></div>';
+      // 대사 음성: 막대 아래 띠로 실제 음성 길이를 보여 준다 (컷 밖으로 넘치면 빨간 끝)
+      const vo = o.kind !== 'layer' && o.voice ? (() => {
+        const audible = voiceAudible(o), w = Math.min(1, (o.voice.dur || 0) / Math.max(0.05, en - st)), over = st + (o.voice.dur || 0) > D + 0.01;
+        return { icon: !audible ? '🔇 ' : voiceStale(o) ? '⚠ ' : '🔊 ', html: '<span class="vo' + (audible ? '' : ' mute') + (over ? ' over' : '') + '" style="width:' + (w * 100).toFixed(2) + '%"></span>', tip: ` · 음성 ${(o.voice.dur || 0).toFixed(1)}초${audible ? '' : ' (음소거)'}${over ? ' · 컷보다 김' : ''}${emoOn(o) ? ' · 🎭 ' + (o.emo.emotion || '') : ''}` };
+      })() : null;
+      return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc((o.text || '') + (vo ? vo.tip : '')) + '">' +
+        '<span class="grip l"></span><span class="lab">' + (vo ? vo.icon : '') + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + ' ' + (o.text || '')) + '</span><span class="grip r"></span>' + (vo ? vo.html : '') + '</div></div>';
+    }).join('') +
+    cutTracks(p).map(({ t, st, en, cutL, cutR }) => {
+      const g = trackGroup(t), on = !t.mute && lvl(mixOf()[g]) > 0 && monOf()[g];
+      return '<div class="row-t row-a"><div class="bar-a ' + g + (on ? '' : ' mute') + (cutL ? ' cl' : '') + (cutR ? ' cr' : '') + (t.id === selAud ? ' on' : '') + '" data-aid="' + t.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%" title="' + esc(t.name) + ' — 누르면 배경음악 탭에서 편집 · 🔊 를 누르면 음소거">' +
+        '<span class="amute" role="button" aria-label="' + (t.mute ? '음소거 풀기' : '음소거') + '">' + (t.mute ? '🔇' : '🔊') + '</span><span class="lab">' + (g === 'sfx' ? '✨ ' : '🎵 ') + esc(t.name) + (on ? '' : ' (꺼짐)') + '</span></div></div>';
     }).join('') +
     (list.length ? '' : '<div class="timeline-empty">레이어나 말풍선을 추가하면 여기에 표시됩니다.</div>') +
     '<div class="ph" style="left:' + timelinePosition(scrubT, D) + '"><b></b></div><div class="tip" hidden></div>';
@@ -4548,6 +4599,12 @@ function bindTimeline(p, el) {
     if (ev.button !== 0) return;
     ev.preventDefault(); box.focus({ preventScroll: true });
     const rect = box.getBoundingClientRect();
+    const ab = ev.target.closest('.bar-a');
+    if (ab) { // 효과음·배경음악 줄: 🔊 = 음소거, 그 밖 = 배경음악 탭에서 편집
+      const t = audTracks().find(x => x.id === ab.dataset.aid); if (!t) return;
+      if (ev.target.closest('.amute')) { t.mute = !t.mute; save(); drawTimeline(p); if (tab === 'audio') renderInspector(); return; }
+      selAud = t.id; setTab('audio'); drawTimeline(p); return;
+    }
     const bar = ev.target.closest('.bar-t');
     if (!bar) { // 눈금자·빈 곳: 그 시각으로 이동하고, 끌면 계속 따라간다
       scrubTo(ev); try { box.setPointerCapture(ev.pointerId); } catch (e) { /* 캡처 불가여도 계속 */ }
