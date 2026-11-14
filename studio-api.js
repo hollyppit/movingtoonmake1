@@ -865,6 +865,28 @@ async function elevenSts(env, b, who) {
   if (!r.ok) return elErr(r);
   return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
 }
+/* 일레븐랩스 즉석 복제(IVC): 저장해 둔 샘플 음성들 → 내 계정의 새 목소리 voice_id */
+async function elevenClone(env, b, who) {
+  const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
+  const keys = (Array.isArray(b.keys) ? b.keys : []).map(String).filter(Boolean).slice(0, 25);
+  if (!keys.length) return json({ error: '복제할 샘플 음성(keys)이 없습니다' }, 400);
+  const name = String(b.name || '').trim().slice(0, 100) || '복제 목소리';
+  const fd = new FormData(); let total = 0;
+  for (const [i, k] of keys.entries()) {
+    const src = await r2Get(env, k, who); total += src.bytes.length;
+    if (total > 40 * 1024 * 1024) return json({ error: '샘플이 너무 큽니다 (모두 합쳐 40MB 이하)' }, 400);
+    fd.append('files', new Blob([src.bytes], { type: src.type || 'audio/mpeg' }), 'sample' + (i + 1) + '.mp3');
+  }
+  fd.append('name', name);
+  if (b.desc) fd.append('description', String(b.desc).slice(0, 500));
+  fd.append('remove_background_noise', 'false');
+  fd.append('labels', JSON.stringify({ language: 'ko', source: 'mantra-studio' }));
+  const r = await fetch('https://api.elevenlabs.io/v1/voices/add', { method: 'POST', headers: { 'xi-api-key': key }, body: fd });
+  if (!r.ok) return elErr(r);
+  const j = await r.json().catch(() => ({}));
+  if (!j.voice_id) return json({ error: '일레븐랩스가 voice_id 를 돌려주지 않았습니다' }, 502);
+  return json({ voiceId: j.voice_id, name });
+}
 /* 일레븐랩스 효과음: 글 설명 → 효과음. 길이 0 = 자동 (0.5~30초) */
 async function elevenSfx(env, b, who) {
   const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
@@ -1296,6 +1318,7 @@ export async function handleTts(req, env) {
     if (req.method !== 'POST') return json({ error: 'GET·POST만 됩니다' }, 405);
     const b = await readObject(req);
     if (b.op === 'sts') return await elevenSts(env, b, who);
+    if (b.op === 'clone') return await elevenClone(env, b, who);
     if (b.op === 'sfx') return await elevenSfx(env, b, who);
     if (b.op === 'music') return await elevenMusic(env, b, who);
     if (b.op === 'addvoice') return await elevenAddVoice(env, b);
