@@ -22,6 +22,7 @@ const ENV = {
   openai: 'OPENAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
   eleven: 'ELEVENLABS_API_KEY',     // 일레븐랩스 음성
+  typecast: 'TYPECAST_API_KEY',     // 타입캐스트 음성 (한국어 캐릭터 목소리)
   gcTts: 'GOOGLE_TTS_API_KEY',      // 선택. Google Cloud Text-to-Speech (없으면 GEMINI_API_KEY 로 시도 — 그 프로젝트에서 TTS API 를 켜야 함)
   anthropic: 'ANTHROPIC_API_KEY',   // 나레이션·대사 맞춤법 검사 / 다듬기 (Claude)
   klKey: 'KLING_API_KEY',    // 새 클링 API: 키 하나 (Authorization: Bearer 키). 있으면 이 방식을 쓴다
@@ -854,6 +855,23 @@ async function elevenMusic(env, b, who) {
   if (!r.ok) return elErr(r);
   return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
 }
+/* 타입캐스트: 감정은 프리셋(emotion) 또는 스마트(앞뒤 문장을 보고 알아서) — ssfm-v21 은 프리셋만 */
+const TC_EMO = ['normal', 'happy', 'sad', 'angry', 'whisper', 'toneup', 'tonedown'];
+async function typecastTts(env, b, who) {
+  const key = env[ENV.typecast]; if (!key) return noKey('TYPECAST_API_KEY');
+  const voice = String(b.voice || '').trim(); if (!/^(tc|uc)_[A-Za-z0-9]+$/.test(voice)) return json({ error: '타입캐스트 voice ID 가 비어 있거나 형식이 다릅니다 (tc_… / uc_…)', kind: 'bad' }, 400);
+  const model = /^ssfm-v(21|30|31)$/.test(b.model || '') ? b.model : 'ssfm-v30', v21 = model === 'ssfm-v21';
+  const emo = TC_EMO.includes(b.emotion) && !(v21 && !['normal', 'happy', 'sad', 'angry'].includes(b.emotion)) ? b.emotion : '';
+  const inten = Math.min(2, Math.max(0, Number.isFinite(+b.emotion_intensity) ? +b.emotion_intensity : 1));
+  const prompt = emo ? (v21 ? { emotion_preset: emo, emotion_intensity: inten } : { emotion_type: 'preset', emotion_preset: emo, emotion_intensity: inten })
+    : v21 ? undefined : { emotion_type: 'smart', previous_text: String(b.previous_text || '').slice(0, 2000), next_text: String(b.next_text || '').slice(0, 2000) };
+  const body = { voice_id: voice, text: String(b.text || '').slice(0, 2000), model, output: { audio_format: 'mp3', audio_tempo: Math.min(2, Math.max(0.5, +b.speed || 1)), audio_pitch: Math.round(Math.min(12, Math.max(-12, +b.pitch || 0))), volume: 100 } };
+  if (b.language) body.language = String(b.language).slice(0, 3);
+  if (prompt) body.prompt = prompt;
+  const r = await fetch('https://api.typecast.ai/v1/text-to-speech', { method: 'POST', headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); return json({ error: j.message || (typeof j.detail === 'string' ? j.detail : '') || j.error_code || 'HTTP ' + r.status, kind: r.status === 402 ? 'credit' : ttsKind(r.status) }, 502); }
+  return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
+}
 /* Google Cloud TTS: 목소리 이름(ko-KR-Chirp3-HD-Kore 등)의 앞 두 마디가 언어 코드 */
 async function googleTts(env, b, who) {
   const key = env[ENV.gcTts] || env[ENV.gemini]; if (!key) return noKey('GOOGLE_TTS_API_KEY');
@@ -1059,6 +1077,24 @@ const TTS = {
       }));
     },
   },
+  typecast: {
+    synth: typecastTts,
+    voices: async (env, lang, q) => {
+      const key = env[ENV.typecast]; if (!key) throw Object.assign(new Error('TYPECAST_API_KEY 없음 (서버 환경변수에 넣어 주세요)'), { status: 502 });
+      const u = new URL('https://api.typecast.ai/v3/voices');
+      const pick = (k, ok) => { const v = (q?.get(k) || '').trim(); if (v && ok.test(v)) u.searchParams.set(k, v); };
+      pick('model', /^ssfm-v(21|30|31)$/); pick('gender', /^(male|female)$/); pick('age', /^(child|teenager|young_adult|middle_age|elder)$/); pick('voice_type', /^(original|custom)$/); pick('use_cases', /^[A-Za-z/ -]{2,30}$/);
+      const r = await fetch(u, { headers: { 'X-API-KEY': key } });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw Object.assign(new Error(j?.message || 'HTTP ' + r.status), { status: 502 });
+      const want = q?.get('model') || 'ssfm-v30';
+      return (Array.isArray(j) ? j : j?.voices || []).map(v => {
+        const m = (v.models || []).find(x => x.version === want) || (v.models || [])[0] || {};
+        return { id: v.voice_id, name: (typeof v.voice_name === 'object' ? v.voice_name?.kor || v.voice_name?.eng : v.voice_name) || v.voice_id, nameEn: typeof v.voice_name === 'object' ? v.voice_name?.eng || '' : '',
+          trial: v.preview_url || '', gender: v.gender || '', age: v.age || '', useCase: (v.use_cases || []).join(', '), category: v.voice_type || '', emotions: m.emotions || [], models: (v.models || []).map(x => x.version) };
+      });
+    },
+  },
   google: {
     synth: googleTts,
     voices: async (env, lang) => {
@@ -1082,8 +1118,8 @@ export async function handleTts(req, env) {
       const u = new URL(req.url);
       if (u.searchParams.get('op') === 'library') return json(await elevenLibrary(env, u.searchParams));
       const eng = TTS[u.searchParams.get('provider') || ''];
-      if (u.searchParams.get('op') !== 'voices' || !eng) return json({ error: 'op=voices 와 provider(openai·gemini·google·eleven)가 필요합니다' }, 400);
-      return json({ voices: await eng.voices(env, u.searchParams.get('lang')) });
+      if (u.searchParams.get('op') !== 'voices' || !eng) return json({ error: 'op=voices 와 provider(openai·gemini·google·eleven·typecast)가 필요합니다' }, 400);
+      return json({ voices: await eng.voices(env, u.searchParams.get('lang'), u.searchParams) });
     }
     if (req.method !== 'POST') return json({ error: 'GET·POST만 됩니다' }, 405);
     const b = await readObject(req);
