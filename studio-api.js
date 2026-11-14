@@ -791,6 +791,8 @@ async function elevenTts(env, b, who) {
   const body = { text: String(b.text || '').slice(0, 5000), model_id: b.model || 'eleven_multilingual_v2', voice_settings: { speed: Math.min(1.2, Math.max(0.7, +b.speed || 1)) } };
   // 감정 연출: 안정성↓·스타일↑ 일수록 감정 폭이 커진다 (v3 는 대신 [태그] 를 글에 넣는다)
   for (const [k, n] of [['stability', 'stability'], ['similarity', 'similarity_boost'], ['style', 'style']]) if (b[k] != null && b[k] !== '' && Number.isFinite(+b[k])) body.voice_settings[n] = Math.min(1, Math.max(0, +b[k]));
+  // 앞뒤 문장: 줄마다 따로 만들어도 이야기 흐름처럼 억양이 이어진다 (eleven_v3 는 받지 않는다)
+  if (!/(^|_)v3/.test(body.model_id)) for (const k of ['previous_text', 'next_text']) { const t = String(b[k] || '').trim(); if (t) body[k] = t.slice(0, 500); }
   const r = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(voice) + '?output_format=mp3_44100_128', {
     method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body),
   });
@@ -832,10 +834,22 @@ async function elevenSfx(env, b, who) {
 /* 일레븐랩스 배경음악(Music): 글 설명 → 곡. 길이 3~600초, 기본은 가사 없는 연주곡 */
 async function elevenMusic(env, b, who) {
   const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
-  const prompt = String(b.text || '').trim().slice(0, 2000); if (!prompt) return json({ error: '음악 설명이 비어 있습니다' }, 400);
-  const model = /^music_v(1|2|2_5)$/.test(b.model || '') ? b.model : 'music_v1';
-  const body = { prompt, model_id: model, force_instrumental: b.instrumental !== false };
-  const sec = +b.duration; if (sec > 0) body.music_length_ms = Math.round(Math.min(600, Math.max(3, sec)) * 1000);
+  let body;
+  if (b.plan) { // AI 설계안 → 섹션별 분위기가 바뀌는 한 곡 (composition_plan · music_v1)
+    const secs = (Array.isArray(b.plan.sections) ? b.plan.sections : []).slice(0, 30).map(s => ({
+      section_name: String(s?.name || 'section').slice(0, 100) || 'section', positive_local_styles: strs(s?.styles, 10, 80), negative_local_styles: strs(s?.negative, 8, 80),
+      duration_ms: Math.round(Math.min(120000, Math.max(3000, +s?.ms || 0))), lines: [],
+    }));
+    if (!secs.length) return json({ error: '음악 설계안에 섹션이 없습니다' }, 400);
+    if (secs.reduce((a, s) => a + s.duration_ms, 0) > 600000) return json({ error: '한 곡은 600초를 넘을 수 없습니다' }, 400);
+    const neg = strs(b.plan.global?.negative, 10, 80); if (b.instrumental !== false && !neg.some(n => /vocal/i.test(n))) neg.push('vocals', 'singing');
+    body = { model_id: 'music_v1', respect_sections_durations: true, composition_plan: { positive_global_styles: strs(b.plan.global?.positive, 10, 80), negative_global_styles: neg, sections: secs } };
+  } else {
+    const prompt = String(b.text || '').trim().slice(0, 2000); if (!prompt) return json({ error: '음악 설명이 비어 있습니다' }, 400);
+    const model = /^music_v(1|2|2_5)$/.test(b.model || '') ? b.model : 'music_v1';
+    body = { prompt, model_id: model, force_instrumental: b.instrumental !== false };
+    const sec = +b.duration; if (sec > 0) body.music_length_ms = Math.round(Math.min(600, Math.max(3, sec)) * 1000);
+  }
   const r = await fetch('https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128', { method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body) });
   if (!r.ok) return elErr(r);
   return json({ key: await r2Put(env, await r.arrayBuffer(), 'audio/mpeg', 'mp3', who) });
@@ -868,7 +882,8 @@ async function directLines(env, b) {
   const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 120).map(s => ({ cut: +s?.cut || 0, desc: String(s?.desc || '').slice(0, 240) }));
   const system = 'You are a voice director for a Korean motion webtoon (moving comic). You get the script in order (cut number, speaker, bubble kind, text), scene descriptions and character notes. ' +
     'For every line marked "target": true, decide how it should be performed, judging from the story flow, the scene, the speaker\'s personality, punctuation and bubble kind ' +
-    '(shout = loud/intense, thought = inner voice, quiet and close, whisper = whispered, narration = narrator tone fitting the mood, caption = neutral). Keep consecutive lines of one speaker consistent and avoid over-acting; ordinary lines can be "평온" with low intensity. ' +
+    '(shout = loud/intense, thought = inner voice, quiet and close, whisper = whispered, caption = neutral). Keep consecutive lines of one speaker consistent and avoid over-acting; ordinary lines can be "평온" with low intensity. ' +
+    'Narration must sound like a skilled audiobook storyteller, never flat, robotic or word-by-word: give it natural flowing intonation that follows the sentence, gentle emphasis on key images, breaths at commas, and a mood that fits the scene (wonder, warmth, tension...). For narration "instr" describe this storytelling delivery concretely (e.g. 신비로운 풍경을 들려주듯 부드럽게 흐르는 억양으로, 쉼표에서 살짝 숨 쉬며). Short title-like narration (place names, time) should be read like a calm scene introduction, not shouted. ' +
     'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":"short Korean emotion label (e.g. 슬픔, 설렘, 분노, 긴장, 평온, 장난)","intensity":0..1,' +
     '"instr":"one short Korean acting direction for a TTS voice actor: emotion, tone, pace, breath (e.g. 목이 메어 떨리는 목소리로 천천히, 끝을 흐리며)",' +
     '"tags":[up to 2 ElevenLabs v3 audio tags from: ' + EL_TAGS.join(', ') + '],"speed":0.8..1.2}]}. Include every target id exactly once.';
@@ -891,6 +906,95 @@ async function directLines(env, b) {
   const seen = new Set(), uniq = res.filter(l => !seen.has(l.id) && seen.add(l.id));
   if (!uniq.length) return json({ error: 'AI 가 연출을 내지 못했습니다. 다시 시도해 주세요.' }, 502);
   return json({ lines: uniq, missing: [...targets].filter(id => !seen.has(id)), model: DIRECT_MODEL, usage: j.usage || null });
+}
+/* ---- AI 음악 감독 · 사운드 디자이너: 컷(이미지·장면·대사·길이)을 보고 배경음악 설계와 효과음 목록을 만든다 ---- */
+const SCORE_MODEL = 'claude-sonnet-5-5';
+function storyCuts(b) {
+  if (!Array.isArray(b.cuts) || !b.cuts.length || b.cuts.length > 200) throw Object.assign(new Error('컷은 1~200개여야 합니다'), { status: 400 });
+  let t = 0;
+  return b.cuts.map((c, i) => {
+    const dur = Math.min(15, Math.max(0.3, +c?.dur || 4)), cut = {
+      i, start: +t.toFixed(2), dur, scene: String(c?.scene || '').slice(0, 300),
+      lines: (Array.isArray(c?.lines) ? c.lines : []).slice(0, 12).map(l => ({ who: String(l?.who || '').slice(0, 20), kind: String(l?.kind || '').slice(0, 12), text: String(l?.text || '').slice(0, 200), emotion: String(l?.emotion || '').slice(0, 12) })),
+      img: typeof c?.img === 'string' && /^[A-Za-z0-9+/=]+$/.test(c.img) && c.img.length < 200000 ? c.img : '',
+    };
+    t += dur; return cut;
+  });
+}
+async function askClaude(env, system, cuts, extra, maxTokens) {
+  const key = env[ENV.anthropic]; if (!key) throw Object.assign(new Error('ANTHROPIC_API_KEY 없음'), { status: 502, kind: 'auth' });
+  const content = [];
+  cuts.forEach(c => {
+    if (c.img) content.push({ type: 'text', text: `cut ${c.i}` }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: c.img } });
+  });
+  content.push({ type: 'text', text: JSON.stringify({ ...extra, total_seconds: +cuts.reduce((a, c) => a + c.dur, 0).toFixed(1), cuts: cuts.map(({ img, ...c }) => c) }) });
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: SCORE_MODEL, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error?.message || 'HTTP ' + r.status), { status: 502, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' });
+  const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+  const m = txt.match(/\{[\s\S]*\}/); if (!m) throw Object.assign(new Error('AI 응답을 읽지 못했습니다'), { status: 502 });
+  try { return JSON.parse(m[0]); } catch (e) { throw Object.assign(new Error('AI 응답 형식 오류'), { status: 502 }); }
+}
+const strs = (a, n, len) => (Array.isArray(a) ? a : []).map(s => String(s || '').trim().slice(0, len)).filter(Boolean).slice(0, n);
+/* 배경음악 설계: 이야기 전개에 맞춰 컷 구간마다 섹션(분위기·악기·템포)을 나눈다. 섹션 길이 = 그 컷들 길이의 합 (3~120초) */
+async function scorePlan(env, b) {
+  const cuts = storyCuts(b);
+  const system = 'You are the music supervisor/composer for a Korean motion webtoon (moving comic video). You get every cut in order (image if provided, scene note, dialogue/narration with speaker and emotion, duration). ' +
+    'Design ONE continuous background score that follows the story: split it into sections at real story beats (mood/tension/location changes), usually 2-10 sections. Sections cover contiguous cut ranges [from,to] (inclusive), in order, covering every cut exactly once. ' +
+    'Keep it underscore: it must sit under narration and dialogue, so avoid busy melodies where there is a lot of speech; build and release energy with the story; transitions between sections should feel musical, not abrupt. ' +
+    (b.vocals ? 'Vocals are allowed. ' : 'Strictly instrumental: no vocals, no singing, no lyrics. ') + (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
+    'Styles are short English music-style tags for a text-to-music model (genre, instruments, tempo e.g. "90 bpm", mood, energy, mix). Never name real artists or songs. ' +
+    'Reply with ONLY JSON, no markdown: {"title":"short Korean title","summary":"2 sentences in Korean explaining the musical arc","global":{"positive":[up to 8 tags],"negative":[up to 8 tags]},' +
+    '"sections":[{"from":cut,"to":cut,"name":"short Korean section name","mood":"short Korean mood","styles":[up to 8 English tags],"negative":[up to 5 English tags]}]}';
+  const out = await askClaude(env, system, cuts, { request: 'background score plan' }, 4000);
+  let secs = (Array.isArray(out?.sections) ? out.sections : []).map(s => ({ from: Math.trunc(+s?.from), to: Math.trunc(+s?.to), name: String(s?.name || '').slice(0, 30), mood: String(s?.mood || '').slice(0, 30), styles: strs(s?.styles, 8, 60), negative: strs(s?.negative, 5, 60) }))
+    .filter(s => Number.isFinite(s.from) && Number.isFinite(s.to)).sort((a, b) => a.from - b.from);
+  // 빈틈·겹침 정리: 앞 섹션 끝 다음 컷에서 시작, 마지막 섹션은 끝 컷까지
+  const fixed = []; let next = 0;
+  for (const s of secs) { if (s.to < next) continue; s.from = next; s.to = Math.min(cuts.length - 1, Math.max(s.from, s.to)); fixed.push(s); next = s.to + 1; if (next >= cuts.length) break; }
+  if (!fixed.length) fixed.push({ from: 0, to: cuts.length - 1, name: '전체', mood: '', styles: [], negative: [] });
+  fixed[fixed.length - 1].to = cuts.length - 1;
+  const ms = s => Math.round(cuts.slice(s.from, s.to + 1).reduce((a, c) => a + c.dur, 0) * 1000);
+  let list = [];
+  fixed.forEach(s => { // 120초 넘는 섹션은 나눈다
+    const total = ms(s); if (total <= 120000) { list.push({ ...s, ms: total }); return; }
+    const n = Math.ceil(total / 120000); for (let k = 0; k < n; k++) list.push({ ...s, name: s.name + ` (${k + 1}/${n})`, ms: Math.round(total / n), part: k });
+  });
+  for (let k = 0; k < list.length; k++) { // 3초 안 되는 섹션은 이웃과 합친다
+    if (list[k].ms >= 3000 || list.length === 1) continue;
+    const into = k > 0 ? k - 1 : k + 1; list[into].ms += list[k].ms; list[into].to = Math.max(list[into].to, list[k].to); list[into].from = Math.min(list[into].from, list[k].from); list.splice(k, 1); k--;
+  }
+  if (list.length === 1 && list[0].ms < 3000) list[0].ms = 3000;
+  let at = 0; list.forEach(s => { s.start = +(at / 1000).toFixed(2); at += s.ms; });
+  // 한 번에 만들 수 있는 곡은 600초·30섹션까지 → 넘으면 여러 곡(piece)으로 나눈다
+  const pieces = []; let cur = [], curMs = 0;
+  list.forEach((s, k) => { if (cur.length && (curMs + s.ms > 600000 || cur.length >= 30)) { pieces.push(cur); cur = []; curMs = 0; } cur.push(k); curMs += s.ms; });
+  if (cur.length) pieces.push(cur);
+  return json({ title: String(out?.title || '배경음악').slice(0, 40), summary: String(out?.summary || '').slice(0, 400), global: { positive: strs(out?.global?.positive, 8, 60), negative: strs(out?.global?.negative, 8, 60) }, sections: list, pieces, model: SCORE_MODEL });
+}
+/* 효과음 설계: 컷마다 필요한 효과음·환경음을 시각과 함께 고른다 */
+async function sfxPlan(env, b) {
+  const cuts = storyCuts(b), max = Math.min(60, Math.max(1, +b.max || 30));
+  const existing = (Array.isArray(b.existing) ? b.existing : []).slice(0, 80).map(x => ({ start: +(+x?.start || 0).toFixed(1), name: String(x?.name || '').slice(0, 40) }));
+  const system = 'You are the sound designer for a Korean motion webtoon (moving comic video). You get every cut in order (image if provided, scene note, dialogue/narration, duration, start time). ' +
+    `Propose at most ${max} sound effects that make it feel alive: ambience beds for locations (one ambience spanning consecutive cuts in the same place, loop=true), foley (footsteps, cloth, doors, water, objects), impacts and whooshes on action, and a few subtle emotional stingers. ` +
+    'Be selective and cinematic: do not stack many sounds at once, keep them under speech, and do not duplicate the existing sounds listed. Time each effect to the moment it happens inside the cut ("at" seconds from the cut start). ' +
+    (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
+    'Reply with ONLY JSON, no markdown: {"summary":"1-2 sentences in Korean","items":[{"cut":number,"at":seconds,"to_cut":number (ambience only, last cut it covers),"label":"short Korean name","prompt":"detailed English description for a sound-effect generator","dur":0.5..30,"loop":boolean,"vol":0.2..1}]}';
+  const out = await askClaude(env, system, cuts, { request: 'sound effect plan', existing_sounds: existing }, 6000);
+  const total = cuts.reduce((a, c) => a + c.dur, 0);
+  const items = (Array.isArray(out?.items) ? out.items : []).map(x => {
+    const ci = Math.trunc(+x?.cut); if (!(ci >= 0 && ci < cuts.length)) return null;
+    const c = cuts[ci], at = Math.min(Math.max(0, +x?.at || 0), Math.max(0, c.dur - 0.3)), start = +(c.start + at).toFixed(2);
+    const loop = !!x?.loop, toCut = loop ? Math.min(cuts.length - 1, Math.max(ci, Math.trunc(+x?.to_cut) || ci)) : ci;
+    const span = loop ? +(cuts[toCut].start + cuts[toCut].dur - start).toFixed(2) : 0;
+    const prompt = String(x?.prompt || '').trim().slice(0, 400); if (!prompt) return null;
+    return { cut: ci, at: +at.toFixed(2), start, toCut, label: String(x?.label || '효과음').slice(0, 24), prompt, dur: +Math.min(30, Math.max(0.5, +x?.dur || (loop ? 10 : 2))).toFixed(1), loop, len: loop ? Math.min(span, total - start) : 0, vol: +Math.min(1, Math.max(0.2, +x?.vol || 0.7)).toFixed(2) };
+  }).filter(Boolean).sort((a, b) => a.start - b.start).slice(0, max);
+  return json({ summary: String(out?.summary || '').slice(0, 300), items, model: SCORE_MODEL });
 }
 const elKey = env => { const k = env[ENV.eleven]; if (!k) throw Object.assign(new Error('ELEVENLABS_API_KEY 없음 (서버 환경변수에 넣어 주세요)'), { status: 502 }); return k; };
 /* 일레븐랩스 음성 라이브러리(공유 목소리) 검색 — 사이트의 ‘탐색’ 화면과 같은 필터 */
@@ -988,6 +1092,8 @@ export async function handleTts(req, env) {
     if (b.op === 'music') return await elevenMusic(env, b, who);
     if (b.op === 'addvoice') return await elevenAddVoice(env, b);
     if (b.op === 'direct') return await directLines(env, b);
+    if (b.op === 'scoreplan') return await scorePlan(env, b);
+    if (b.op === 'sfxplan') return await sfxPlan(env, b);
     const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
     const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
     if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);

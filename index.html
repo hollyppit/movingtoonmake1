@@ -177,6 +177,9 @@ pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; backgroun
 .tabs button[aria-selected=true] { color: var(--gold-l); border-bottom-color: var(--gold); }
 #insp { padding: 16px; display: grid; gap: 16px; }
 .olist { display: grid; gap: 4px; }
+.oirow { display: flex; gap: 4px; align-items: stretch; }
+.oirow .oi { flex: 1; min-width: 0; }
+.oirow .oiSpk { flex: none; width: 104px; font-size: .78rem; padding: 2px 4px; }
 .otl { position: relative; border: 1px solid var(--line-2); border-radius: 3px; background: var(--panel-2); padding: 22px 0 6px; user-select: none; touch-action: none; max-height: 260px; overflow-y: auto; overflow-x: hidden; }
 .otl .ruler { position: absolute; left: 0; right: 0; top: 0; height: 18px; font-size: .62rem; color: var(--ink-3); cursor: pointer; border-bottom: 1px solid var(--line-2); }
 .otl .ruler i { position: absolute; top: 3px; transform: translateX(-50%); font-style: normal; font-variant-numeric: tabular-nums; }
@@ -750,6 +753,23 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="dlg-f"><span class="note" style="flex:1;margin:0">탐색 목록의 목소리를 고르면 내 일레븐랩스 계정 ‘내 음성’에 추가한 뒤 씁니다. 요금제마다 추가할 수 있는 목소리 수가 다릅니다.</span><button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
+<dialog id="dlgScore" style="width:min(900px,96vw)">
+  <div class="dlg-h"><h3>🎼 AI 배경음악 — 전개에 맞춘 작곡</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b" id="scoreBody"></div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="scoreSt" style="flex:1"></span>
+    <button type="button" class="b ghost sm" id="scoreRedo">↻ 다시 설계</button>
+    <button type="button" class="b sm" id="scoreGo">이대로 작곡</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+<dialog id="dlgSfxAI" style="width:min(900px,96vw)">
+  <div class="dlg-h"><h3>🎧 AI 효과음 — 장면을 보고 골라 배치</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b" id="sfxAIBody"></div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="sfxAISt" style="flex:1"></span>
+    <button type="button" class="b ghost sm" id="sfxAIRedo">↻ 다시 고르기</button>
+    <button type="button" class="b sm" id="sfxAIGo">선택한 효과음 만들기</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
 <!-- 내보내기 -->
 <div class="printapp" id="printApp" hidden>
   <aside class="col left" id="prLeft" aria-label="페이지"></aside>
@@ -1013,7 +1033,7 @@ function rgba(hex, a) {
 const S_DEF = {
   mode: /^https?:$/.test(location.protocol) && !/^(localhost|127\.|\[::1\])/.test(location.hostname) ? 'server' : 'direct', apiBase: '',
   provider: 'auto', maxRefs: 6,
-  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', gmVoice: 'Kore', gmTtsModel: 'gemini-2.5-flash-preview-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', elVoice: '', gcVoice: 'ko-KR-Chirp3-HD-Kore', stsModel: 'eleven_multilingual_sts_v2', stsDenoise: '', cSts: 0.2, cSfx: 0.08, cMusic: 0.8, musicModel: 'music_v1', autoEmo: '1', cDirect: 0.01, autoFit: true, cTts: 0.015,
+  ttsEngine: 'openai', ttsVoice: 'coral', ttsModel: 'gpt-4o-mini-tts', gmVoice: 'Kore', gmTtsModel: 'gemini-2.5-flash-preview-tts', ttsInstr: '차분하고 또렷한 한국어 내레이션', ttsSpeed: 1, elModel: 'eleven_multilingual_v2', elVoice: '', gcVoice: 'ko-KR-Chirp3-HD-Kore', stsModel: 'eleven_multilingual_sts_v2', stsDenoise: '', cSts: 0.2, cSfx: 0.08, cMusic: 0.8, musicModel: 'music_v1', autoEmo: '1', cDirect: 0.01, autoSync: true, syncHold: 'end', syncShrink: false, syncLead: 0.3, syncGap: 0.25, readCps: 7, autoFit: true, cTts: 0.015,
   oaKey: '', oaModel: 'gpt-image-2', oaSize: '1024x1536', oaQuality: 'medium',
   gmKey: '', gmModel: 'gemini-2.5-flash-image', gmAspect: '9:16',
   klAK: '', klSK: '', klBase: 'https://api-singapore.klingai.com', klModel: 'kling-v2-1', klFetchProxy: '',
@@ -2883,7 +2903,43 @@ function resolveTts(t) {
   const engine = t.engine || S.ttsEngine, d = engDefaults(engine);
   return { engine, voice: String(t.voice || '').trim() || d.voice, model: d.model, instr: String(t.instr || '').trim() || S.ttsInstr, speed: +t.speed || +S.ttsSpeed || 1 };
 }
-const voiceProfile = o => { const s = speakerOf(o); return Object.assign(resolveTts(s.tts), { label: s.label }); };
+/* ‘읽는 사람’ 고르기 목록: 자동 · 나레이터 · 기본 목소리 · 캐릭터들(목소리를 정한 캐릭터는 그 목소리 이름도) */
+function speakerOptions(o) {
+  const auto = o.kind === 'narration' || o.kind === 'caption' ? '나레이터' : '기본 목소리', sp = o.speaker || '';
+  const opt = (v, t) => `<option value="${v}" ${sp === v ? 'selected' : ''}>${esc(t)}</option>`;
+  return opt('', `자동 (${auto})`) + opt('narr', '🎙 나레이터') + opt('base', '기본 목소리') +
+    P.chars.map(c => { const v = resolveTts(c.tts); return opt(c.id, `👤 ${c.name || '이름 없음'}${hasOwnTts(c.tts) && v.voice ? ' · ' + voiceName(v.voice) : ''}`); }).join('');
+}
+/* 나레이터 읽는 스타일 — 말투 지시(OpenAI·Gemini)로 들어간다. 나레이터 말투를 비워 두면 ‘이야기하듯’ 을 쓴다 */
+const NARR_STYLES = [
+  ['이야기하듯', '오디오북 성우가 옆에서 이야기를 들려주듯 자연스럽고 따뜻하게. 문장 흐름을 따라 억양을 살리고, 쉼표와 마침표에서 숨 쉬듯 자연스럽게 쉬며, 단어마다 또박또박 끊어 읽지 말 것'],
+  ['다큐멘터리', '다큐멘터리 내레이터처럼 차분하지만 생동감 있게. 장면을 보여 주듯 묘사하고, 중요한 단어에 살짝 힘을 주며 자연스러운 호흡으로'],
+  ['잔잔한 감성', '잔잔하고 감성적으로, 조금 느린 템포로 여운을 남기며. 속삭이듯 가깝게, 문장 끝을 부드럽게 내려 읽기'],
+  ['긴장감', '낮은 목소리로 긴장감 있게, 문장 사이 짧은 침묵을 두고 서서히 몰입시키듯'],
+  ['밝은 동화', '동화를 읽어 주듯 밝고 다정하게, 억양을 풍부하게 살려서'],
+];
+const NARR_DEFAULT = NARR_STYLES[0][1];
+const voiceProfile = o => {
+  const s = speakerOf(o), v = Object.assign(resolveTts(s.tts), { label: s.label });
+  if (s.label === '나레이터' && !String(s.tts?.instr || '').trim() && (!S.ttsInstr || S.ttsInstr === '차분하고 또렷한 한국어 내레이션')) v.instr = NARR_DEFAULT; // 예전 기본값은 딱딱하게 읽혀서 바꾼다
+  return v;
+};
+/* 읽기 전에 글을 다듬는다 (화면 글자는 그대로): 말풍선 줄바꿈 → 띄어쓰기, 끝에 문장부호가 없으면 마침표 — 줄마다 끊기고 억양이 평평해지는 것을 막는다 */
+function speakText(o) {
+  let t = String(o.text || '').replace(/\s*\n+\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  t = t.replace(/\.{3,}/g, '…').replace(/…{2,}/g, '…');
+  if (t && !/[.?!…~。？！」』"'”’)\]]$/.test(t)) t += '.';
+  return t;
+}
+/* 같은 사람이 바로 앞뒤에 읽는 대사 — 일레븐랩스가 문장 사이 흐름(억양 이어짐)을 자연스럽게 잇는 데 쓴다 */
+function neighborLines(p, o) {
+  const tl = timeline(), i = tl.findIndex(s => s.p.id === p.id), g = voiceGroup(o), who = o.speaker || '';
+  const same = x => x.text?.trim() && (g.g === 'narr' ? voiceGroup(x).g === 'narr' : (x.speaker || '') === who);
+  const seq = [];
+  for (let k = Math.max(0, i - 1); k <= Math.min(tl.length - 1, i + 1); k++) tl[k].p.overlays.filter(same).sort((a, b) => (+a.start || 0) - (+b.start || 0)).forEach(x => seq.push(x));
+  const j = seq.indexOf(o);
+  return { prev: j > 0 ? speakText(seq[j - 1]).slice(-300) : '', next: j >= 0 && j < seq.length - 1 ? speakText(seq[j + 1]).slice(0, 300) : '' };
+}
 const hasOwnTts = t => !!(t && (t.engine || String(t.voice || '').trim() || String(t.instr || '').trim() || +t.speed));
 /* ---- AI 감정 연출 ----
    o.emo = { on, emotion, intensity(0~1), instr(말투 지시), tags[](일레븐랩스 v3 태그), speed(배율), ai(AI가 정했는지) }
@@ -2891,7 +2947,7 @@ const hasOwnTts = t => !!(t && (t.engine || String(t.voice || '').trim() || Stri
 const emoOn = o => !!(o.emo && o.emo.on !== false && (o.emo.instr || o.emo.tags?.length || (+o.emo.speed && +o.emo.speed !== 1) || o.emo.emotion));
 const elV3 = m => /(^|_)v3/.test(m || '');
 function applyEmo(o, v) {
-  let text = (o.text || '').trim(); v = { ...v };
+  let text = speakText(o); v = { ...v };
   if (!emoOn(o)) return { v, text };
   const e = o.emo, k = clamp(+e.intensity || 0, 0, 1);
   if (e.instr) v.instr = (v.instr ? v.instr + '. 이번 대사는 ' : '') + e.instr;
@@ -3008,7 +3064,7 @@ async function stsVoice(p, o, src) {
     o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice } };
     dropAssetIfUnused(old); if (oldSrc && oldSrc !== srcId) dropAssetIfUnused(oldSrc);
     o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초`;
-    if (S.autoFit && fitPanelToVoices(p)) o._vst += ` · 컷 길이를 ${panelDur(p).toFixed(1)}초로 늘림`;
+    { const n = afterVoice(p); if (n) o._vst += ' · ' + n; }
     logCall({ kind: '목소리 변환', provider: 'tts', ok: true, cost: (buf?.duration || 0) / 60 * (+S.cSts || 0) });
   } catch (e) { o._vst = '실패: ' + e.message; logCall({ kind: '목소리 변환', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
   o._vbusy = false; save(); refreshPanel(p); renderPanels();
@@ -3053,9 +3109,10 @@ const VB_KO = { female: '여성', male: '남성', neutral: '중성', young: '젊
 const VB = { tab: 'lib', page: 0, list: [], mine: null, hasMore: false, total: 0, uc: new Set(), cur: '', onPick: null, seq: 0, audio: null };
 const ko = s => VB_KO[s] || String(s || '').replace(/_/g, ' ');
 const kNum = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n || 0);
-function openVoiceBrowser(cur, onPick) {
+function openVoiceBrowser(cur, onPick, opts) {
   if (!isServer()) return toast('목소리 찾기는 서버 모드에서만 됩니다');
   VB.cur = cur || ''; VB.onPick = onPick;
+  VB.uc = new Set(opts?.uc || []); // 나레이터에서 열면 ‘낭독’ 목소리부터
   $('.vb-uc').innerHTML = VB_UC.map(([k, n]) => `<button type="button" class="chip" data-uc="${k}" aria-pressed="${VB.uc.has(k)}">${n}</button>`).join('');
   $$('.vb-uc [data-uc]').forEach(b => (b.onclick = () => { VB.uc.has(b.dataset.uc) ? VB.uc.delete(b.dataset.uc) : VB.uc.add(b.dataset.uc); b.setAttribute('aria-pressed', VB.uc.has(b.dataset.uc)); vbSearch(); }));
   $('#dlgVoice').showModal(); vbSearch();
@@ -3136,18 +3193,18 @@ function voiceEditorHTML(t) {
   const eng = t.engine || '', r = resolveTts(t);
   return `<div class="g2 vEd">
     <label><span class="lbl">음성 엔진</span><select class="vEng"><option value="">기본 (${esc(TTS_ENG[S.ttsEngine] || S.ttsEngine)})</option>${Object.entries(TTS_ENG).map(([k, n]) => `<option value="${k}" ${eng === k ? 'selected' : ''}>${n}${TTS_SRV_ONLY.has(k) ? ' · 서버' : ''}</option>`).join('')}</select></label>
-    <label><span class="lbl">목소리${r.engine === 'eleven' && r.voice ? ' · ' + esc(voiceName(r.voice)) : ''}</span><span class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" class="vVoice" style="flex:1;min-width:0" list="${VLIST[r.engine]}" data-vl="${r.engine}" placeholder="${esc(voiceName(engDefaults(r.engine).voice) || (r.engine === 'eleven' ? 'voice ID' : ''))}">${r.engine === 'eleven' ? '<button type="button" class="b ghost sm vFind" title="일레븐랩스 음성 라이브러리에서 찾기">🔍 찾기</button>' : ''}</span></label>
+    <label style="grid-column:1/-1"><span class="lbl">목소리${r.engine === 'eleven' && r.voice ? ' · ' + esc(voiceName(r.voice)) : ''}</span><span class="row" style="gap:4px;flex-wrap:nowrap"><input type="text" class="vVoice" style="flex:1;min-width:0" list="${VLIST[r.engine]}" data-vl="${r.engine}" placeholder="${esc(voiceName(engDefaults(r.engine).voice) || (r.engine === 'eleven' ? 'voice ID' : ''))}">${r.engine === 'eleven' ? '<button type="button" class="b ghost sm vFind" title="일레븐랩스 음성 라이브러리에서 찾기">🔍 찾기</button>' : ''}</span></label>
     <label><span class="lbl">속도</span><input type="number" class="vSpd" step="0.05" min="0.25" max="4" placeholder="${+S.ttsSpeed || 1}"></label>
-    <label><span class="lbl">말투 (OpenAI·Gemini)</span><input type="text" class="vIns" placeholder="${esc(S.ttsInstr)}"></label>
+    <label><span class="lbl">말투 (OpenAI·Gemini)</span><input type="text" class="vIns" placeholder="${esc(t === P.narrTts && (!S.ttsInstr || S.ttsInstr === '차분하고 또렷한 한국어 내레이션') ? '이야기하듯 (아래 스타일에서 고르기)' : S.ttsInstr)}"></label>
   </div>
   <div class="row"><button type="button" class="b ghost sm vTry">▶ 샘플 듣기</button><span class="st vTrySt"></span></div>`;
 }
-function bindVoiceEditor(el, t, sampleText, onChange) {
+function bindVoiceEditor(el, t, sampleText, onChange, findOpts) {
   const q = s => el.querySelector(s), vv = q('.vVoice'), sp = q('.vSpd'), ins = q('.vIns');
   vv.value = t.voice || ''; sp.value = t.speed || ''; ins.value = t.instr || '';
   const done = () => { save(); onChange && onChange(); };
   q('.vEng').onchange = e => { t.engine = e.target.value; t.voice = ''; done(); };
-  const fd = q('.vFind'); if (fd) fd.onclick = e => { e.preventDefault(); openVoiceBrowser(resolveTts(t).voice, id => { if (!t.engine) t.engine = 'eleven'; t.voice = id; done(); }); };
+  const fd = q('.vFind'); if (fd) fd.onclick = e => { e.preventDefault(); openVoiceBrowser(resolveTts(t).voice, id => { if (!t.engine) t.engine = 'eleven'; t.voice = id; done(); }, findOpts); };
   vv.oninput = () => { t.voice = vv.value.trim(); save(); };
   vv.onchange = done;
   sp.onchange = () => { t.speed = sp.value === '' ? 0 : +sp.value; done(); };
@@ -3173,6 +3230,7 @@ async function ttsBlob(text, force, v) {
     if (eng === 'eleven' && !v.voice) throw new Error('일레븐랩스 voice ID 를 정해 주세요');
     const body = { provider: eng, text, voice: v.voice, model: v.model, instructions: ins, speed: spd, force: !!force };
     if (v.stability != null) body.stability = v.stability; if (v.style != null) body.style = v.style;
+    if (v.prev) body.previous_text = v.prev; if (v.next) body.next_text = v.next;
     const r = await srvJSON('/api/tts', body);
     return { blob: await fetchKey(r.key), key: r.key };
   }
@@ -3216,6 +3274,7 @@ async function genVoice(p, o, force, noDirect) {
   }
   try {
     const { v, text } = applyEmo(o, voiceProfile(o));
+    if (v.engine === 'eleven' && !elV3(v.model)) { const nb = neighborLines(p, o); v.prev = nb.prev; v.next = nb.next; } // 앞뒤 문장과 억양을 잇는다 (v3 는 지원하지 않음)
     const r = await ttsBlob(text, force, v);
     const id = await addAsset(r.blob); if (r.key) P.keys[id] = r.key;
     const buf = await audioBuf(id);
@@ -3223,10 +3282,68 @@ async function genVoice(p, o, force, noDirect) {
     o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: voiceSig(o), vol: o.voice?.vol ?? 1 };
     dropAssetIfUnused(old); if (oldSrc) dropAssetIfUnused(oldSrc);
     o._vst = `✓ 음성 ${o.voice.dur.toFixed(1)}초`;
-    if (S.autoFit && fitPanelToVoices(p)) o._vst += ` · 컷 길이를 ${panelDur(p).toFixed(1)}초로 늘림`;
+    { const n = afterVoice(p); if (n) o._vst += ' · ' + n; }
     logCall({ kind: '음성', provider: 'tts', ok: true, cost: text.length / 1000 * (+S.cTts || 0) });
   } catch (e) { o._vst = '실패: ' + e.message; logCall({ kind: '음성', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
   o._vbusy = false; save(); refreshPanel(p); renderPanels();
+}
+/* ---- 읽는 속도에 맞춰 타임라인 배치 ----
+   대사를 등장 순서대로 하나씩: 음성이 있으면 음성 길이, 없으면 글자 수 ÷ 읽기 속도만큼 보여 주고 다음 대사로 넘어간다.
+   직접 옮긴 대사(o.timeLock)는 그 자리를 지키고, 다른 대사가 그 뒤로 흐른다. 컷 길이는 마지막 대사 + 여유로 맞춘다 */
+const readLen = o => (o.voice && !o.voice.mute && +o.voice.dur > 0 ? +o.voice.dur : Math.max(1, [...(o.text || '').replace(/\s+/g, '')].length / Math.max(2, +S.readCps || 7)));
+function syncCut(p, { force } = {}) {
+  const lead = clamp(+S.syncLead || 0, 0, 3), gap = clamp(+S.syncGap || 0, 0, 3), tail = 0.6, hold = S.syncHold !== 'read';
+  const lines = p.overlays.map((o, i) => ({ o, i })).filter(x => x.o.text?.trim()).sort((a, b) => (+a.o.start || 0) - (+b.o.start || 0) || a.i - b.i).map(x => x.o);
+  if (!lines.length) return null;
+  const r1 = v => Math.ceil(v * 10 - 1e-6) / 10;
+  let cur = lead, end = 0;
+  lines.forEach(o => {
+    const len = readLen(o);
+    if (o.timeLock && !force) { const e = (+o.start || 0) + len; cur = Math.max(cur, e + gap); end = Math.max(end, e); return; }
+    if (force) delete o.timeLock;
+    o.start = r1(cur);
+    o.dur = hold ? 0 : +(len + 0.5).toFixed(1); // 컷 끝까지 남기기 / 읽는 동안만
+    end = Math.max(end, o.start + len); cur = o.start + len + gap;
+  });
+  const need = r1(end + tail), before = panelDur(p);
+  const want = S.syncShrink ? need : Math.max(before, need);
+  p.dur = +clamp(want, DUR_MIN, DUR_MAX).toFixed(1);
+  if (!hold) lines.forEach(o => { if (+o.dur > 0 && o.start + o.dur > p.dur) o.dur = +Math.max(0.2, p.dur - o.start).toFixed(1); });
+  return { n: lines.length, dur: p.dur, changed: p.dur !== before, over: need > DUR_MAX, locked: lines.filter(o => o.timeLock).length };
+}
+function syncUI(p) {
+  const locked = p.overlays.filter(o => o.timeLock && o.text?.trim()).length;
+  return `<div class="box sync" style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+    <div class="row" style="flex-wrap:wrap;gap:6px;align-items:center"><strong style="font-size:.85rem">⏱ 읽는 속도에 맞춰 배치</strong>
+      <button type="button" class="b sm" id="syncCut">이 컷</button><button type="button" class="b ghost sm" id="syncAll">모든 컷</button>
+      ${locked ? `<button type="button" class="b ghost sm" id="syncForce" title="직접 옮긴 대사도 다시 배치">📌 ${locked}개 고정 풀고 맞추기</button>` : ''}</div>
+    <label class="chk"><input type="checkbox" id="autoSync" ${S.autoSync ? 'checked' : ''}> 음성을 만들면 자동으로 맞추기</label>
+    <details><summary class="note" style="cursor:pointer">배치 방법</summary><div class="g2" style="margin-top:6px">
+      <label><span class="lbl">말풍선</span><select id="syncHold"><option value="end" ${S.syncHold !== 'read' ? 'selected' : ''}>컷 끝까지 남기기</option><option value="read" ${S.syncHold === 'read' ? 'selected' : ''}>읽는 동안만 보이기</option></select></label>
+      <label class="chk" style="align-self:end"><input type="checkbox" id="syncShrink" ${S.syncShrink ? 'checked' : ''}> 컷 길이도 대사에 맞춰 줄이기</label>
+      <label><span class="lbl">첫 대사 시작(초)</span><input type="number" id="syncLead" min="0" max="3" step="0.1" value="${+S.syncLead}"></label>
+      <label><span class="lbl">대사 사이 간격(초)</span><input type="number" id="syncGap" min="0" max="3" step="0.05" value="${+S.syncGap}"></label>
+      <label><span class="lbl">음성 없는 글 읽기 속도(글자/초)</span><input type="number" id="readCps" min="2" max="20" step="0.5" value="${+S.readCps}"></label>
+    </div><p class="note" style="margin:4px 0 0">음성이 있으면 음성 길이, 없으면 글자 수로 보여 줄 시간을 정합니다. 타임라인에서 직접 옮긴 대사는 그 자리에 고정됩니다. 타자기 효과는 음성 속도에 맞춰 찍힙니다.</p></details>
+  </div>`;
+}
+function bindSync(p, el) {
+  const b = $('#syncCut', el); if (!b) return;
+  const run = (list, force) => { histSnap(); const notes = list.map(x => syncCut(x, { force })).filter(Boolean); save(); renderInspector(); renderPanels(); requestDraw();
+    toast(list.length === 1 ? (syncNote(notes[0]) || '배치할 대사가 없습니다') : `컷 ${notes.length}개를 읽는 속도에 맞춰 배치했습니다${notes.some(n => n.over) ? ' · ⚠ 15초를 넘는 컷이 있습니다' : ''}`, 4000); };
+  b.onclick = () => run([p]);
+  $('#syncAll', el).onclick = () => { if (confirm('모든 컷의 대사를 읽는 속도에 맞춰 다시 배치할까요? (직접 옮긴 대사는 그대로)')) run(P.panels); };
+  const f = $('#syncForce', el); if (f) f.onclick = () => run([p], true);
+  $('#autoSync', el).onchange = e => { S.autoSync = e.target.checked; saveSettings(); };
+  $('#syncHold', el).onchange = e => { S.syncHold = e.target.value; saveSettings(); };
+  $('#syncShrink', el).onchange = e => { S.syncShrink = e.target.checked; saveSettings(); };
+  [['syncLead', 0, 3], ['syncGap', 0, 3], ['readCps', 2, 20]].forEach(([k, lo, hi]) => { $('#' + k, el).onchange = e => { S[k] = clamp(+e.target.value || 0, lo, hi); e.target.value = S[k]; saveSettings(); }; });
+}
+const syncNote = r => !r ? '' : `대사 ${r.n}개를 읽는 속도에 맞춰 배치${r.changed ? ` · 컷 ${r.dur.toFixed(1)}초` : ''}${r.locked ? ` · 직접 옮긴 ${r.locked}개는 그대로` : ''}${r.over ? ` · ⚠ 컷 최대 ${DUR_MAX}초를 넘어 뒤 대사가 잘립니다 (컷을 나누세요)` : ''}`;
+/* 음성을 만든 뒤: 자동 배치가 켜져 있으면 컷 전체를 다시 배치, 아니면 예전처럼 컷 길이만 늘린다 */
+function afterVoice(p) {
+  if (S.autoSync) return syncNote(syncCut(p));
+  return S.autoFit && fitPanelToVoices(p) ? `컷 길이를 ${panelDur(p).toFixed(1)}초로 늘림` : '';
 }
 /* 대사·음성이 컷보다 길면 컷을 늘린다 (관리자 페이지의 ‘권장 세팅’과 같은 방향) */
 function fitPanelToVoices(p) {
@@ -3250,7 +3367,9 @@ async function genVoicesForPanel(p) {
 
 /* ---- 목소리 배정 창: 읽는 사람을 고른 뒤, 대사를 여러 개 체크해서 한꺼번에 적용 ---- */
 const CAST = { sel: new Set(), last: -1 };
-const castWhoOptions = () => `<option value="narr">🎙 나레이터</option><option value="base">기본 목소리</option>${P.chars.map(c => `<option value="${c.id}">${esc(c.name || '이름 없음')}</option>`).join('')}<option value="">자동 (종류에 따라)</option>`;
+const castWhoOptions = () => `<option value="narr">🎙 나레이터</option><option value="base">기본 목소리</option>${P.chars.map(c => { const v = resolveTts(c.tts); return `<option value="${c.id}">👤 ${esc(c.name || '이름 없음')}${hasOwnTts(c.tts) && v.voice ? ' · ' + esc(voiceName(v.voice)) : ''}</option>`; }).join('')}<option value="">자동 (종류에 따라)</option>`;
+/* 이 사람이 읽는 대사 수 (모든 컷) */
+const linesOf = who => P.panels.reduce((a, p) => a + p.overlays.filter(o => o.text?.trim() && (who === 'narr' ? voiceGroup(o).g === 'narr' : o.speaker === who)).length, 0);
 function castRows() {
   const scope = $('#castScope').value, f = $('#castFilter').value, cur = selPanel();
   const rows = [];
@@ -3302,10 +3421,11 @@ $('#castEmo').onclick = async () => {
   catch (e) { toast('AI 감정 연출 실패: ' + e.message, 4500); }
   b.textContent = '🎭 선택한 대사 AI 감정 연출'; renderCast(); castCount();
 };
-function openCast() {
+function openCast(who) {
   CAST.sel.clear(); CAST.last = -1;
   const so = selOverlay(); if (so && so.text?.trim()) CAST.sel.add(selPanel().id + ':' + so.id);
   $('#castWho').innerHTML = castWhoOptions();
+  if (who != null) { $('#castWho').value = who; $('#castScope').value = 'all'; } // 캐릭터 카드에서 열면 그 캐릭터를 고른 채로, 모든 컷에서
   renderCast(); $('#dlgCast').showModal();
 }
 $('#castScope').onchange = $('#castFilter').onchange = () => { CAST.last = -1; renderCast(); };
@@ -3314,7 +3434,7 @@ $('#castNone').onclick = () => { CAST.sel.clear(); renderCast(); };
 $('#castApply').onclick = () => {
   const who = $('#castWho').value, list = castPicked();
   list.forEach(({ o }) => { o.speaker = who; });
-  save(); renderCast(); refreshInspector(); renderPanels();
+  save(); renderCast(); refreshInspector(); renderPanels(); renderChars();
   const stale = list.filter(({ o }) => o.voice && voiceStale(o)).length;
   toast(`${list.length}개 대사의 읽는 사람을 ‘${$('#castWho').selectedOptions[0].textContent.trim()}’(으)로 정했습니다${stale ? ` · 이미 만든 음성 ${stale}개는 다시 만들어야 합니다` : ''}`, 3500);
 };
@@ -3570,7 +3690,8 @@ function ovState(o, lt, forced) {
   const st = +o.start || 0, d = +o.dur || 0, en = d > 0 ? st + d : Infinity;
   if (lt < st || lt >= en) return null;
   const len = [...(o.text || '')].length, k = lt - st;
-  const inDur = o.anim === 'typewriter' ? Math.max(0.4, len * 0.055) : o.anim === 'none' ? 0.001 : 0.45;
+  // 타자기: 음성이 있으면 읽는 속도에 맞춰 글자가 찍힌다
+  const inDur = o.anim === 'typewriter' ? (o.voice && +o.voice.dur > 0 && !o.voice.mute ? Math.max(0.4, +o.voice.dur * 0.92) : Math.max(0.4, len * 0.055)) : o.anim === 'none' ? 0.001 : 0.45;
   const p = clamp(k / inDur, 0, 1);
   switch (o.anim) {
     case 'fade': s.alpha = p; break;
@@ -3990,9 +4111,12 @@ function renderStyle() {
 }
 function renderNarr() {
   const el = $('#narrBox'); if (!el) return;
-  el.innerHTML = `<div class="card"><div class="row"><strong style="flex:1">🎙 나레이터 목소리</strong><button type="button" class="b sm" id="castOpen">목소리 배정…</button></div>${voiceEditorHTML(P.narrTts)}<p class="note">나레이션·자막은 자동으로 나레이터가 읽습니다. ‘목소리 배정’에서 여러 대사를 골라 한꺼번에 읽는 사람을 바꿀 수 있습니다.</p></div>`;
-  bindVoiceEditor(el, P.narrTts, '그날, 모든 것이 달라졌다.', () => { renderNarr(); refreshInspector(); renderPanels(); });
-  $('#castOpen', el).onclick = () => openCast();
+  el.innerHTML = `<div class="card"><div class="row"><strong style="flex:1">🎙 나레이터 목소리</strong><button type="button" class="b sm" id="castOpen" title="여러 대사를 골라 나레이터·캐릭터에게 한꺼번에 배정">대사 배정 (${linesOf('narr')})…</button></div>${voiceEditorHTML(P.narrTts)}
+    <div class="row" style="flex-wrap:wrap;gap:4px;align-items:center"><span class="lbl" style="margin:0">읽는 스타일</span>${NARR_STYLES.map(([n, t], i) => { const cur = String(P.narrTts.instr || '').trim(), on = cur ? cur === t : i === 0; return `<button type="button" class="chip" data-nst="${i}" aria-pressed="${on}" title="${esc(t)}">${n}</button>`; }).join('')}</div>
+    <p class="note">나레이션·자막은 자동으로 나레이터가 읽습니다. ‘목소리 배정’에서 여러 대사를 골라 한꺼번에 읽는 사람을 바꿀 수 있습니다.</p></div>`;
+  bindVoiceEditor(el, P.narrTts, '그날, 모든 것이 달라졌다. 아무도 그 일이 이렇게 커질 줄은 몰랐다.', () => { renderNarr(); refreshInspector(); renderPanels(); }, { uc: ['narrative_story'] });
+  $$('[data-nst]', el).forEach(b => (b.onclick = () => { const i = +b.dataset.nst; P.narrTts.instr = i === 0 ? '' : NARR_STYLES[i][1]; save(); renderNarr(); refreshInspector(); renderPanels(); toast(`나레이터 스타일: ${NARR_STYLES[i][0]} — 나레이션 음성을 다시 만들면 적용됩니다`); }));
+  $('#castOpen', el).onclick = () => openCast('narr');
 }
 function renderChars() {
   renderNarr();
@@ -4004,6 +4128,7 @@ function renderChars() {
       <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
       <textarea class="ds" rows="3" placeholder="외형: 나이대, 얼굴형, 머리 모양·색, 눈, 의상, 체형, 상징 색"></textarea>
       <details class="vBox"${hasOwnTts(c.tts) ? ' open' : ''}><summary>🔊 목소리 · ${esc((() => { const v = resolveTts(c.tts); return (TTS_ENG[v.engine] || v.engine) + ' ' + (voiceName(v.voice) || '(없음)'); })())}</summary>${voiceEditorHTML(c.tts || (c.tts = {}))}</details>
+      <div class="row"><button type="button" class="b sm castMe" title="이 캐릭터가 읽을 대사를 골라 배정합니다">🎙 대사 배정 (${linesOf(c.id)})…</button></div>
       <div class="refs"></div>
       <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple hidden></label><button type="button" class="b ghost sm gen" ${c._busy ? 'disabled' : ''}>${c._busy ? '생성 중…' : '시트 생성'}</button></div>
       <div class="st ${/^실패/.test(c._st || '') ? 'err' : ''}">${esc(c._st || '')}</div>`;
@@ -4021,6 +4146,7 @@ function renderChars() {
     c.refs.forEach((id, i) => refs.appendChild(refThumb(id, i === 0, () => { c.refs.splice(i, 1); dropAssetIfUnused(id); save(); renderChars(); })));
     d.querySelector('input[type=file]').onchange = async e => { for (const f of e.target.files) c.refs.push(await addAsset(f)); save(); renderChars(); };
     d.querySelector('.gen').onclick = () => genSheet(c);
+    d.querySelector('.castMe').onclick = () => openCast(c.id);
     bindVoiceEditor(d.querySelector('.vBox'), c.tts, `안녕하세요, 저는 ${c.name || '이 캐릭터'}예요. 잘 부탁해요!`, () => { renderChars(); refreshInspector(); renderPanels(); });
     el.appendChild(d);
   });
@@ -4482,7 +4608,9 @@ function tabText(p) {
     <p class="note">자동 선택: 끝이 ‘!’면 소리치는 말풍선, ( ) 안은 생각, ‘나레이션:’ ‘자막:’으로 시작하면 해당 모양, 나머지는 동그란 말풍선. 넣은 뒤 아래에서 하나씩 바꿀 수 있습니다.</p></div>
   <div class="grp"><span class="lbl">추가</span><div class="row">${Object.entries(KINDS).map(([k, v]) => `<button type="button" class="b ghost sm" data-add="${k}">+ ${v}</button>`).join('')}</div></div>
   <div class="grp"><span class="lbl">이 컷의 텍스트 ${p.overlays.length}개 · 등장 순서</span>
-    ${list.length ? `<div class="olist">${list.map(x => `<button type="button" class="oi ${x.id === selOv ? 'on' : ''}" data-ov="${x.id}"><b>${KINDS[x.kind]}${x.voice ? (voiceStale(x) ? ' ⚠' : ' 🔊') : ''}</b><span>${esc(x.text || '(빈 텍스트)')}</span><small>${(+x.start).toFixed(1)}s</small></button>`).join('')}</div>` : '<span class="note">아직 없습니다.</span>'}</div>
+    ${list.length ? `<div class="olist">${list.map(x => `<div class="oirow"><button type="button" class="oi ${x.id === selOv ? 'on' : ''}" data-ov="${x.id}"><b>${KINDS[x.kind]}${x.voice ? (voiceStale(x) ? ' ⚠' : ' 🔊') : ''}</b><span>${esc(x.text || '(빈 텍스트)')}</span><small>${(+x.start).toFixed(1)}s</small></button><select class="oiSpk" data-spk="${x.id}" aria-label="읽는 사람" title="읽는 사람">${speakerOptions(x)}</select></div>`).join('')}</div>
+    <p class="note" style="margin:2px 0 0">오른쪽 칸에서 대사마다 읽는 사람(나레이터·캐릭터)을 고릅니다. 여러 개는 캐릭터 칸의 ‘대사 배정’으로 한꺼번에.</p>
+    ${syncUI(p)}` : '<span class="note">아직 없습니다.</span>'}</div>
   ${o ? `
   <div class="box grp">
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px"><span class="lbl">말풍선 합치기</span>
@@ -4514,12 +4642,7 @@ function tabText(p) {
     ${bubbleUI(o)}
     <div class="grp" style="border-top:1px solid var(--line-2);padding-top:10px">
       ${(() => { const v = voiceProfile(o); return `<span class="lbl">대사 음성 · ${esc(v.label)} — ${esc(TTS_ENG[v.engine] || v.engine)} ${esc(voiceName(v.voice) || '(목소리 없음)')}${isServer() ? ' · 서버' : ''}</span>`; })()}
-      <label><span class="lbl">읽는 사람</span><select id="vSpk">
-        <option value="" ${!o.speaker ? 'selected' : ''}>자동 (${o.kind === 'narration' || o.kind === 'caption' ? '나레이터' : '기본 목소리'})</option>
-        <option value="narr" ${o.speaker === 'narr' ? 'selected' : ''}>나레이터</option>
-        <option value="base" ${o.speaker === 'base' ? 'selected' : ''}>기본 목소리</option>
-        ${P.chars.map(c => `<option value="${c.id}" ${o.speaker === c.id ? 'selected' : ''}>${esc(c.name || '이름 없음')}</option>`).join('')}
-      </select></label>
+      <label><span class="lbl">읽는 사람</span><select id="vSpk">${speakerOptions(o)}</select></label>
       <div class="row">
         <button type="button" class="b ghost sm" id="vGen" ${o._vbusy ? 'disabled' : ''}>${o._vbusy ? '만드는 중…' : !o.voice ? '🔊 음성 만들기' : o.voice.sts ? '🔊 글로 새로 만들기(녹음 대신)' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>
         ${o.voice ? `<button type="button" class="b ghost sm" id="vPlay">▶ 듣기</button><button type="button" class="b ghost sm" id="vMute" aria-pressed="${!!o.voice.mute}">${o.voice.mute ? '🔇 음소거됨' : '🔊 음소거'}</button><button type="button" class="b danger sm" id="vDel">음성 빼기</button>` : ''}
@@ -4577,7 +4700,7 @@ function drawTimeline(p) {
         return { icon: !audible ? '🔇 ' : voiceStale(o) ? '⚠ ' : '🔊 ', html: '<span class="vo' + (audible ? '' : ' mute') + (over ? ' over' : '') + '" style="width:' + (w * 100).toFixed(2) + '%"></span>', tip: ` · 음성 ${(o.voice.dur || 0).toFixed(1)}초${audible ? '' : ' (음소거)'}${over ? ' · 컷보다 김' : ''}${emoOn(o) ? ' · 🎭 ' + (o.emo.emotion || '') : ''}` };
       })() : null;
       return '<div class="row-t"><div class="bar-t ' + (o.id === selOv || o.id === selLayer ? 'on' : '') + (open ? ' open' : '') + '" data-id="' + o.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / D * 100).toFixed(3) + '%;--c:' + c + '" title="' + esc((o.text || '') + (vo ? vo.tip : '')) + '">' +
-        '<span class="grip l"></span><span class="lab">' + (vo ? vo.icon : '') + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + ' ' + (o.text || '')) + '</span><span class="grip r"></span>' + (vo ? vo.html : '') + '</div></div>';
+        '<span class="grip l"></span><span class="lab">' + (o.timeLock && o.kind !== 'layer' ? '📌' : '') + (vo ? vo.icon : '') + esc(o.kind === 'layer' ? (o.ink ? '✏ 효과음 ' : '이미지 ') + (o.name || '') : KINDS[o.kind] + (o.speaker && o.speaker !== 'base' ? ' · ' + speakerOf(o).label : '') + ' ' + (o.text || '')) + '</span><span class="grip r"></span>' + (vo ? vo.html : '') + '</div></div>';
     }).join('') +
     cutTracks(p).map(({ t, st, en, cutL, cutR }) => {
       const g = trackGroup(t), on = !t.mute && lvl(mixOf()[g]) > 0 && monOf()[g];
@@ -4647,6 +4770,7 @@ function bindTimeline(p, el) {
     const up = () => {
       bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', up);
       if (tip) tip.hidden = true;
+      if (moved && !isLayer) o.timeLock = true; // 직접 옮긴 대사는 자동 배치가 건드리지 않는다
       save(); if (isLayer && tab !== 'layer') setTab('layer'); else if (moved || !wasSel) { renderInspector(); renderPanels(); } else drawTimeline(p); requestDraw();
     };
     bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', up);
@@ -6501,6 +6625,8 @@ function bindText(p, el) {
     scrubT = Math.min(panelDur(p), o.start + 0.8); save(); prepareFonts(); renderInspector(); renderPanels(); requestDraw();
     setTimeout(() => { const t = $('#ovText'); if (t) { t.focus(); t.select(); } }, 0);
   }));
+  bindSync(p, el);
+  $$('[data-spk]', el).forEach(s => (s.onchange = () => { const x = p.overlays.find(q => q.id === s.dataset.spk); if (!x) return; x.speaker = s.value; save(); renderInspector(); renderPanels(); renderChars(); }));
   $$('[data-ov]', el).forEach(b => (b.onclick = () => { selOv = b.dataset.ov; const o = selOverlay(); scrubT = Math.min(panelDur(p), (+o.start || 0) + 0.8); renderInspector(); requestDraw(); }));
   const o = selOverlay(); if (!o) return;
   const join=$('#bubbleJoin',el),unjoin=$('#bubbleUnjoin',el);
@@ -6512,12 +6638,13 @@ function bindText(p, el) {
   endIn.addEventListener('input', () => {
     const v = parseFloat(endIn.value); if (Number.isNaN(v)) return;
     endAbs = v <= 0 ? 0 : Math.min(panelDur(p), v);
-    o.dur = endAbs ? +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2) : 0;
+    o.dur = endAbs ? +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2) : 0; o.timeLock = true;
     save(); requestDraw(); drawTimeline(p);
   });
   bind(el, o, (f, v) => {
     if(o.bubbleGroup && ['fill','fillA','stroke','strokeW'].includes(f)) p.overlays.filter(x=>x.bubbleGroup===o.bubbleGroup).forEach(x=>x[f]=v);
     if (f === 'start') { // 등장 시각을 옮겨도 사라지는 시각은 그대로 둔다
+      o.timeLock = true;
       if (endAbs) { o.dur = +Math.max(0.2, endAbs - (+o.start || 0)).toFixed(2); if (o.start + o.dur > endAbs + 0.001) endAbs = o.start + o.dur; endIn.value = +endAbs.toFixed(2); }
       drawTimeline(p);
     }
@@ -6569,7 +6696,7 @@ function bindText(p, el) {
     $$('[data-bub]', el).forEach(b => (b.onclick = () => { o.shapeImg = b.dataset.bub; getImg(o.shapeImg); save(); renderInspector(); requestDraw(); }));
   }
   $('#vGen', el).onclick = () => { if (o.voice?.sts && !confirm('목소리 변환한 음성을 글 읽기(TTS) 음성으로 바꿉니다. 원본 녹음은 지워집니다. 계속할까요?')) return; genVoice(p, o, !!o.voice && !voiceStale(o)); };
-  $('#vSpk', el).onchange = e => { o.speaker = e.target.value; save(); renderInspector(); renderPanels(); };
+  $('#vSpk', el).onchange = e => { o.speaker = e.target.value; save(); renderInspector(); renderPanels(); renderChars(); };
   $('#vRec', el).onclick = () => toggleRecord(p, o);
   bindEmo(p, o, el);
   $('#vStsFile', el).onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (f) await stsVoice(p, o, f); };
@@ -6705,6 +6832,129 @@ const MUSIC_PRESETS = [
   ['슬픔', 'sad solo cello and piano, slow and heartbreaking, lots of space'],
   ['판타지', 'epic fantasy orchestral theme, choir and harp, sense of wonder'],
 ];
+/* ---- AI 음악 감독 · AI 사운드 디자이너 ---- */
+const AISCORE = { hint: '', plan: null, busy: false }, AISFX = { plan: null, sel: new Set(), busy: false, done: new Set() };
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+/* 이야기 정보: 컷마다 길이·장면 메모·대사(읽는 사람·감정)·작은 그림(최대 60장) */
+async function storyForAI(st) {
+  const tl = timeline(), every = Math.max(1, Math.ceil(tl.length / 60)), cuts = [];
+  for (let i = 0; i < tl.length; i++) {
+    const p = tl[i].p; let img = '';
+    if (i % every === 0 && curAsset(p)) { try { st && st(`컷 그림 준비 중… ${i + 1}/${tl.length}`); img = (await renderCutCanvas(p, { text: false, maxSide: 224 })).toDataURL('image/jpeg', 0.7).split(',')[1] || ''; } catch (e) { img = ''; } }
+    cuts.push({ dur: +tl[i].dur.toFixed(2), scene: (p.prompt || '').trim(), img,
+      lines: p.overlays.filter(o => o.text?.trim()).sort((a, b) => (+a.start || 0) - (+b.start || 0)).map(o => ({ who: speakerOf(o).label, kind: KINDS[o.kind] || o.kind, text: o.text.trim(), emotion: emoOn(o) ? o.emo.emotion : '' })) });
+  }
+  return cuts;
+}
+async function openScore(redo) {
+  if (!isServer()) return toast('AI 작곡은 서버 모드에서만 됩니다');
+  const dlg = $('#dlgScore'); if (!dlg.open) dlg.showModal();
+  if (AISCORE.plan && !redo) return renderScore();
+  AISCORE.busy = true; renderScore();
+  const st = t => ($('#scoreSt').textContent = t);
+  try {
+    const cuts = await storyForAI(st); st('🎼 AI 가 이야기 흐름을 읽고 음악을 설계하는 중…');
+    AISCORE.plan = await srvJSON('/api/tts', { op: 'scoreplan', cuts, hint: AISCORE.hint });
+    logCall({ kind: 'AI 음악 설계', provider: 'claude', ok: true, cost: +S.cDirect || 0 });
+    st('');
+  } catch (e) { st('실패: ' + e.message); }
+  AISCORE.busy = false; renderScore();
+}
+function renderScore() {
+  const b = $('#scoreBody'), pl = AISCORE.plan;
+  if (AISCORE.busy && !pl) { b.innerHTML = '<p class="note" style="padding:20px;text-align:center">컷 그림과 대사를 읽고 있습니다… (30초~1분)</p>'; $('#scoreGo').disabled = true; return; }
+  if (!pl) { b.innerHTML = '<p class="note" style="padding:20px">설계안이 없습니다. ‘다시 설계’를 눌러 주세요.</p>'; $('#scoreGo').disabled = true; return; }
+  const total = pl.sections.reduce((a, s) => a + s.ms, 0) / 1000;
+  b.innerHTML = `<div class="grp"><strong>${esc(pl.title)}</strong> <span class="note">· ${mmss(total)} · 섹션 ${pl.sections.length}개${pl.pieces.length > 1 ? ` · 10분이 넘어 ${pl.pieces.length}곡으로 나눠 만듭니다` : ''}</span>
+      <p style="margin:4px 0 8px">${esc(pl.summary)}</p>
+      <label><span class="lbl">전체 스타일 (영어 태그, 쉼표)</span><input type="text" data-sg="positive" value="${esc(pl.global.positive.join(', '))}"></label>
+      <label><span class="lbl">빼고 싶은 것</span><input type="text" data-sg="negative" value="${esc(pl.global.negative.join(', '))}"></label></div>
+    <div class="score-secs">${pl.sections.map((s, k) => `<div class="card" style="padding:8px;margin:6px 0">
+      <div class="row" style="gap:8px;align-items:baseline;flex-wrap:wrap"><b>${k + 1}. ${esc(s.name)}</b><span class="chip">${esc(s.mood || '')}</span><span class="note" style="margin:0">${mmss(s.start)}–${mmss(s.start + s.ms / 1000)} · 컷 ${s.from + 1}${s.to > s.from ? '–' + (s.to + 1) : ''} · ${(s.ms / 1000).toFixed(1)}초</span></div>
+      <input type="text" data-ss="${k}" value="${esc(s.styles.join(', '))}" aria-label="섹션 ${k + 1} 스타일" style="margin-top:4px">
+    </div>`).join('')}</div>
+    <label class="chk"><input type="checkbox" id="scoreMuteOld" ${audTracks().some(t => trackGroup(t) === 'bgm' && !t.mute) ? 'checked' : ''}> 기존 배경음악 트랙은 음소거</label>
+    <p class="note">섹션 길이는 컷 길이에 맞춰져 장면이 바뀌는 순간 음악도 바뀝니다. 스타일 칸을 고친 뒤 작곡할 수 있습니다. 대사 타이밍을 다 맞춘 뒤 만들면 가장 잘 맞습니다.</p>`;
+  const tags = v => v.split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
+  $$('[data-sg]', b).forEach(i => (i.onchange = () => { pl.global[i.dataset.sg] = tags(i.value); }));
+  $$('[data-ss]', b).forEach(i => (i.onchange = () => { pl.sections[+i.dataset.ss].styles = tags(i.value); }));
+  $('#scoreGo').disabled = AISCORE.busy; $('#scoreGo').textContent = AISCORE.busy ? '작곡 중…' : `이대로 작곡 (${mmss(total)})`;
+}
+$('#scoreRedo').onclick = () => openScore(true);
+$('#scoreGo').onclick = async () => {
+  const pl = AISCORE.plan; if (!pl || AISCORE.busy) return;
+  const st = t => ($('#scoreSt').textContent = t), muteOld = $('#scoreMuteOld')?.checked;
+  AISCORE.busy = true; renderScore();
+  try {
+    if (muteOld) audTracks().forEach(t => { if (trackGroup(t) === 'bgm') t.mute = true; });
+    for (let k = 0; k < pl.pieces.length; k++) {
+      const secs = pl.pieces[k].map(i => pl.sections[i]), start = secs[0].start, len = secs.reduce((a, s) => a + s.ms, 0) / 1000;
+      st(`🎼 작곡 중… ${pl.pieces.length > 1 ? `${k + 1}/${pl.pieces.length}곡 · ` : ''}${mmss(len)} 길이 (몇 분 걸릴 수 있습니다)`);
+      const r = await srvJSON('/api/tts', { op: 'music', instrumental: true, plan: { global: pl.global, sections: secs.map(s => ({ name: s.name, styles: [...s.styles, s.mood].filter(Boolean), negative: s.negative, ms: s.ms })) } });
+      const assetId = await addAsset(await fetchKey(r.key)); P.keys[assetId] = r.key;
+      const buf = await audioBuf(assetId); if (!buf) throw new Error('받은 음악을 읽지 못했습니다');
+      audTracks().push({ id: uid(), kind: 'bgm', assetId, name: ('배경음악 · ' + pl.title + (pl.pieces.length > 1 ? ` ${k + 1}` : '')).slice(0, 40), start, trimIn: 0, len: 0, vol: 0.55, fadeIn: k ? 0.3 : 0.8, fadeOut: k === pl.pieces.length - 1 ? 2 : 0.3, loop: false, duck: true, srcDur: +buf.duration.toFixed(3), mute: false });
+      logCall({ kind: '배경음악', provider: 'tts', ok: true, cost: buf.duration / 60 * (+S.cMusic || 0) });
+      save(); if (tab === 'audio') renderInspector(); renderPanels();
+    }
+    st('✓ 배경음악을 넣었습니다 — ▶ 전체로 들어 보세요'); toast('🎼 AI 배경음악을 넣었습니다', 3500);
+  } catch (e) { st('실패: ' + e.message); logCall({ kind: '배경음악', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  AISCORE.busy = false; renderScore(); save(); if (tab === 'audio') renderInspector();
+};
+async function openSfxAI(redo) {
+  if (!isServer()) return toast('AI 효과음은 서버 모드에서만 됩니다');
+  const dlg = $('#dlgSfxAI'); if (!dlg.open) dlg.showModal();
+  if (AISFX.plan && !redo) return renderSfxAI();
+  AISFX.busy = true; AISFX.plan = null; renderSfxAI();
+  const st = t => ($('#sfxAISt').textContent = t);
+  try {
+    const cuts = await storyForAI(st); st('🎧 AI 가 장면마다 필요한 소리를 고르는 중…');
+    const existing = audTracks().filter(t => trackGroup(t) === 'sfx').map(t => ({ start: +t.start || 0, name: t.name }));
+    AISFX.plan = await srvJSON('/api/tts', { op: 'sfxplan', cuts, existing, max: 30 });
+    AISFX.sel = new Set(AISFX.plan.items.map((_, i) => i)); AISFX.done = new Set();
+    logCall({ kind: 'AI 효과음 설계', provider: 'claude', ok: true, cost: +S.cDirect || 0 });
+    st('');
+  } catch (e) { st('실패: ' + e.message); }
+  AISFX.busy = false; renderSfxAI();
+}
+function renderSfxAI() {
+  const b = $('#sfxAIBody'), pl = AISFX.plan;
+  if (!pl) { b.innerHTML = `<p class="note" style="padding:20px;text-align:center">${AISFX.busy ? '컷 그림과 대사를 읽고 있습니다… (30초~1분)' : '목록이 없습니다. ‘다시 고르기’를 눌러 주세요.'}</p>`; $('#sfxAIGo').disabled = true; return; }
+  b.innerHTML = `<p style="margin:0 0 6px">${esc(pl.summary)}</p>
+    <div class="row" style="gap:6px"><button type="button" class="b ghost sm" id="sfxAIAll">전체 선택</button><button type="button" class="b ghost sm" id="sfxAINone">선택 해제</button></div>
+    <div style="max-height:56vh;overflow:auto;border:1px solid var(--line-2);border-radius:8px;margin-top:6px">${pl.items.map((x, i) => `<label class="chk" style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px;border-bottom:1px solid var(--line-2)">
+      <input type="checkbox" data-si="${i}" ${AISFX.sel.has(i) ? 'checked' : ''} ${AISFX.done.has(i) ? 'disabled' : ''}>
+      <span style="flex:1;min-width:0"><b>${AISFX.done.has(i) ? '✓ ' : ''}${x.loop ? '🌫 ' : '✨ '}${esc(x.label)}</b> <span class="note" style="margin:0">${mmss(x.start)} · 컷 ${x.cut + 1}${x.loop && x.toCut > x.cut ? '–' + (x.toCut + 1) : ''} · ${x.loop ? `환경음 ${x.len.toFixed(1)}초 반복` : x.dur + '초'} · 음량 ${Math.round(x.vol * 100)}%</span><br>
+      <input type="text" data-sp="${i}" value="${esc(x.prompt)}" style="width:100%;margin-top:3px;font-size:.8rem" aria-label="효과음 설명"></span></label>`).join('')}</div>
+    <p class="note">🌫 = 장소의 환경음(여러 컷에 걸쳐 반복), ✨ = 그 순간의 효과음. 설명은 영어로 고칠 수 있습니다. 만든 뒤 아래 타임라인·믹서에서 조절하세요.</p>`;
+  const cnt = () => { const n = [...AISFX.sel].filter(i => !AISFX.done.has(i)).length; $('#sfxAIGo').disabled = AISFX.busy || !n; $('#sfxAIGo').textContent = AISFX.busy ? '만드는 중…' : `선택한 ${n}개 만들기`; };
+  $$('[data-si]', b).forEach(c => (c.onchange = () => { c.checked ? AISFX.sel.add(+c.dataset.si) : AISFX.sel.delete(+c.dataset.si); cnt(); }));
+  $$('[data-sp]', b).forEach(i => (i.onchange = () => { pl.items[+i.dataset.sp].prompt = i.value.trim(); }));
+  $('#sfxAIAll', b).onclick = () => { pl.items.forEach((_, i) => AISFX.sel.add(i)); renderSfxAI(); };
+  $('#sfxAINone', b).onclick = () => { AISFX.sel.clear(); renderSfxAI(); };
+  cnt();
+}
+$('#sfxAIRedo').onclick = () => openSfxAI(true);
+$('#sfxAIGo').onclick = async () => {
+  const pl = AISFX.plan; if (!pl || AISFX.busy) return;
+  const todo = [...AISFX.sel].filter(i => !AISFX.done.has(i)).sort((a, b) => a - b), st = t => ($('#sfxAISt').textContent = t);
+  AISFX.busy = true; renderSfxAI(); let ok = 0, fail = 0;
+  for (const [n, i] of todo.entries()) {
+    const x = pl.items[i]; st(`🎧 ${n + 1}/${todo.length} · ${x.label} 만드는 중…`);
+    try {
+      const r = await srvJSON('/api/tts', { op: 'sfx', text: x.prompt, duration: x.dur, loop: x.loop, influence: 0.35 });
+      const assetId = await addAsset(await fetchKey(r.key)); P.keys[assetId] = r.key;
+      const buf = await audioBuf(assetId); if (!buf) throw new Error('읽지 못함');
+      audTracks().push({ id: uid(), kind: 'sfx', assetId, name: ('효과음 · ' + x.label).slice(0, 40), start: x.start, trimIn: 0, len: x.loop ? +x.len.toFixed(2) : 0, vol: x.vol, fadeIn: x.loop ? 0.6 : 0, fadeOut: x.loop ? 0.8 : 0.1, loop: x.loop, duck: x.loop, srcDur: +buf.duration.toFixed(3), mute: false });
+      AISFX.done.add(i); ok++;
+      logCall({ kind: '효과음', provider: 'tts', ok: true, cost: +S.cSfx || 0 });
+      save(); renderSfxAI(); renderPanels(); if (tab === 'audio') renderInspector();
+    } catch (e) { fail++; logCall({ kind: '효과음', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  }
+  AISFX.busy = false; renderSfxAI();
+  st(`✓ 효과음 ${ok}개를 넣었습니다${fail ? ` · ${fail}개 실패 (다시 누르면 실패한 것만 다시 만듭니다)` : ''}`);
+  toast(`🎧 AI 효과음 ${ok}개를 타임라인에 넣었습니다`, 3500);
+};
 async function genMusic() {
   const text = MUSIC.text.trim(); if (!text) return toast('어떤 음악인지 적어 주세요');
   if (!isServer()) return toast('배경음악 만들기는 서버 모드에서만 됩니다');
@@ -6830,6 +7080,7 @@ function tabAudio() {
   return `
   ${mixerHTML()}
   <details class="grp sfx" data-sec="sfx" ${S.secOpen?.sfx === false ? '' : 'open'}><summary class="lbl">✨ 효과음 만들기 (일레븐랩스 · 서버 모드)</summary>
+    <div class="box" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0 8px"><button type="button" class="b sm" id="aiSfx">🎧 AI가 효과음 자동 배치</button><span class="note" style="margin:0">모든 컷을 보고 환경음·효과음을 골라 시각까지 맞춰 줍니다 (고른 뒤 한꺼번에 생성)</span></div>
     <div class="row" style="flex-wrap:wrap;gap:4px">${SFX_PRESETS.map((x, i) => `<button type="button" class="chip" data-sfxp="${i}">${esc(x[0])}</button>`).join('')}</div>
     <textarea id="sfxText" rows="2" placeholder="어떤 소리인지 적으세요. 예: 비 오는 밤 골목, 멀리서 천둥 / heavy wooden door slams shut in an empty hall">${esc(SFX.text)}</textarea>
     <div class="g2">
@@ -6849,6 +7100,8 @@ function tabAudio() {
     </div>
     <div class="row" style="flex-wrap:wrap"><label class="note"><input type="checkbox" id="musInst" ${MUSIC.inst ? 'checked' : ''}> 가사 없는 연주곡</label>
       <label class="note"><input type="checkbox" id="musLoop" ${MUSIC.loop ? 'checked' : ''}> 영상이 더 길면 반복</label></div>
+    <div class="box" style="display:flex;flex-direction:column;gap:6px;margin:4px 0 8px"><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><button type="button" class="b sm" id="aiScore">🎼 AI가 전개에 맞춰 작곡</button><span class="note" style="margin:0">컷 그림·대사·감정을 보고 장면마다 분위기가 바뀌는 한 곡을 설계합니다</span></div>
+      <input type="text" id="aiScoreHint" placeholder="원하는 느낌이 있으면 (선택) 예: 오케스트라 중심, 후반은 웅장하게" value="${esc(AISCORE.hint)}"></div>
     <div class="row"><button type="button" class="b sm" id="musGen" ${MUSIC.busy ? 'disabled' : ''}>${MUSIC.busy ? '작곡 중… (1분 넘게 걸릴 수 있음)' : '배경음악 만들어 처음부터 넣기'}</button><span class="st ${stCls(MUSIC.st)}">${esc(MUSIC.st || '')}</span></div>
     <p class="note">영상 0초부터 새 트랙으로 들어가고, 대사가 나올 때 볼륨이 자동으로 낮아집니다. 실존 가수·곡 이름은 거절될 수 있습니다.</p>
   </details>
@@ -6924,6 +7177,9 @@ function bindAudio(p, el) {
   $('#musLoop', el).onchange = e => { MUSIC.loop = e.target.checked; };
   $$('[data-musp]', el).forEach(b => (b.onclick = () => { MUSIC.text = MUSIC_PRESETS[+b.dataset.musp][1]; renderInspector(); }));
   $('#musGen', el).onclick = genMusic;
+  $('#aiScoreHint', el).oninput = e => { AISCORE.hint = e.target.value; };
+  $('#aiScore', el).onclick = () => openScore();
+  $('#aiSfx', el).onclick = () => openSfxAI();
   $('#audUp', el).onchange = async e => { const fs = [...e.target.files]; e.target.value = ''; if (fs.length) await addAudioFiles(fs); };
   tr.forEach(t => { if (!t.srcDur) audioBuf(t.assetId).then(b => { if (b && !t.srcDur) { t.srcDur = +b.duration.toFixed(3); save(); if (tab === 'audio') refreshInspector(); } }); });
   const pick = id => { selAud = id; $$('.aud', el).forEach(c => c.classList.toggle('sel', c.dataset.aid === id)); $$('.atl .bar', el).forEach(b => b.classList.toggle('on', b.dataset.aid === id)); };
