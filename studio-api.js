@@ -620,6 +620,8 @@ const EDIT_TOOLS = [
       panel: { type: 'integer' }, at: { type: 'number', description: '컷 시작 기준 초' }, to_panel: { type: 'integer', description: '환경음이 끝나는 컷' },
       label: { type: 'string', description: '짧은 한국어 이름' }, prompt: { type: 'string', description: '효과음 생성기용 자세한 영어 설명' },
       dur: { type: 'number', description: '0.5~30초' }, loop: { type: 'boolean' }, vol: { type: 'number', description: '0.2~1' } } } } } } },
+  { name: 'plan_sfx', description: '컷 그림과 이야기 흐름을 보는 효과음 전문 AI 에게 효과음·환경음 설계를 맡긴다(사용자가 목록을 확인한 뒤 생성). 전체 편집에서는 add_sfx 대신 이것을 쓴다.', input_schema: { type: 'object', properties: {
+    panels: { type: 'array', items: { type: 'integer' }, description: '대상 컷(생략하면 전체)' }, max: { type: 'integer', description: '최대 개수(기본 20)' }, hint: { type: 'string', description: '원하는 소리 방향(선택)' } } } },
   { name: 'compose_bgm', description: '이야기 전개에 맞춘 배경음악 설계를 시작한다(사용자가 설계안을 확인한 뒤 작곡). 배경음악이 없거나 사용자가 원할 때.', input_schema: { type: 'object', properties: {
     hint: { type: 'string', description: '원하는 음악 느낌(선택)' } } } },
 ];
@@ -644,9 +646,11 @@ export async function handleEdit(req, env) {
       '(7) 마지막에 무엇을 어떻게 바꿨는지, 어떤 가정을 했는지 한국어로 1~3문장으로 알립니다. ' +
       '(8) 더빙(대사 음성): 요약의 cast(나레이터·캐릭터와 목소리·설명)와 각 오버레이의 reader·emotion·voice를 보고 set_dub로 고칩니다. 캐릭터 단위 요청("백운 도사는 더 무겁게")은 speakers로, 장면 단위("7~13컷 긴장감 있게")는 panels로 묶어 한두 번에 처리하고, 대사마다 따로 부르지 않습니다. ' +
       '감정은 emotion_presets 중 가장 가까운 것을 고르고, 미묘한 말투는 note에 구체적으로 적습니다. 캐릭터 나이·성격(cast desc)과 장면 흐름에 맞게, 과장하지 말고 자연스럽게. 사용자가 음성을 새로 만들어 달라고 했을 때만 remake:true를 씁니다(크레딧이 듭니다). ' +
-      '(9) 전체 편집("알아서 전체 편집/다듬어", 자동 모드): 영상 전체를 완성도 있게 만듭니다 — ① 어색하거나 빠진 감정·말투를 set_dub로 다듬고 ② 음성이 없거나 ⚠인 대사가 있으면 make_voices ③ 그다음 sync_to_voices로 대사 타이밍과 컷 길이를 음성에 맞추고 ④ 장면에 소리가 비어 있으면 add_sfx로 꼭 필요한 환경음·효과음만(컷당 0~2개, 과하지 않게) ⑤ 배경음악 트랙이 없으면 compose_bgm ⑥ 자막·말풍선 색·크기·전환이 들쭉날쭉하면 정리. ' +
-      '이미 잘 된 것은 건드리지 말고, 크레딧이 드는 make_voices·add_sfx·compose_bgm은 적용 전에 사용자가 한 번 확인합니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
-    const user = '현재 타임라인:\n' + JSON.stringify(sm).slice(0, 150000) + '\n\n지시: ' + instruction;
+      '(9) 전체 편집("알아서 전체 편집/다듬어", 자동 모드): 영상 전체를 완성도 있게 만듭니다 — ① 어색하거나 빠진 감정·말투를 set_dub로 다듬고 ② 음성이 없거나 ⚠인 대사가 있으면 make_voices ③ 그다음 sync_to_voices로 대사 타이밍과 컷 길이를 음성에 맞추고 ④ 장면에 소리가 비어 있으면 plan_sfx(그림과 이야기 흐름을 보는 효과음 설계)로 꼭 필요한 환경음·효과음만 — 특정 소리를 콕 집어 넣으라는 요청에만 add_sfx ⑤ 배경음악 트랙이 없으면 compose_bgm ⑥ 자막·말풍선 색·크기·전환이 들쭉날쭉하면 정리. ' +
+      '이미 잘 된 것은 건드리지 말고, 크레딧이 드는 make_voices·add_sfx·plan_sfx·compose_bgm은 적용 전에 사용자가 한 번 확인합니다. ' +
+      '(10) 이야기 흐름 분석([이야기 흐름])이 주어지면 그것이 기준입니다: 감정·말투는 각 대사가 속한 구간의 분위기·긴장도와 캐릭터 감정 흐름에 맞추고, 긴장도가 오르는 구간은 점점 강하게, 해소·여운 구간은 힘을 빼서 에피소드 전체가 하나의 감정선으로 이어지게 합니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
+    const arcT = arcText(sm.arc); // 이야기 흐름 분석이 있으면 모든 판단의 기준으로 앞에 둔다
+    const user = (arcT ? arcT + '\n(위 이야기 흐름과 캐릭터 감정선에 맞춰 판단하세요)\n\n' : '') + '현재 타임라인:\n' + JSON.stringify({ ...sm, arc: undefined }).slice(0, 150000) + '\n\n지시: ' + instruction;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 12000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
@@ -785,21 +789,35 @@ function pcmToWav(pcm, rate = 24000) {
 }
 async function geminiTts(env, b, who) {
   const key = env[ENV.gemini]; if (!key) return json({ error: 'GEMINI_API_KEY 없음', kind: 'auth' }, 502);
-  const model = b.model || 'gemini-2.5-flash-preview-tts';
-  const text = String(b.text || '').slice(0, 4000), style = String(b.instructions || '').slice(0, 500);
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+  const model = String(b.model || 'gemini-2.5-flash-preview-tts').trim();
+  const text = String(b.text || '').slice(0, 4000);
+  // 말투 지시는 짧게: 너무 길면 Gemini 가 음성 대신 글로 답하거나 빈 응답을 낸다
+  const style = String(b.instructions || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const call = prompt => fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: style ? style + ': ' + text : text }] }],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: b.voice || 'Kore' } } } },
     }),
   });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 || r.status === 403 ? 'auth' : 'bad' }, 502);
-  const d = j.candidates?.[0]?.content?.parts?.find(p => p.inlineData || p.inline_data);
-  const data = (d?.inlineData || d?.inline_data)?.data;
-  if (!data) return json({ error: '음성이 반환되지 않았습니다 (' + (j.candidates?.[0]?.finishReason || j.promptFeedback?.blockReason || '이유 불명') + ')', kind: 'empty' }, 502);
-  return json({ key: await r2Put(env, pcmToWav(unb64(data)), 'audio/wav', 'wav', who) });
+  const audioOf = j => { const d = j?.candidates?.[0]?.content?.parts?.find(p => p.inlineData || p.inline_data); return (d?.inlineData || d?.inline_data)?.data || ''; };
+  const tries = style ? [`${style}:\n${text}`, text] : [text]; // 지시를 붙여 한 번, 음성이 안 오면 글만으로 한 번 더
+  let last = null, lastStatus = 0;
+  for (let i = 0; i < tries.length; i++) {
+    let r = await call(tries[i]);
+    if (r.status === 429 || r.status === 500 || r.status === 503) { await new Promise(x => setTimeout(x, 1500)); r = await call(tries[i]); } // 바쁘면 잠깐 뒤 한 번 더
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = j.error?.message || 'HTTP ' + r.status;
+      const hint = r.status === 404 || /not found|is not supported/i.test(msg) ? ` — Gemini 음성 모델 ‘${model}’ 을 찾을 수 없습니다. 설정의 ‘Gemini 음성 모델’을 확인하세요` : r.status === 429 ? ' — 요청이 많아 잠시 막혔습니다. 조금 뒤 다시 시도하세요' : /voice/i.test(msg) ? ` — 목소리 이름 ‘${b.voice}’ 을 확인하세요` : '';
+      return json({ error: 'Gemini: ' + msg + hint, kind: r.status === 429 ? 'rate' : r.status === 401 || r.status === 403 ? 'auth' : 'bad' }, 502);
+    }
+    const data = audioOf(j);
+    if (data) return json({ key: await r2Put(env, pcmToWav(unb64(data)), 'audio/wav', 'wav', who), retried: i > 0 });
+    last = j; lastStatus = r.status;
+  }
+  const why = last?.candidates?.[0]?.finishReason || last?.promptFeedback?.blockReason || '이유 불명';
+  return json({ error: `Gemini 가 음성을 돌려주지 않았습니다 (${why})${why === 'SAFETY' || last?.promptFeedback?.blockReason ? ' — 안전 필터에 걸렸을 수 있습니다' : ' — 잠시 뒤 다시 시도하거나 다른 목소리·엔진으로 바꿔 보세요'}`, kind: 'empty', status: lastStatus }, 502);
 }
 const ttsKind = s => (s === 429 ? 'rate' : s === 401 || s === 403 ? 'auth' : 'bad');
 const noKey = name => json({ error: name + ' 없음 (서버 환경변수에 넣어 주세요)', kind: 'auth' }, 502);
@@ -920,6 +938,7 @@ async function directLines(env, b) {
   if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 200) return json({ error: '대사는 1~200개여야 합니다' }, 400);
   const lines = b.lines.map(l => {
     const x = { id: String(l?.id || '').slice(0, 40), cut: +l?.cut || 0, who: String(l?.who || '').slice(0, 30), kind: String(l?.kind || '').slice(0, 20), text: String(l?.text || '').slice(0, 400), target: !!l?.target };
+    if (l?.beat) x.beat = String(l.beat).slice(0, 60); // 이 대사가 속한 이야기 구간(긴장도 포함)
     const note = String(l?.note || '').trim().slice(0, 300), emo = String(l?.want || '').trim().slice(0, 20);
     if (x.target && note) x.note = note;   // 연출자가 직접 적은 말투 — 그대로 따른다
     if (x.target && emo) x.want = emo;     // 연출자가 고른 감정
@@ -941,6 +960,7 @@ async function directLines(env, b) {
     '5. Bubble kinds: thought = inner voice, close and quiet; shout = projected but with the real emotion under it; whisper = whispered; caption = neutral.\n' +
     '6. Narration = skilled audiobook storyteller, flowing intonation, breaths at commas, mood fitting the scene; title-like lines are calm scene introductions.\n' +
     (hint ? 'Director\'s note for this project (follow it): ' + hint + '\n' : '') +
+    (arcText(b.arc) ? 'Whole-episode story arc (shared by every step - keep each character consistent with their journey across the episode and match each line to its beat and tension; lines carry "beat"):\n' + arcText(b.arc) + '\n' : '') +
     '7. If a target line has "note", it is the director\'s explicit instruction for THAT line - follow it faithfully over your own judgment, and make every output field realize it (some TTS engines cannot read text, so tags, perf, tc, intensity, speed and pitch must carry the note: e.g. "숨죽여 작게" → whisper/tonedown, low intensity, slightly slower, pitch -1; "들떠서 빠르게" → happy/toneup, faster, pitch +2). If it has "want", keep that emotion as the core.\n' +
     'Output per target line:\n' +
     '- "emotion": nuanced Korean label, can be mixed (e.g. 겁먹은 걱정, 애써 태연한 척, 안도 섞인 울먹임).\n' +
@@ -1013,13 +1033,43 @@ async function askClaude(env, system, cuts, extra, maxTokens) {
   try { return JSON.parse(m[0]); } catch (e) { throw Object.assign(new Error('AI 응답 형식 오류'), { status: 502 }); }
 }
 const strs = (a, n, len) => (Array.isArray(a) ? a : []).map(s => String(s || '').trim().slice(0, len)).filter(Boolean).slice(0, n);
+/* ---- 이야기 흐름 분석: 모든 AI 단계(감정 연출·편집·효과음·작곡)가 함께 쓰는 전체 감정선 ----
+   반환 { title, logline, tone, beats:[{from,to,name,phase,mood,tension,note}], characters:[{name,journey:[{from,to,emotion}],note}] } */
+const ARC_PHASES = ['도입', '전개', '회상', '위기', '절정', '반전', '해소', '여운'];
+function arcText(a) { // 다른 AI 에 넘길 짧은 요약 (컷 번호는 1부터)
+  if (!a || !Array.isArray(a.beats)) return '';
+  const beats = a.beats.slice(0, 24).map(b => `컷${+b.from + 1}-${+b.to + 1} ${String(b.phase || '')} "${String(b.name || '')}" 분위기:${String(b.mood || '')} 긴장도:${Math.round((+b.tension || 0) * 10)}/10${b.note ? ' — ' + String(b.note).slice(0, 80) : ''}`).join('\n');
+  const chars = (Array.isArray(a.characters) ? a.characters : []).slice(0, 12).map(c => `${String(c.name || '')}: ${(Array.isArray(c.journey) ? c.journey : []).slice(0, 8).map(j => `컷${+j.from + 1}-${+j.to + 1} ${String(j.emotion || '')}`).join(' → ')}${c.note ? ' (' + String(c.note).slice(0, 80) + ')' : ''}`).join('\n');
+  return `[이야기 흐름] ${String(a.logline || '').slice(0, 200)} / 톤: ${String(a.tone || '').slice(0, 80)}\n${beats}${chars ? '\n[캐릭터 감정 흐름]\n' + chars : ''}`.slice(0, 4000);
+}
+async function arcPlan(env, b) {
+  const cuts = storyCuts(b), n = cuts.length;
+  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 20).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 200) }));
+  const system = 'You are a story editor and director for a Korean motion webtoon. You get every cut in order (image if provided, scene note, dialogue/narration with speaker, duration) and the character notes. ' +
+    'Read the WHOLE episode first and map its dramatic structure so that voice acting, sound effects and music can follow one consistent emotional arc. ' +
+    'Split the episode into 3-12 beats covering contiguous cut ranges [from,to] (0-based, inclusive, in order, covering every cut once). For each beat give a Korean name, phase (one of ' + ARC_PHASES.join(', ') + '), mood (short Korean), tension 0..1 (the curve should rise and fall like real drama, not stay flat), and a one-sentence Korean note on what the audience should feel. ' +
+    'For each speaking character (and "나레이터" if there is narration) describe their emotional journey across cut ranges in short Korean emotion words, plus a note on how their voice should evolve. ' +
+    (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
+    'Reply with ONLY JSON, no markdown: {"title":"short Korean","logline":"one Korean sentence","tone":"overall tone in Korean","beats":[{"from":0,"to":0,"name":"","phase":"","mood":"","tension":0.5,"note":""}],"characters":[{"name":"","journey":[{"from":0,"to":0,"emotion":""}],"note":""}]}';
+  const out = await askClaude(env, system, cuts, { request: 'story arc', characters: chars }, 5000);
+  let next = 0; const beats = [];
+  (Array.isArray(out?.beats) ? out.beats : []).map(x => ({ from: Math.trunc(+x?.from), to: Math.trunc(+x?.to), name: String(x?.name || '').slice(0, 30), phase: ARC_PHASES.includes(x?.phase) ? x.phase : '전개', mood: String(x?.mood || '').slice(0, 30), tension: +Math.min(1, Math.max(0, +x?.tension || 0)).toFixed(2), note: String(x?.note || '').slice(0, 160) }))
+    .filter(x => Number.isFinite(x.from) && Number.isFinite(x.to)).sort((a, c) => a.from - c.from)
+    .forEach(x => { if (x.to < next || next >= n || x.from >= n) return; /* 없는 컷을 가리키는 구간은 버린다 */ x.from = next; x.to = Math.min(n - 1, Math.max(x.from, x.to)); beats.push(x); next = x.to + 1; });
+  if (!beats.length) beats.push({ from: 0, to: n - 1, name: '전체', phase: '전개', mood: '', tension: 0.5, note: '' });
+  beats[beats.length - 1].to = n - 1;
+  const characters = (Array.isArray(out?.characters) ? out.characters : []).slice(0, 20).map(c => ({ name: String(c?.name || '').slice(0, 30),
+    journey: (Array.isArray(c?.journey) ? c.journey : []).slice(0, 12).map(j => ({ from: Math.max(0, Math.min(n - 1, Math.trunc(+j?.from) || 0)), to: Math.max(0, Math.min(n - 1, Math.trunc(+j?.to) || 0)), emotion: String(j?.emotion || '').slice(0, 30) })).filter(j => j.emotion),
+    note: String(c?.note || '').slice(0, 160) })).filter(c => c.name);
+  return json({ title: String(out?.title || '').slice(0, 40), logline: String(out?.logline || '').slice(0, 200), tone: String(out?.tone || '').slice(0, 80), beats, characters, model: SCORE_MODEL });
+}
 /* 배경음악 설계: 이야기 전개에 맞춰 컷 구간마다 섹션(분위기·악기·템포)을 나눈다. 섹션 길이 = 그 컷들 길이의 합 (3~120초) */
 async function scorePlan(env, b) {
   const cuts = storyCuts(b);
   const system = 'You are the music supervisor/composer for a Korean motion webtoon (moving comic video). You get every cut in order (image if provided, scene note, dialogue/narration with speaker and emotion, duration). ' +
     'Design ONE continuous background score that follows the story: split it into sections at real story beats (mood/tension/location changes), usually 2-10 sections. Sections cover contiguous cut ranges [from,to] (inclusive), in order, covering every cut exactly once. ' +
     'Keep it underscore: it must sit under narration and dialogue, so avoid busy melodies where there is a lot of speech; build and release energy with the story; transitions between sections should feel musical, not abrupt. ' +
-    (b.vocals ? 'Vocals are allowed. ' : 'Strictly instrumental: no vocals, no singing, no lyrics. ') + (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
+    (arcText(b.arc) ? 'Use this story arc analysis (shared by every step) - section boundaries and energy should follow its beats and tension curve:\n' + arcText(b.arc) + '\n' : '') + (b.vocals ? 'Vocals are allowed. ' : 'Strictly instrumental: no vocals, no singing, no lyrics. ') + (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
     'Styles are short English music-style tags for a text-to-music model (genre, instruments, tempo e.g. "90 bpm", mood, energy, mix). Never name real artists or songs. ' +
     'Reply with ONLY JSON, no markdown: {"title":"short Korean title","summary":"2 sentences in Korean explaining the musical arc","global":{"positive":[up to 8 tags],"negative":[up to 8 tags]},' +
     '"sections":[{"from":cut,"to":cut,"name":"short Korean section name","mood":"short Korean mood","styles":[up to 8 English tags],"negative":[up to 5 English tags]}]}';
@@ -1056,6 +1106,7 @@ async function sfxPlan(env, b) {
   const system = 'You are the sound designer for a Korean motion webtoon (moving comic video). You get every cut in order (image if provided, scene note, dialogue/narration, duration, start time). ' +
     `Propose at most ${max} sound effects that make it feel alive: ambience beds for locations (one ambience spanning consecutive cuts in the same place, loop=true), foley (footsteps, cloth, doors, water, objects), impacts and whooshes on action, and a few subtle emotional stingers. ` +
     'Be selective and cinematic: do not stack many sounds at once, keep them under speech, and do not duplicate the existing sounds listed. Time each effect to the moment it happens inside the cut ("at" seconds from the cut start). ' +
+    (arcText(b.arc) ? 'Follow this story arc (shared by every step): quiet beats get sparse ambience, high-tension beats and climaxes get stronger accents and stingers:\n' + arcText(b.arc) + '\n' : '') +
     (b.hint ? 'Director\'s note: ' + String(b.hint).slice(0, 300) + '. ' : '') +
     'Reply with ONLY JSON, no markdown: {"summary":"1-2 sentences in Korean","items":[{"cut":number,"at":seconds,"to_cut":number (ambience only, last cut it covers),"label":"short Korean name","prompt":"detailed English description for a sound-effect generator","dur":0.5..30,"loop":boolean,"vol":0.2..1}]}';
   const out = await askClaude(env, system, cuts, { request: 'sound effect plan', existing_sounds: existing }, 6000);
@@ -1186,6 +1237,7 @@ export async function handleTts(req, env) {
     if (b.op === 'direct') return await directLines(env, b);
     if (b.op === 'scoreplan') return await scorePlan(env, b);
     if (b.op === 'sfxplan') return await sfxPlan(env, b);
+    if (b.op === 'arc') return await arcPlan(env, b);
     const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
     const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
     if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);

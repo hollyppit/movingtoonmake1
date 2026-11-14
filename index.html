@@ -432,6 +432,11 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 .mixer .mxg[open] > summary .mxr > span[title]::before { content:'▾ '; }
 .mixer .mxr { padding:2px 0; }
 .mixer .mxg > summary .mxr > span[title] { font-weight:600; }
+/* 이야기 흐름: 긴장도 곡선 */
+.arc-curve { display: flex; gap: 2px; align-items: flex-end; height: 110px; padding: 6px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel-2); margin: 6px 0; }
+.arc-bar { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; min-width: 18px; height: 100%; }
+.arc-bar i { display: block; background: linear-gradient(180deg, #c0452f, #b48a2c); border-radius: 4px 4px 0 0; opacity: .85; }
+.arc-bar span { font-size: .66rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
 /* 캐릭터 카드: 접힌 모양 */
 .ch-card .ch-thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: 1px solid var(--line-2); }
 .ch-card .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -677,7 +682,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
-  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
+  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
   <details class="ai-cap" id="aiCap"><summary>대본으로 자막 자동 생성</summary>
     <div class="ai-cap-b">
       <label><span>음성 트랙</span><select id="capTrack"></select></label>
@@ -739,7 +744,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     <details id="castDirSet"><summary class="note" style="cursor:pointer">🎭 AI 감정 연출 설정 (연출 메모 · 정밀도)</summary>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><input type="text" id="castHint" style="flex:1;min-width:240px" placeholder="연출 메모 — 예: 과장 없이 자연스럽게, 건우는 겁 많은 13살, 사부님은 느긋하게">
       <select id="castQual"><option value="">표준</option><option value="high">정밀 (더 섬세 · 비쌈)</option></select></div>
-      <p class="note" style="margin:4px 0 0">캐릭터 카드의 설명(나이·성격)도 함께 봅니다. 성격·말투를 적어 두면 더 자연스러워집니다.</p></details>
+      <p class="note" style="margin:4px 0 0">캐릭터 카드의 설명(나이·성격)과 <a href="#" id="castArcLink">📖 이야기 흐름(전체 감정선)</a>도 함께 봅니다. 성격·말투를 적어 두면 더 자연스러워집니다.</p></details>
     <div id="castList" style="max-height:52vh;overflow:auto;border:1px solid var(--line-2);border-radius:6px"></div>
   </div>
   <div class="dlg-f" style="flex-wrap:wrap;gap:6px">
@@ -779,6 +784,14 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </section>
   </div>
   <div class="dlg-f"><span class="note" style="flex:1;margin:0">탐색 목록의 목소리를 고르면 내 일레븐랩스 계정 ‘내 음성’에 추가한 뒤 씁니다. 요금제마다 추가할 수 있는 목소리 수가 다릅니다.</span><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
+<dialog id="dlgArc" style="width:min(900px,96vw)">
+  <div class="dlg-h"><h3>📖 이야기 흐름 — 모든 AI 작업이 함께 쓰는 감정선</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b" id="arcBody"></div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="arcSt" style="flex:1"></span>
+    <button type="button" class="b sm" id="arcRedo">↻ 다시 분석</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
 <dialog id="dlgScore" style="width:min(900px,96vw)">
@@ -3089,7 +3102,7 @@ function bindEmo(p, o, el) {
   const ai = $('#emoAI', el); if (!ai) return;
   ai.onclick = async () => {
     o._ebusy = true; renderInspector();
-    try { await aiDirect([{ p, o }]); toast(`🎭 ‘${o.emo?.emotion || ''}’ (으)로 정했습니다 — 음성을 다시 만들면 적용됩니다`, 3500); }
+    try { await ensureArc({ quiet: true }); await aiDirect([{ p, o }]); toast(`🎭 ‘${o.emo?.emotion || ''}’ (으)로 정했습니다 — 음성을 다시 만들면 적용됩니다`, 3500); }
     catch (e) { toast('AI 감정 연출 실패: ' + e.message, 4500); }
     o._ebusy = false; renderInspector();
   };
@@ -3130,6 +3143,7 @@ async function autoDirectBatch(list) {
   if (!S.autoEmo || !isServer()) return;
   const need = list.filter(({ o }) => !o.emo && o.kind !== 'caption');
   if (!need.length) return;
+  await ensureArc({ quiet: true }); // 전체 감정선을 먼저 (없거나 대본이 바뀌었을 때만)
   toast(`🎭 AI 가 대사 ${need.length}개의 감정을 판단하는 중…`, 3000);
   await aiDirect(need, { quiet: true }).catch(e => toast('AI 감정 연출 실패 — 감정 없이 만듭니다: ' + e.message, 4500));
 }
@@ -3140,14 +3154,14 @@ async function aiDirect(targets, { quiet, notes } = {}) {
   targets = targets.filter(({ o }) => o.text?.trim());
   if (!targets.length) return 0;
   const tl = timeline(), idx = new Map(tl.map((s, i) => [s.p.id, i])), want = new Set();
-  targets.forEach(({ p }) => { const i = idx.get(p.id) ?? 0; for (let d = -1; d <= 1; d++) if (tl[i + d]) want.add(i + d); });
+  targets.forEach(({ p }) => { const i = idx.get(p.id) ?? 0; for (let d = -2; d <= 2; d++) if (tl[i + d]) want.add(i + d); });
   const tgt = new Set(targets.map(({ p, o }) => p.id + ':' + o.id));
   const all = [], scenes = [];
   [...want].sort((a, b) => a - b).forEach(i => {
     const p = tl[i].p; if (p.prompt?.trim()) scenes.push({ cut: i + 1, desc: p.prompt.trim() });
     p.overlays.filter(o => o.text?.trim()).sort((a, b) => (+a.start || 0) - (+b.start || 0)).forEach(o => {
       const sp = speakerOf(o), id = p.id + ':' + o.id;
-      all.push({ id, cut: i + 1, who: sp.label === '기본 목소리' ? '(미지정)' : sp.label, kind: { speech: '대사', shout: '외침', thought: '생각(속마음)', whisper: '속삭임', narration: '나레이션', caption: '자막' }[o.kind] || KINDS[o.kind] || o.kind, text: o.text.trim(), target: tgt.has(id) });
+      all.push({ id, cut: i + 1, who: sp.label === '기본 목소리' ? '(미지정)' : sp.label, kind: { speech: '대사', shout: '외침', thought: '생각(속마음)', whisper: '속삭임', narration: '나레이션', caption: '자막' }[o.kind] || KINDS[o.kind] || o.kind, text: o.text.trim(), target: tgt.has(id), ...(beatOf(i) ? { beat: beatOf(i) } : {}) });
     });
   });
   const chars = P.chars.map(c => ({ name: c.name || '', desc: c.desc || '' }));
@@ -3155,7 +3169,7 @@ async function aiDirect(targets, { quiet, notes } = {}) {
   for (let i = 0; i < targets.length; i += 60) { // 한 번에 60줄씩
     const chunk = new Set(targets.slice(i, i + 60).map(({ p, o }) => p.id + ':' + o.id));
     const lines = all.map(l => { const t = chunk.has(l.id), n = t && notes?.get(l.id); return { ...l, target: t, ...(n ? { note: n.note || '', want: n.want || '' } : {}) }; });
-    const r = await srvJSON('/api/tts', { op: 'direct', lines: lines.slice(0, 200), chars, scenes, hint: (S.directHint || '').trim(), quality: S.directQuality === 'high' ? 'high' : '' });
+    const r = await srvJSON('/api/tts', { op: 'direct', lines: lines.slice(0, 200), chars, scenes, arc: arcForAI(), hint: (S.directHint || '').trim(), quality: S.directQuality === 'high' ? 'high' : '' });
     r.lines.forEach(d => {
       const [pid, oid] = d.id.split(':'), o = P.panels.find(p => p.id === pid)?.overlays.find(x => x.id === oid); if (!o) return;
       const n = notes?.get(d.id);
@@ -3434,9 +3448,19 @@ function genUI() { if (document.querySelector('#dlgCast[open]')) renderCast(); c
 async function runGen(name, list, fn) {
   if (GEN.name) return toast('다른 일괄 만들기가 진행 중입니다 — 먼저 멈추거나 끝날 때까지 기다려 주세요');
   Object.assign(GEN, { name, done: 0, total: list.length, stop: false }); genUI();
-  let ok = 0;
-  try { for (const it of list) { if (GEN.stop) break; await fn(it); GEN.done++; if (it.o?.voice && !/^(실패|취소)/.test(it.o._vst || '')) ok++; genUI(); } }
-  finally { const stopped = GEN.stop; Object.assign(GEN, { name: '', done: 0, total: 0, stop: false }); genUI(); toast(stopped ? `중지했습니다 — ${ok}개 만들었고 나머지는 건너뛰었습니다` : `음성 ${ok}개를 만들었습니다`, 3500); }
+  let ok = 0, fail = 0, firstErr = '';
+  try {
+    for (const it of list) {
+      if (GEN.stop) break; await fn(it); GEN.done++;
+      const st = it.o?._vst || '';
+      if (/^실패/.test(st)) { fail++; firstErr ||= st.replace(/^실패:\s*/, ''); }
+      else if (it.o?.voice && !/^취소/.test(st)) ok++;
+      genUI();
+    }
+  } finally {
+    const stopped = GEN.stop; Object.assign(GEN, { name: '', done: 0, total: 0, stop: false }); genUI();
+    toast((stopped ? `중지했습니다 — ${ok}개 만들었고 나머지는 건너뛰었습니다` : `음성 ${ok}개를 만들었습니다`) + (fail ? ` · ${fail}개 실패: ${firstErr.slice(0, 120)}` : ''), fail ? 8000 : 3500);
+  }
 }
 /* ---- 이전 음성으로 되돌리기: 대사마다 최근 음성 5개를 (만들 때의 읽는 사람·감정과 함께) 보관 ---- */
 const VHIST_MAX = 5;
@@ -3461,6 +3485,7 @@ async function genVoice(p, o, force, noDirect) {
   o._vbusy = true; o._vst = '음성 만드는 중…'; refreshPanel(p); genUI();
   if (!noDirect && S.autoEmo && isServer() && !o.emo && o.kind !== 'caption') {
     o._vst = '🎭 AI 가 감정을 판단하는 중…'; refreshPanel(p);
+    await ensureArc({ quiet: true }); // 전체 감정선 (없거나 대본이 바뀌었을 때만 분석)
     await aiDirect([{ p, o }], { quiet: true }).catch(e => toast('AI 감정 연출 실패 — 감정 없이 만듭니다: ' + e.message, 4000));
     o._vst = '음성 만드는 중…'; refreshPanel(p);
   }
@@ -3591,7 +3616,7 @@ function renderCast() {
     const v = voiceProfile(r.o), k = r.p.id + ':' + r.o.id;
     return `<label class="chk" style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px;border-bottom:1px solid var(--line-2)" data-i="${i}">
       <input type="checkbox" data-k="${k}" ${CAST.sel.has(k) ? 'checked' : ''}>
-      <span style="flex:1;min-width:0"><span class="note" style="margin:0">${r.pi + 1}컷 · ${esc(OV_SHORT[r.o.kind] || KINDS[r.o.kind] || r.o.kind)} · ${(+r.o.start || 0).toFixed(1)}초</span><br>${esc(r.o.text.trim().slice(0, 80))}</span>
+      <span style="flex:1;min-width:0"><span class="note" style="margin:0">${r.pi + 1}컷 · ${esc(OV_SHORT[r.o.kind] || KINDS[r.o.kind] || r.o.kind)} · ${(+r.o.start || 0).toFixed(1)}초</span><br>${esc(r.o.text.trim().slice(0, 80))}${/^실패/.test(r.o._vst || '') ? `<br><span class="st err" style="margin:2px 0 0;display:block;white-space:normal">${esc(r.o._vst)}</span>` : ''}</span>
       <span class="note" style="margin:0;white-space:nowrap">${emoOn(r.o) ? (r.o.emo.manual ? '✋ ' : '🎭 ') + esc(r.o.emo.emotion || '') + ' · ' : ''}${esc(v.label)}${!r.o.speaker ? ' (자동)' : ''}${r.o.voice ? (voiceStale(r.o) ? ' · ⚠' : ' · 🔊') : ''}</span>
       <span class="cast-play" style="display:flex;gap:4px;flex:none">
         ${r.o.voice ? `<button type="button" class="ib cPlay" data-pk="${k}" title="${voiceStale(r.o) ? '지금 음성 듣기 (설정이 바뀌기 전 음성)' : '듣기'}">${CAST.playing === k ? '⏹' : '▶'}</button>` : ''}
@@ -3679,6 +3704,7 @@ $('#castPlayAll').onclick = () => {
   castPlay(list);
 };
 $('#dlgCast').addEventListener('close', castStop);
+$('#castArcLink').onclick = e => { e.preventDefault(); openArc(); };
 $('#castHint').onchange = e => { S.directHint = e.target.value.trim(); saveSettings(); };
 $('#castQual').onchange = e => { S.directQuality = e.target.value; saveSettings(); };
 $('#castDl').onclick = () => { const list = castPicked().filter(({ o }) => o.voice); if (!list.length) return toast('선택한 대사에 만든 음성이 없습니다'); saveZip(list.map(({ p, o }) => voiceEntry(p, o)), '선택한_대사'); };
@@ -3687,7 +3713,7 @@ $('#castEmo').onclick = async () => {
   const redo = list.filter(({ o }) => o.emo && !o.emo.ai).length;
   if (redo && !confirm(`직접 고친 감정 ${redo}개도 AI 판단으로 바뀝니다. 계속할까요?`)) return;
   const b = $('#castEmo'); b.disabled = true; b.textContent = `🎭 ${list.length}개 판단 중…`;
-  try { const n = await aiDirect(list); toast(`🎭 대사 ${n}개의 감정을 정했습니다 — ‘음성 만들기’로 적용하세요`, 4000); }
+  try { await ensureArc({ quiet: true }); const n = await aiDirect(list); toast(`🎭 대사 ${n}개의 감정을 정했습니다 — ‘음성 만들기’로 적용하세요`, 4000); }
   catch (e) { toast('AI 감정 연출 실패: ' + e.message, 4500); }
   b.textContent = '🎭 선택한 대사 AI 감정 연출'; renderCast(); castCount();
 };
@@ -6463,7 +6489,8 @@ let prClip = null, prOvClip = null; // 복사한 컷 칸·이미지·글상자 /
       const dst = [items.find(x => x.id === prSel), items.find(x => x.id === prLastCut), items.find(x => x.id === prOvClip.src), items.find(isCut)].find(isCut);
       if (!dst) return toast('이 쪽에 말풍선을 붙여넣을 컷 칸·이미지가 없습니다');
       const v = prFrameView(dst), n = prOvPut(dst, prOvClip, v.x0 + v.vw / 2, v.y0 + v.vh / 2);
-      prAutoSpot(dst, n); prSel = dst.id; // 칸 안에서 다른 말풍선과 겹치지 않는 자리로 자동 배치 prOv = { item: dst.id, id: n.id }; save(); prRerender(); prLoadCuts(); toast('말풍선을 붙여넣었습니다'); return;
+      prAutoSpot(dst, n); // 칸 안에서 다른 말풍선과 겹치지 않는 자리로 자동 배치
+      prSel = dst.id; prOv = { item: dst.id, id: n.id }; save(); prRerender(); prLoadCuts(); toast('말풍선을 붙여넣었습니다'); return;
     }
     if (!prIsCover() && !cfg.pages[prPage]) { cfg.pages.push({ id: uid(), panels: [] }); prPage = cfg.pages.length - 1; }
     if (files.length) { // 다른 프로그램에서 복사한 이미지(스크린샷 등)
@@ -7149,6 +7176,62 @@ async function storyForAI(st) {
   }
   return cuts;
 }
+/* ---- 이야기 흐름 분석 (P.arc): 감정 연출·AI 편집·효과음·작곡이 함께 쓰는 전체 감정선 ----
+   대본(컷 수·대사·읽는 사람)이 바뀌면 ‘오래됨’ 으로 보고, 다음 AI 작업 전에 다시 분석한다 */
+const arcSig = () => hash(P.panels.map(p => p.overlays.filter(o => o.text?.trim()).map(o => (o.speaker || '') + ':' + o.text.trim()).join('|')).join('#') + '#' + P.panels.length).toString(36);
+const arcFresh = () => !!(P.arc && P.arc.sig === arcSig());
+const arcForAI = () => P.arc ? { logline: P.arc.logline, tone: P.arc.tone, beats: P.arc.beats, characters: P.arc.characters } : null;
+function beatOf(ci) { const b = P.arc?.beats?.find(x => ci >= x.from && ci <= x.to); return b ? `${b.name} (${b.phase} · ${b.mood} · 긴장 ${Math.round(b.tension * 10)}/10)` : ''; }
+let arcBusy = null;
+async function ensureArc({ force, quiet } = {}) {
+  if (!isServer()) return P.arc || null;
+  if (!force && arcFresh()) return P.arc;
+  if (arcBusy) return arcBusy;
+  arcBusy = (async () => {
+    const t = !quiet && toast('📖 이야기 전체 흐름과 감정선을 분석하는 중… (30초~1분)', 60000);
+    try {
+      const cuts = await storyForAI();
+      const r = await srvJSON('/api/tts', { op: 'arc', cuts, chars: P.chars.map(c => ({ name: c.name || '', desc: c.desc || '' })), hint: (S.directHint || '').trim() });
+      if (!Array.isArray(r?.beats) || !r.beats.length) throw new Error('분석 결과가 비어 있습니다');
+      P.arc = { title: r.title || '', logline: r.logline || '', tone: r.tone || '', beats: r.beats, characters: Array.isArray(r.characters) ? r.characters : [], sig: arcSig(), at: Date.now() }; save();
+      logCall({ kind: 'AI 이야기 흐름', provider: 'claude', ok: true, cost: (+S.cDirect || 0) * 2 });
+      if (!quiet) toast(`📖 흐름 분석 완료 — ${P.arc.beats.length}개 구간`, 3000);
+      if ($('#dlgArc')?.open) renderArc();
+      return P.arc;
+    } catch (e) { toast('이야기 흐름 분석 실패 — 흐름 없이 진행합니다: ' + e.message, 5000); return P.arc || null; }
+    finally { arcBusy = null; }
+  })();
+  return arcBusy;
+}
+/* 📖 이야기 흐름 창: 구간·긴장도 곡선·캐릭터 감정 흐름을 보고 고친다 */
+function openArc() { $('#dlgArc').showModal(); renderArc(); if (!P.arc && isServer()) ensureArc().then(renderArc); }
+function renderArc() {
+  const b = $('#arcBody'), a = P.arc, n = P.panels.length;
+  $('#arcSt').textContent = !a ? '' : arcFresh() ? `분석: ${new Date(a.at).toLocaleString()}` : '⚠ 대본이 바뀌었습니다 — 다시 분석을 권합니다 (다음 AI 작업 때 자동으로 다시 분석)';
+  if (!a) { b.innerHTML = `<p class="note" style="padding:20px;text-align:center">${arcBusy ? '컷 그림과 대사를 읽고 있습니다… (30초~1분)' : '아직 분석하지 않았습니다. ‘다시 분석’을 누르세요.'}</p>`; return; }
+  const PH = ['도입', '전개', '회상', '위기', '절정', '반전', '해소', '여운'];
+  b.innerHTML = `<div class="grp"><strong>${esc(a.title || '')}</strong> <span class="note">· ${esc(a.tone || '')}</span><p style="margin:4px 0">${esc(a.logline || '')}</p></div>
+    <div class="arc-curve" title="긴장도 곡선 (구간 길이 = 컷 수)">${a.beats.map(x => `<div class="arc-bar" style="flex:${x.to - x.from + 1}"><i style="height:${Math.round(8 + x.tension * 72)}px"></i><span>${esc(x.name)}</span></div>`).join('')}</div>
+    ${a.beats.map((x, k) => `<div class="card" style="padding:8px;margin:6px 0" data-ab="${k}">
+      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><span class="note" style="margin:0;white-space:nowrap">컷 ${x.from + 1}${x.to > x.from ? '–' + (x.to + 1) : ''}</span>
+        <input type="text" class="abName" value="${esc(x.name)}" style="flex:1;min-width:120px" aria-label="구간 이름">
+        <select class="abPhase">${PH.map(p => `<option ${p === x.phase ? 'selected' : ''}>${p}</option>`).join('')}</select>
+        <input type="text" class="abMood" value="${esc(x.mood)}" style="width:110px" aria-label="분위기">
+        <label class="row" style="gap:4px;align-items:center;margin:0"><span class="note" style="margin:0">긴장</span><input type="range" class="abT" min="0" max="1" step="0.05" value="${x.tension}" style="width:90px"></label></div>
+      <input type="text" class="abNote" value="${esc(x.note || '')}" placeholder="관객이 느껴야 할 것" style="width:100%;margin-top:4px"></div>`).join('')}
+    ${a.characters?.length ? `<div class="grp"><span class="lbl">캐릭터 감정 흐름</span>${a.characters.map((c, k) => `<div class="card" style="padding:8px;margin:4px 0"><b>${esc(c.name)}</b> <span class="note" style="margin:0">${c.journey.map(j => `컷${j.from + 1}-${j.to + 1} ${esc(j.emotion)}`).join(' → ')}</span>
+      <input type="text" class="acNote" data-ac="${k}" value="${esc(c.note || '')}" placeholder="목소리가 어떻게 변해야 하는지" style="width:100%;margin-top:4px"></div>`).join('')}</div>` : ''}
+    <p class="note">여기서 고친 내용은 다음 AI 작업(감정 연출·전체 편집·효과음·작곡)부터 기준이 됩니다. 컷 ${n}개.</p>`;
+  $$('[data-ab]', b).forEach(row => {
+    const x = a.beats[+row.dataset.ab], q = s => $(s, row);
+    q('.abName').onchange = e => { x.name = e.target.value.trim().slice(0, 30); save(); renderArc(); };
+    q('.abPhase').onchange = e => { x.phase = e.target.value; save(); };
+    q('.abMood').onchange = e => { x.mood = e.target.value.trim().slice(0, 30); save(); };
+    q('.abT').onchange = e => { x.tension = +(+e.target.value).toFixed(2); save(); renderArc(); };
+    q('.abNote').onchange = e => { x.note = e.target.value.trim().slice(0, 160); save(); };
+  });
+  $$('.acNote', b).forEach(i => (i.onchange = () => { a.characters[+i.dataset.ac].note = i.value.trim().slice(0, 160); save(); }));
+}
 async function openScore(redo) {
   if (!isServer()) return toast('AI 작곡은 서버 모드에서만 됩니다');
   const dlg = $('#dlgScore'); if (!dlg.open) dlg.showModal();
@@ -7157,7 +7240,8 @@ async function openScore(redo) {
   const st = t => ($('#scoreSt').textContent = t);
   try {
     const cuts = await storyForAI(st); st('🎼 AI 가 이야기 흐름을 읽고 음악을 설계하는 중…');
-    AISCORE.plan = await srvJSON('/api/tts', { op: 'scoreplan', cuts, hint: AISCORE.hint });
+    await ensureArc({ quiet: true }); st('🎼 AI 가 이야기 흐름을 읽고 음악을 설계하는 중…');
+    AISCORE.plan = await srvJSON('/api/tts', { op: 'scoreplan', cuts, hint: AISCORE.hint, arc: arcForAI() });
     logCall({ kind: 'AI 음악 설계', provider: 'claude', ok: true, cost: +S.cDirect || 0 });
     st('');
   } catch (e) { st('실패: ' + e.message); }
@@ -7213,7 +7297,8 @@ async function openSfxAI(redo) {
   try {
     const cuts = await storyForAI(st); st('🎧 AI 가 장면마다 필요한 소리를 고르는 중…');
     const existing = audTracks().filter(t => trackGroup(t) === 'sfx').map(t => ({ start: +t.start || 0, name: t.name }));
-    AISFX.plan = await srvJSON('/api/tts', { op: 'sfxplan', cuts, existing, max: 30 });
+    await ensureArc({ quiet: true }); st('🎧 AI 가 장면마다 필요한 소리를 고르는 중…');
+    AISFX.plan = await srvJSON('/api/tts', { op: 'sfxplan', cuts, existing, max: AISFX.max || 30, hint: AISFX.hint || '', arc: arcForAI() });
     AISFX.sel = new Set(AISFX.plan.items.map((_, i) => i)); AISFX.done = new Set();
     logCall({ kind: 'AI 효과음 설계', provider: 'claude', ok: true, cost: +S.cDirect || 0 });
     st('');
@@ -8044,7 +8129,8 @@ $('#logClear').onclick = () => { if (confirm('생성 기록을 지울까요? (�
 const aiChat = [];
 const editSummary = () => ({
   aspect: P.aspect, total_sec: +totalDur().toFixed(2), selected_panel: P.panels.findIndex(p => p.id === sel) + 1,
-  panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), read_need: +readNeed(p).toFixed(1), prompt: String(p.prompt || '').slice(0, 80),
+  arc: arcForAI(),
+  panels: P.panels.map((p, i) => ({ panel: i + 1, ...(beatOf(i) ? { beat: beatOf(i) } : {}), dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), read_need: +readNeed(p).toFixed(1), prompt: String(p.prompt || '').slice(0, 80),
     overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size, color: o.color, fill: o.fill, fillA: o.fillA, stroke: o.stroke,
       ...(o.kind === 'caption' && !o.speaker ? {} : { reader: speakerOf(o).label, emotion: emoOn(o) ? `${o.emo.emotion || '직접'} ${Math.round((+o.emo.intensity || 0) * 100)}%${o.emo.manual ? ' (직접)' : ''}` : o.emo ? '없음' : '자동',
         voice: o.voice ? `${(+o.voice.dur || 0).toFixed(1)}초${voiceStale(o) ? ' ⚠다시 만들어야 함' : ''}${o.voice.mute ? ' 음소거' : ''}${(o.voice.vol ?? 1) !== 1 ? ' 음량' + o.voice.vol : ''}` : '없음' }) })) })),
@@ -8085,7 +8171,7 @@ function applyOvStyle(o, op) {
 function applyEditOps(ops) {
   const done = [], skipped = [];
   // 시간이 걸리거나 크레딧이 드는 일은 모아 두었다가 순서대로: 말투 변환 → 음성 만들기 → 타이밍 맞춤 → 효과음 → 배경음악
-  const jobs = { notes: [], remake: new Set(), make: [], sync: [], sfx: [], bgm: null };
+  const jobs = { notes: [], remake: new Set(), make: [], sync: [], sfx: [], bgm: null, sfxPlan: null };
   // 번호는 요청 시점(요약)의 컷·오버레이·트랙을 가리키므로, 적용 중 순서가 바뀌어도 흔들리지 않게 미리 붙잡아 둔다
   const pans = P.panels.slice(), ovs = new Map(pans.map(p => [p, p.overlays.slice()])), tracks = P.audio.slice();
   const panelAt = n => pans[Math.trunc(+n) - 1];
@@ -8180,6 +8266,8 @@ function applyEditOps(ops) {
         jobs.sfx.push({ label: String(x.label || '효과음').slice(0, 24), prompt: String(x.prompt).slice(0, 400), dur: clamp(aiNum(x.dur) ?? (loop ? 10 : 2), 0.5, 30), loop, start, len, vol: clamp(aiNum(x.vol) ?? 0.7, 0.2, 1) });
       });
       if (jobs.sfx.length) done.push(`효과음 예약 ${jobs.sfx.length}개`); else skipped.push('효과음(대상 없음)');
+    } else if (op.tool === 'plan_sfx') {
+      jobs.sfxPlan = { max: clamp(Math.trunc(aiNum(op.max) ?? 20), 1, 40), hint: typeof op.hint === 'string' ? op.hint.slice(0, 300) : '' }; done.push('효과음 설계');
     } else if (op.tool === 'compose_bgm') {
       jobs.bgm = { hint: typeof op.hint === 'string' ? op.hint.slice(0, 300) : '' }; done.push('배경음악 설계');
     } else skipped.push(label);
@@ -8219,6 +8307,12 @@ async function runEditJobs(jobs, say) {
       }
       say('bot', `✨ 효과음 ${ok}개를 넣었습니다.`); if (tab === 'audio') renderInspector();
     } else say('bot', '효과음은 건너뛰었습니다.');
+  }
+  if (jobs.sfxPlan) { // 그림·이야기 흐름을 보는 효과음 설계 → 목록을 확인하고 생성
+    AISFX.max = jobs.sfxPlan.max; AISFX.hint = jobs.sfxPlan.hint;
+    say('bot', '🎧 컷 그림과 이야기 흐름을 보고 효과음을 설계합니다 — 목록을 확인하고 ‘선택한 효과음 만들기’를 누르세요.');
+    await openSfxAI(true); AISFX.max = 0; AISFX.hint = '';
+    if (jobs.bgm) await new Promise(r => { const d = $('#dlgSfxAI'); if (!d.open) return r(); d.addEventListener('close', r, { once: true }); }); // 효과음 창을 닫으면 음악 설계로
   }
   if (jobs.bgm) { AISCORE.hint = jobs.bgm.hint || AISCORE.hint; say('bot', '🎼 배경음악 설계를 엽니다 — 설계안을 확인하고 ‘이대로 작곡’을 누르세요.'); openScore(true); }
   const stale = P.panels.reduce((a, p) => a + p.overlays.filter(o => o.voice && voiceStale(o)).length, 0);
@@ -8313,7 +8407,14 @@ async function captionsRun() {
 $('#capGo').onclick = captionsRun;
 $('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '컷 길이·전환·말풍선 타이밍·음악 볼륨에 더해 더빙(읽는 사람·감정·말투·음량)·음성 만들기·효과음·배경음악까지 편집합니다. 예: “백운 도사 대사는 더 낮고 느긋하게 다시 만들어줘”, “7~13컷은 긴장감 있게”. ✨ 알아서 전체 편집은 전부 한 번에 해 드립니다.'); $('#aiIn').focus(); } };
 $('#aiEditClose').onclick = () => { $('#aiEdit').hidden = true; };
-$('#aiFull').onclick = () => aiSend('영상 전체를 알아서 완성도 있게 편집해줘(전체 편집). 나레이터·캐릭터 목소리는 이미 정해져 있으니 그대로 두고, 어색하거나 빠진 감정·말투를 장면과 캐릭터에 맞게 자연스럽게 다듬은 뒤, 음성이 없거나 ⚠인 대사는 만들고, 대사 타이밍과 컷 길이를 음성에 맞춰줘. 소리가 비어 있는 장면엔 꼭 필요한 환경음·효과음만 넣고, 배경음악이 없으면 설계를 시작해. 자막·말풍선 스타일이 들쭉날쭉하면 정리해. 컷 순서·그림·글 내용은 바꾸지 마. 질문하지 말고 바로 적용해.', true);
+$('#aiArc').onclick = () => openArc();
+$('#arcRedo').onclick = () => { renderArc(); ensureArc({ force: true }).then(renderArc); setTimeout(renderArc, 50); };
+$('#aiFull').onclick = async () => {
+  if (aiBusy) return;
+  if (isServer() && !arcFresh()) { aiSay('bot', '📖 먼저 이야기 전체 흐름과 감정선을 분석합니다… (30초~1분)'); await ensureArc({ quiet: true }); if (P.arc?.beats?.length) aiSay('bot', `📖 ${P.arc.beats.length}개 구간으로 나눴습니다: ${P.arc.beats.map(b => b.name).join(' → ')}`); }
+  aiSendFull();
+};
+const aiSendFull = () => aiSend('영상 전체를 알아서 완성도 있게 편집해줘(전체 편집). 나레이터·캐릭터 목소리는 이미 정해져 있으니 그대로 두고, 어색하거나 빠진 감정·말투를 장면과 캐릭터에 맞게 자연스럽게 다듬은 뒤, 음성이 없거나 ⚠인 대사는 만들고, 대사 타이밍과 컷 길이를 음성에 맞춰줘. 소리가 비어 있는 장면엔 꼭 필요한 환경음·효과음만 넣고, 배경음악이 없으면 설계를 시작해. 자막·말풍선 스타일이 들쭉날쭉하면 정리해. 컷 순서·그림·글 내용은 바꾸지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiAuto').onclick = () => aiSend('타임라인 전체를 보고 읽기 쉽게 알아서 다듬어줘. 글 읽는 시간이 모자란 컷은 맞추고, 말풍선 등장 타이밍이 겹치거나 너무 빠르면 정리해. 컷 순서·그림·글 내용·음악은 건드리지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiForm').onsubmit = e => { e.preventDefault(); const v = $('#aiIn').value.trim(); if (!v) return; $('#aiIn').value = ''; aiSend(v); };
 $('#aiIn').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#aiForm').requestSubmit(); } };
