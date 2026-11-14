@@ -432,6 +432,13 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 .mixer .mxg[open] > summary .mxr > span[title]::before { content:'▾ '; }
 .mixer .mxr { padding:2px 0; }
 .mixer .mxg > summary .mxr > span[title] { font-weight:600; }
+/* 캐릭터 카드: 접힌 모양 */
+.ch-card .ch-thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: 1px solid var(--line-2); }
+.ch-card .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ch-card .ch-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-card .ch-sub { display: block; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .76rem; }
+.ch-card:not(.open) .ch-head:hover .ch-name { text-decoration: underline; }
+.ch-card.open { box-shadow: 0 0 0 2px rgba(180,138,44,.35); }
 /* 목소리 찾기 창 */
 .vb { display:grid; grid-template-columns:260px 1fr; gap:16px; min-height:60vh; }
 .vb-f { display:flex; flex-direction:column; gap:10px; }
@@ -719,13 +726,15 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </div>
     <p class="note">Shift+클릭으로 범위를 고를 수 있습니다.</p>
     <div class="box" id="castEmoBox" style="display:flex;flex-direction:column;gap:6px;margin:4px 0">
-      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><strong style="font-size:.85rem">🎭 감정 직접 지정</strong><span class="note" style="margin:0">체크한 대사에 감정을 고르면 바로 적용됩니다</span></div>
+      <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><strong style="font-size:.85rem">🎭 감정 직접 지정</strong><span class="note" style="margin:0">체크한 대사에 감정을 고르거나, 말투를 적고 ✍ 를 누르세요 (둘 다 하면 그 감정 + 그 말투)</span></div>
       <div class="row emo-chips" id="castEmoChips" style="flex-wrap:wrap;gap:4px"></div>
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
         <label class="row" style="gap:6px;align-items:center;margin:0"><span class="lbl" style="margin:0">강도</span><input type="range" id="castEmoK" min="0" max="1" step="0.05" value="0.5" style="width:120px"><span class="note" id="castEmoKv" style="margin:0;width:38px">기본</span></label>
-        <input type="text" id="castEmoInstr" style="flex:1;min-width:200px" placeholder="말투 지시를 직접 적기 (선택) — 예: 숨죽여 작게, 끝을 길게 끌며">
+        <input type="text" id="castEmoInstr" style="flex:1;min-width:200px" placeholder="말투를 직접 적기 — 예: 숨죽여 작게, 끝을 길게 끌며">
+        <button type="button" class="b sm" id="castNoteGo" title="적은 말투를 체크한 대사에 적용 (감정을 함께 골라도 됩니다)">✍ 이 말투로 적용</button>
         <button type="button" class="b ghost sm" id="castEmoClear">감정 지우기</button>
       </div>
+      <p class="note" style="margin:0">타입캐스트·일레븐랩스는 글로 된 말투를 읽지 못해서, 적은 말투를 AI 가 감정·강도·속도·톤 높이·태그로 바꿔 적용합니다 (OpenAI·Gemini 는 글 그대로).</p>
     </div>
     <details id="castDirSet"><summary class="note" style="cursor:pointer">🎭 AI 감정 연출 설정 (연출 메모 · 정밀도)</summary>
       <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px"><input type="text" id="castHint" style="flex:1;min-width:240px" placeholder="연출 메모 — 예: 과장 없이 자연스럽게, 건우는 겁 많은 13살, 사부님은 느긋하게">
@@ -738,6 +747,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     <button type="button" class="b sm" id="castApply">선택한 대사에 적용</button>
     <button type="button" class="b ghost sm" id="castEmo">🎭 선택한 대사 AI 감정 연출</button>
     <button type="button" class="b ghost sm" id="castGen">선택한 대사 음성 만들기</button>
+    <button type="button" class="b ghost sm" id="castPlayAll">▶ 선택한 대사 이어 듣기</button>
     <button type="button" class="b ghost sm" id="castDl">⬇ 선택한 대사 음성 받기</button>
     <button type="button" class="b ghost sm" data-close>닫기</button>
   </div>
@@ -2972,7 +2982,7 @@ function applyEmo(o, v) {
   const e = o.emo, k = clamp(+e.intensity || 0, 0, 1);
   if (e.instr) v.instr = (v.instr ? v.instr + '. 이번 대사는 ' : '') + e.instr;
   v.speed = +clamp((+v.speed || 1) * (+e.speed || 1), 0.5, 2).toFixed(2);
-  if (v.engine === 'typecast') { const m = tcEmotion(e, v); if (m) { v.emotion = m.preset; v.emotion_intensity = m.intensity; } }
+  if (v.engine === 'typecast') { const m = tcEmotion(e, v); if (m) { v.emotion = m.preset; v.emotion_intensity = m.intensity; } if (+e.pitch) v.pitch = clamp(Math.round(+e.pitch), -4, 4); } // 타입캐스트는 글을 못 읽어 톤 높이로도 표현
   if (v.engine === 'eleven') {
     if (elV3(v.model)) { // 대사 중간의 숨·머뭇거림까지 넣은 연기 대본이 있으면 그것을, 없으면 앞에 태그만
       if (e.perf?.trim()) text = speakText({ text: e.perf });
@@ -3001,35 +3011,48 @@ function tcEmotion(e, v) {
   return { preset, intensity: +clamp(0.5 + 0.8 * k, 0, 1.3).toFixed(2) }; // 과장되지 않게 1.3 까지만
 }
 /* 직접 지정하는 감정: 하나를 고르면 말투 지시(OpenAI·Gemini) · 감정 태그(일레븐랩스 v3) · 타입캐스트 감정이 함께 정해진다
-   [이름, 말투 지시, v3 태그, 타입캐스트, 기본 강도, 속도] */
+   [이름, 말투 지시, v3 태그, 타입캐스트, 기본 강도, 속도, 톤 높이(반음 · 타입캐스트)] */
 const EMO_PRESETS = [
-  ['평온', '편안하고 자연스럽게, 힘을 빼고', [], 'smart', 0.2, 1],
-  ['담담', '감정을 누르고 담담하게, 차분한 호흡으로', ['calm'], 'tonedown', 0.3, 0.97],
-  ['기쁨', '밝고 경쾌하게, 미소가 느껴지게', ['happy'], 'happy', 0.5, 1.03],
-  ['설렘', '설레는 마음을 숨기지 못하고 살짝 들뜬 목소리로', ['excited'], 'happy', 0.5, 1.03],
-  ['장난', '장난스럽게 웃음기를 띠고 가볍게', ['mischievously', 'chuckles'], 'happy', 0.45, 1.05],
-  ['다정', '따뜻하고 다정하게, 부드럽게 감싸듯', ['tender'], 'smart', 0.35, 0.97],
-  ['걱정', '걱정스럽게 조심조심, 말끝을 살짝 흐리며', ['nervous'], 'tonedown', 0.45, 0.97],
-  ['긴장', '긴장해서 낮고 조심스럽게, 짧게 숨을 고르며', ['nervous'], 'tonedown', 0.5, 0.98],
-  ['두려움', '겁에 질려 작고 빠르게, 숨이 가쁘게', ['scared'], 'tonedown', 0.6, 1.05],
-  ['놀람', '깜짝 놀라 숨을 들이켜며 목소리가 올라가게', ['surprised', 'gasps'], 'toneup', 0.6, 1.05],
-  ['슬픔', '목이 메어 천천히, 끝을 흐리며', ['sad'], 'sad', 0.55, 0.93],
-  ['울먹임', '울음을 꾹 참으며 떨리는 목소리로', ['crying'], 'sad', 0.75, 0.92],
-  ['분노', '화를 누르며 단단하고 날카롭게', ['angry'], 'angry', 0.6, 1.02],
-  ['외침', '크게 외치듯 힘 있게, 숨을 실어', ['shouting'], 'toneup', 0.8, 1.05],
-  ['단호', '흔들림 없이 단호하고 또렷하게', ['determined'], 'smart', 0.5, 1],
-  ['속삭임', '귓속말처럼 아주 작게 속삭이며', ['whispers'], 'whisper', 0.5, 0.95],
-  ['비웃음', '비꼬듯 코웃음 섞어 느릿하게', ['sarcastic'], 'smart', 0.5, 0.97],
-  ['피곤', '지치고 늘어진 목소리로 한숨 섞어', ['tired', 'sighs'], 'tonedown', 0.45, 0.92],
-  ['신비', '신비로운 분위기로 천천히, 여운을 남기며', ['thoughtful'], 'tonedown', 0.35, 0.94],
-  ['웅장', '웅장하고 힘 있게, 장면을 크게 열어 주듯', ['serious'], 'toneup', 0.55, 0.97],
+  ['평온', '편안하고 자연스럽게, 힘을 빼고', [], 'smart', 0.2, 1, 0],
+  ['담담', '감정을 누르고 담담하게, 차분한 호흡으로', ['calm'], 'tonedown', 0.3, 0.97, -1],
+  ['기쁨', '밝고 경쾌하게, 미소가 느껴지게', ['happy'], 'happy', 0.5, 1.03, 1],
+  ['설렘', '설레는 마음을 숨기지 못하고 살짝 들뜬 목소리로', ['excited'], 'happy', 0.5, 1.03, 1],
+  ['장난', '장난스럽게 웃음기를 띠고 가볍게', ['mischievously', 'chuckles'], 'happy', 0.45, 1.05, 1],
+  ['다정', '따뜻하고 다정하게, 부드럽게 감싸듯', ['tender'], 'smart', 0.35, 0.97, 0],
+  ['걱정', '걱정스럽게 조심조심, 말끝을 살짝 흐리며', ['nervous'], 'tonedown', 0.45, 0.97, 0],
+  ['긴장', '긴장해서 낮고 조심스럽게, 짧게 숨을 고르며', ['nervous'], 'tonedown', 0.5, 0.98, -1],
+  ['두려움', '겁에 질려 작고 빠르게, 숨이 가쁘게', ['scared'], 'tonedown', 0.6, 1.05, 1],
+  ['놀람', '깜짝 놀라 숨을 들이켜며 목소리가 올라가게', ['surprised', 'gasps'], 'toneup', 0.6, 1.05, 2],
+  ['슬픔', '목이 메어 천천히, 끝을 흐리며', ['sad'], 'sad', 0.55, 0.93, -1],
+  ['울먹임', '울음을 꾹 참으며 떨리는 목소리로', ['crying'], 'sad', 0.75, 0.92, -1],
+  ['분노', '화를 누르며 단단하고 날카롭게', ['angry'], 'angry', 0.6, 1.02, -1],
+  ['외침', '크게 외치듯 힘 있게, 숨을 실어', ['shouting'], 'toneup', 0.8, 1.05, 1],
+  ['단호', '흔들림 없이 단호하고 또렷하게', ['determined'], 'smart', 0.5, 1, -1],
+  ['속삭임', '귓속말처럼 아주 작게 속삭이며', ['whispers'], 'whisper', 0.5, 0.95, -1],
+  ['비웃음', '비꼬듯 코웃음 섞어 느릿하게', ['sarcastic'], 'smart', 0.5, 0.97, -1],
+  ['피곤', '지치고 늘어진 목소리로 한숨 섞어', ['tired', 'sighs'], 'tonedown', 0.45, 0.92, -2],
+  ['신비', '신비로운 분위기로 천천히, 여운을 남기며', ['thoughtful'], 'tonedown', 0.35, 0.94, -1],
+  ['웅장', '웅장하고 힘 있게, 장면을 크게 열어 주듯', ['serious'], 'toneup', 0.55, 0.97, -1],
 ];
 /* 직접 지정: 같은 감정을 고르면 강도만 바꾸고, 말투 지시를 적으면 그것을 쓴다 */
 function setEmo(o, name, { intensity, instr } = {}) {
   const pz = EMO_PRESETS.find(x => x[0] === name); if (!pz) return;
-  o.emo = { on: true, emotion: pz[0], intensity: +clamp(intensity ?? pz[4], 0, 1).toFixed(2), instr: (instr || '').trim() || pz[1], tags: [...pz[2]], tc: pz[3], perf: '', speed: pz[5], ai: false, manual: true };
+  o.emo = { on: true, emotion: pz[0], intensity: +clamp(intensity ?? pz[4], 0, 1).toFixed(2), instr: (instr || '').trim() || pz[1], tags: [...pz[2]], tc: pz[3], perf: '', speed: pz[5], pitch: pz[6] || 0, ai: false, manual: true };
 }
-const emoKey = o => emoOn(o) ? JSON.stringify([o.emo.emotion, o.emo.intensity, o.emo.instr, o.emo.tags, o.emo.speed].concat(o.emo.perf || o.emo.tc ? [o.emo.perf || '', o.emo.tc || ''] : [])) : '';
+/* 직접 적은 말투를 모든 엔진에 적용: 글자 그대로는 OpenAI·Gemini 가 읽고,
+   글을 못 읽는 타입캐스트·일레븐랩스용 값(감정·강도·속도·톤 높이·태그·연기 대본)은 AI 가 말투에 맞춰 정한다 */
+async function applyNote(list, note, want) {
+  note = String(note || '').trim(); if (!list.length || !note) return 0;
+  list.forEach(({ o }) => { // 먼저 글자 그대로 적용 (AI 가 실패해도 OpenAI·Gemini 는 바로 쓴다)
+    if (want) setEmo(o, want, { instr: note, intensity: o.emo?.manual && o.emo.emotion === want ? o.emo.intensity : undefined });
+    else o.emo = Object.assign({ on: true, emotion: '직접 지시', intensity: 0.5, tags: [], tc: 'smart', perf: '', speed: 1, pitch: 0 }, o.emo?.manual ? o.emo : {}, { on: true, instr: note, ai: false, manual: true, noted: true });
+  });
+  save();
+  if (!isServer()) return list.length;
+  const notes = new Map(list.map(({ p, o }) => [p.id + ':' + o.id, { note, want: want || '' }]));
+  return aiDirect(list, { notes, quiet: true });
+}
+const emoKey = o => emoOn(o) ? JSON.stringify([o.emo.emotion, o.emo.intensity, o.emo.instr, o.emo.tags, o.emo.speed].concat(o.emo.perf || o.emo.tc ? [o.emo.perf || '', o.emo.tc || ''] : []).concat(+o.emo.pitch ? [+o.emo.pitch] : [])) : '';
 /* 문장·목소리 설정 서명: 음성을 만든 뒤 바뀌었는지(다시 만들어야 하는지) 알려 준다 */
 const voiceSig = o => { const v = voiceProfile(o), e = emoKey(o); return hash([o.text.trim(), v.engine, v.voice, v.model, v.instr, v.speed].join('|') + (e ? '|' + e : '')).toString(36); };
 const legacySig = o => hash([o.text.trim(), S.ttsEngine, S.ttsVoice, S.gmVoice, S.gmTtsModel, S.ttsModel, S.ttsInstr, S.ttsSpeed, S.elModel].join('|')).toString(36);
@@ -3038,7 +3061,8 @@ const voiceStale = o => !!(o.voice && (o.voice.sts ? o.voice.sts.voice !== stsTa
 function emoBlockHTML(o) {
   const e = o.emo, on = emoOn(o), v = voiceProfile(o);
   const tcm = v.engine === 'typecast' && on ? tcEmotion(e, v) : null;
-  const how = v.engine === 'typecast' ? (tcm ? `타입캐스트 → 감정 프리셋 ‘${tcm.preset}’ · 강도 ${tcm.intensity}` : '타입캐스트 → 스마트 감정 (앞뒤 문장을 보고 알아서)') : v.engine === 'eleven' ? (elV3(v.model) ? (e?.perf ? '일레븐랩스 v3 → 연기 대본(숨·머뭇거림 위치)으로 적용' : '일레븐랩스 v3 → 감정 태그로 적용') : '일레븐랩스 → 안정성·스타일로 적용 (태그는 eleven_v3 모델에서)') : v.engine === 'google' ? 'Google → 속도만 적용' : v.engine === 'gemini' ? 'Gemini → 말투 지시로 적용' : 'OpenAI → 말투 지시로 적용';
+  const tcP = on && +e.pitch ? ` · 톤 ${+e.pitch > 0 ? '+' : ''}${+e.pitch}` : '', tcS = on && +e.speed && +e.speed !== 1 ? ` · 속도 ×${e.speed}` : '';
+  const how = v.engine === 'typecast' ? (tcm ? `타입캐스트 → 감정 프리셋 ‘${tcm.preset}’ · 강도 ${tcm.intensity}${tcP}${tcS}` : `타입캐스트 → 스마트 감정 (앞뒤 문장을 보고 알아서)${tcP}${tcS}`) + (on && e.noted ? ' · 적은 말투를 이 값들로 바꿨습니다' : '') : v.engine === 'eleven' ? (elV3(v.model) ? (e?.perf ? '일레븐랩스 v3 → 연기 대본(숨·머뭇거림 위치)으로 적용' : '일레븐랩스 v3 → 감정 태그로 적용') : '일레븐랩스 → 안정성·스타일로 적용 (태그는 eleven_v3 모델에서)') : v.engine === 'google' ? 'Google → 속도만 적용' : v.engine === 'gemini' ? 'Gemini → 말투 지시로 적용' : 'OpenAI → 말투 지시로 적용';
   return `<div class="emo" style="border:1px dashed var(--line-2);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px">
     <div class="row" style="flex-wrap:wrap;gap:6px;align-items:center">
       <strong style="font-size:.85rem">🎭 감정 연출</strong>
@@ -3051,11 +3075,12 @@ function emoBlockHTML(o) {
       <div class="g2" style="margin-top:6px">
         <label><span class="lbl">감정</span><input type="text" data-emo="emotion" maxlength="12" value="${esc(e.emotion || '')}"></label>
         <label><span class="lbl">강도 ${Math.round((+e.intensity || 0) * 100)}%</span><input type="range" data-emo="intensity" min="0" max="1" step="0.05" value="${+e.intensity || 0}"></label>
-        <label style="grid-column:1/-1"><span class="lbl">말투 지시 (OpenAI·Gemini)</span><input type="text" data-emo="instr" maxlength="160" value="${esc(e.instr || '')}"></label>
+        <label style="grid-column:1/-1"><span class="lbl">말투 지시 — 고치면 ${v.engine === 'typecast' || v.engine === 'eleven' ? 'AI 가 ' + TTS_ENG[v.engine] + '용 값으로 바꿔 적용' : '글 그대로 적용'}</span><input type="text" data-emo="instr" maxlength="260" value="${esc(e.instr || '')}"></label>
         <label><span class="lbl">감정 태그 (일레븐랩스 v3, 쉼표)</span><input type="text" data-emo="tags" value="${esc((e.tags || []).join(', '))}" placeholder="sad, sighs"></label>
         <label><span class="lbl">타입캐스트 감정</span><select data-emo="tc">${['smart', 'normal', 'happy', 'sad', 'angry', 'whisper', 'toneup', 'tonedown'].map(k => `<option value="${k}" ${(e.tc || 'smart') === k ? 'selected' : ''}>${k === 'smart' ? '스마트 (대화 흐름으로 자동)' : TC_EMO_KO[k] + ' (' + k + ')'}</option>`).join('')}</select></label>
         <label style="grid-column:1/-1"><span class="lbl">연기 대본 (일레븐랩스 v3: 숨·머뭇거림 위치 — 단어는 그대로)</span><input type="text" data-emo="perf" value="${esc(e.perf || '')}" placeholder="예: [nervous] …초아야? [hesitates] 괜찮아?"></label>
-        <label><span class="lbl">속도 배율 (0.8~1.2)</span><input type="number" data-emo="speed" min="0.8" max="1.2" step="0.05" value="${+e.speed || 1}"></label>
+        <label><span class="lbl">속도 배율 (0.75~1.3)</span><input type="number" data-emo="speed" min="0.75" max="1.3" step="0.05" value="${+e.speed || 1}"></label>
+        <label><span class="lbl">톤 높이 (반음 · 타입캐스트)</span><input type="number" data-emo="pitch" min="-4" max="4" step="1" value="${+e.pitch || 0}"></label>
       </div></details>` : ''}
     <span class="note" style="margin:0">${how}</span>
   </div>`;
@@ -3081,11 +3106,23 @@ function bindEmo(p, o, el) {
     const set = () => {
       const v = inp.value;
       o.emo[f] = f === 'tags' ? v.split(/[,\s]+/).map(t => t.toLowerCase().replace(/[^a-z]/g, '')).filter(Boolean).slice(0, 3)
-        : f === 'intensity' ? +v : f === 'speed' ? clamp(+v || 1, 0.8, 1.2) : v.trim();
+        : f === 'intensity' ? +v : f === 'speed' ? clamp(+v || 1, 0.75, 1.3) : f === 'pitch' ? clamp(Math.round(+v || 0), -4, 4) : v.trim();
       o.emo.ai = false; o.emo.manual = true; save();
     };
     if (inp.type === 'range') inp.oninput = () => { set(); inp.previousElementSibling.textContent = `강도 ${Math.round(+inp.value * 100)}%`; };
-    inp.onchange = () => { set(); renderInspector(); renderPanels(); };
+    inp.onchange = async () => {
+      set();
+      // 말투를 고치면: 글을 못 읽는 엔진(타입캐스트·일레븐랩스)을 위해 AI 가 감정·강도·속도·톤 높이·태그를 다시 맞춘다
+      const eng = voiceProfile(o).engine;
+      if (f === 'instr' && o.emo.instr && isServer() && (eng === 'typecast' || eng === 'eleven')) {
+        o._ebusy = true; renderInspector(); toast('✍ 적은 말투를 ' + TTS_ENG[eng] + '에 맞게 바꾸는 중…');
+        const want = EMO_PRESETS.some(x => x[0] === o.emo.emotion) ? o.emo.emotion : '';
+        try { await applyNote([{ p, o }], o.emo.instr, want); toast('✍ 말투를 적용했습니다 — 음성을 다시 만들면 들립니다', 3000); }
+        catch (e) { toast('말투 변환 실패: ' + e.message, 4500); }
+        o._ebusy = false;
+      }
+      renderInspector(); renderPanels();
+    };
   });
 }
 /* 여러 대사를 한꺼번에 만들기 전에, 감정이 아직 없는 대사를 한 번에 연출한다 (설정에서 켜 둔 경우) */
@@ -3097,7 +3134,8 @@ async function autoDirectBatch(list) {
   await aiDirect(need, { quiet: true }).catch(e => toast('AI 감정 연출 실패 — 감정 없이 만듭니다: ' + e.message, 4500));
 }
 /* 대사들(targets = [{p,o}])의 감정을 AI 에게 맡긴다. 앞뒤 컷까지 대본 흐름으로 함께 보낸다 */
-async function aiDirect(targets, { quiet } = {}) {
+/* notes: Map('컷id:대사id' → { note, want }) — 연출자가 직접 적은 말투/고른 감정. AI 는 이것을 엔진별 값(태그·감정·강도·속도·톤 높이)으로 옮긴다 */
+async function aiDirect(targets, { quiet, notes } = {}) {
   if (!isServer()) throw new Error('AI 감정 연출은 서버 모드에서만 됩니다');
   targets = targets.filter(({ o }) => o.text?.trim());
   if (!targets.length) return 0;
@@ -3116,11 +3154,14 @@ async function aiDirect(targets, { quiet } = {}) {
   let done = 0;
   for (let i = 0; i < targets.length; i += 60) { // 한 번에 60줄씩
     const chunk = new Set(targets.slice(i, i + 60).map(({ p, o }) => p.id + ':' + o.id));
-    const lines = all.map(l => ({ ...l, target: chunk.has(l.id) }));
+    const lines = all.map(l => { const t = chunk.has(l.id), n = t && notes?.get(l.id); return { ...l, target: t, ...(n ? { note: n.note || '', want: n.want || '' } : {}) }; });
     const r = await srvJSON('/api/tts', { op: 'direct', lines: lines.slice(0, 200), chars, scenes, hint: (S.directHint || '').trim(), quality: S.directQuality === 'high' ? 'high' : '' });
     r.lines.forEach(d => {
       const [pid, oid] = d.id.split(':'), o = P.panels.find(p => p.id === pid)?.overlays.find(x => x.id === oid); if (!o) return;
-      o.emo = { on: true, emotion: d.emotion, intensity: d.intensity, instr: d.instr, tags: d.tags, perf: d.perf || '', tc: d.tc || 'smart', speed: d.speed, ai: true }; done++;
+      const n = notes?.get(d.id);
+      o.emo = n ? { on: true, emotion: n.want || d.emotion, intensity: d.intensity, instr: n.note || d.instr, tags: d.tags, perf: d.perf || '', tc: d.tc || 'smart', speed: d.speed, pitch: d.pitch || 0, ai: false, manual: true, noted: !!n.note } // 직접 적은 말투는 글자 그대로 두고, 나머지 값만 AI 가 맞춘다
+        : { on: true, emotion: d.emotion, intensity: d.intensity, instr: d.instr, tags: d.tags, perf: d.perf || '', tc: d.tc || 'smart', speed: d.speed, pitch: d.pitch || 0, ai: true };
+      done++;
     });
     logCall({ kind: 'AI 감정 연출', provider: 'claude', ok: true, cost: chunk.size / 10 * (+S.cDirect || 0) * (S.directQuality === 'high' ? 5 : 1) });
   }
@@ -3340,6 +3381,7 @@ async function ttsBlob(text, force, v) {
     if (v.stability != null) body.stability = v.stability; if (v.style != null) body.style = v.style;
     if (v.prev) body.previous_text = v.prev; if (v.next) body.next_text = v.next;
     if (v.emotion) { body.emotion = v.emotion; body.emotion_intensity = v.emotion_intensity; }
+    if (v.pitch) body.pitch = v.pitch;
     if (eng === 'typecast' && !v.voice) throw new Error('타입캐스트 voice ID 를 정해 주세요 (🔍 찾기)');
     const r = await srvJSON('/api/tts', body);
     return { blob: await fetchKey(r.key), key: r.key };
@@ -3506,8 +3548,19 @@ function renderCast() {
       <input type="checkbox" data-k="${k}" ${CAST.sel.has(k) ? 'checked' : ''}>
       <span style="flex:1;min-width:0"><span class="note" style="margin:0">${r.pi + 1}컷 · ${esc(OV_SHORT[r.o.kind] || KINDS[r.o.kind] || r.o.kind)} · ${(+r.o.start || 0).toFixed(1)}초</span><br>${esc(r.o.text.trim().slice(0, 80))}</span>
       <span class="note" style="margin:0;white-space:nowrap">${emoOn(r.o) ? (r.o.emo.manual ? '✋ ' : '🎭 ') + esc(r.o.emo.emotion || '') + ' · ' : ''}${esc(v.label)}${!r.o.speaker ? ' (자동)' : ''}${r.o.voice ? (voiceStale(r.o) ? ' · ⚠' : ' · 🔊') : ''}</span>
+      <span class="cast-play" style="display:flex;gap:4px;flex:none">
+        ${r.o.voice ? `<button type="button" class="ib cPlay" data-pk="${k}" title="${voiceStale(r.o) ? '지금 음성 듣기 (설정이 바뀌기 전 음성)' : '듣기'}">${CAST.playing === k ? '⏹' : '▶'}</button>` : ''}
+        ${r.o._vbusy ? '<span class="note" style="margin:0">만드는 중…</span>' : !r.o.voice || voiceStale(r.o) ? `<button type="button" class="ib cGen" data-pk="${k}" title="지금 설정(목소리·감정)으로 만들어서 바로 듣기 — 크레딧 사용">${r.o.voice ? '⟳▶' : '🔊▶'}</button>` : ''}
+      </span>
     </label>`;
   }).join('');
+  const rowOf = k => { const [pid, oid] = k.split(':'), p = P.panels.find(x => x.id === pid); return { p, o: p?.overlays.find(x => x.id === oid) }; };
+  $$('.cPlay', el).forEach(b => (b.onclick = e => { e.preventDefault(); e.stopPropagation(); const k = b.dataset.pk; if (CAST.playing === k) return castStop(); const { o } = rowOf(k); if (o?.voice) castPlay([{ k, o }]); }));
+  $$('.cGen', el).forEach(b => (b.onclick = async e => {
+    e.preventDefault(); e.stopPropagation(); const k = b.dataset.pk, { p, o } = rowOf(k); if (!o) return;
+    castStop(); const genP = genVoice(p, o, !!o.voice && !voiceStale(o)); renderCast(); await genP;
+    renderCast(); if (o.voice && !/^실패/.test(o._vst || '')) castPlay([{ k, o }]); else toast(o._vst || '음성을 만들지 못했습니다', 4000);
+  }));
   $$('input[data-k]', el).forEach((cb, i) => cb.addEventListener('click', e => {
     if (e.shiftKey && CAST.last >= 0) {
       const boxes = $$('input[data-k]', el), [a, b] = [Math.min(CAST.last, i), Math.max(CAST.last, i)];
@@ -3517,6 +3570,23 @@ function renderCast() {
   }));
   castCount();
 }
+/* 목소리 배정 창 미리듣기: 한 줄 또는 체크한 대사들을 순서대로 */
+async function castPlay(items) {
+  castStop(); const my = (CAST.tok = (CAST.tok || 0) + 1);
+  for (const it of items) {
+    if (CAST.tok !== my) return;
+    const buf = await audioBuf(it.o.voice.assetId); if (!buf || CAST.tok !== my) continue;
+    CAST.playing = it.k; renderCast(); castPlayBtn();
+    const c = actx(), s = c.createBufferSource(), g = c.createGain();
+    g.gain.value = clamp(it.o.voice.vol ?? 1, 0, 2); s.buffer = buf; // 미리듣기는 믹서 음소거와 상관없이 들려준다 s.connect(g); g.connect(c.destination);
+    CAST.src = s; s.start();
+    await new Promise(res => { s.onended = res; });
+    if (CAST.tok === my) await new Promise(r => setTimeout(r, 250)); // 대사 사이 짧은 틈
+  }
+  if (CAST.tok === my) { CAST.playing = null; CAST.src = null; renderCast(); castPlayBtn(); }
+}
+function castStop() { CAST.tok = (CAST.tok || 0) + 1; try { CAST.src?.stop(); } catch (e) { /* 이미 멈춤 */ } const was = CAST.playing; CAST.src = null; CAST.playing = null; if (was) renderCast(); castPlayBtn(); }
+function castPlayBtn() { const b = $('#castPlayAll'); if (b) b.textContent = CAST.playing ? '⏹ 멈추기' : '▶ 선택한 대사 이어 듣기'; }
 function castPicked() {
   const out = [];
   P.panels.forEach(p => p.overlays.forEach(o => { if (CAST.sel.has(p.id + ':' + o.id)) out.push({ p, o }); }));
@@ -3527,18 +3597,38 @@ function castCount() { const n = castPicked().length; $('#castApply').textConten
 const CASTEMO = { k: null };
 $('#castEmoChips').innerHTML = EMO_PRESETS.map(([n, ins]) => `<button type="button" class="chip" data-cemo="${n}" title="${esc(ins)}">${n}</button>`).join('');
 $('#castEmoK').oninput = e => { CASTEMO.k = +e.target.value; $('#castEmoKv').textContent = Math.round(CASTEMO.k * 100) + '%'; };
-$$('#castEmoChips [data-cemo]').forEach(b => (b.onclick = () => {
-  const list = castPicked(); if (!list.length) return toast('먼저 대사를 체크하세요');
-  list.forEach(({ o }) => setEmo(o, b.dataset.cemo, { intensity: CASTEMO.k ?? undefined, instr: $('#castEmoInstr').value }));
+async function castNote(want) { // 적은 말투가 있으면 AI 로 엔진별 값까지 맞춘다
+  const list = castPicked(), note = $('#castEmoInstr').value.trim();
+  if (!list.length) return toast('먼저 대사를 체크하세요');
+  if (!note) {
+    if (!want) return toast('말투를 적거나 감정을 고르세요');
+    list.forEach(({ o }) => setEmo(o, want, { intensity: CASTEMO.k ?? undefined }));
+  } else {
+    const b = $('#castNoteGo'); b.disabled = true; b.textContent = '✍ 말투를 엔진에 맞추는 중…';
+    try { await applyNote(list, note, want); if (CASTEMO.k != null) list.forEach(({ o }) => (o.emo.intensity = CASTEMO.k)); }
+    catch (e) { toast('말투 변환 실패 — OpenAI·Gemini 에만 글 그대로 적용됩니다: ' + e.message, 5000); }
+    b.disabled = false; b.textContent = '✍ 이 말투로 적용';
+  }
   save(); renderCast(); refreshInspector(); renderPanels();
   const stale = list.filter(({ o }) => o.voice).length;
-  toast(`🎭 대사 ${list.length}개에 ‘${b.dataset.cemo}’ 감정을 정했습니다${stale ? ` · 음성 ${stale}개는 다시 만들어야 적용됩니다` : ''}`, 3500);
-}));
+  toast(`🎭 대사 ${list.length}개에 ${want ? `‘${want}’` : ''}${note ? ` 말투 “${note.slice(0, 20)}”` : ''} 적용${stale ? ` · 음성 ${stale}개는 다시 만들어야 들립니다` : ''}`, 4000);
+}
+$$('#castEmoChips [data-cemo]').forEach(b => (b.onclick = () => castNote(b.dataset.cemo)));
+$('#castNoteGo').onclick = () => castNote('');
+$('#castEmoInstr').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); castNote(''); } };
 $('#castEmoClear').onclick = () => {
   const list = castPicked().filter(({ o }) => o.emo); if (!list.length) return toast('감정이 정해진 대사를 체크하세요');
   list.forEach(({ o }) => { o.emo = { on: false, manual: true, ai: false, emotion: '', intensity: 0, instr: '', tags: [], speed: 1 }; });
   save(); renderCast(); refreshInspector(); renderPanels(); toast(`대사 ${list.length}개의 감정을 지웠습니다 (자동 AI 연출도 하지 않습니다)`);
 };
+$('#castPlayAll').onclick = () => {
+  if (CAST.playing) return castStop();
+  const tl = timeline(), at = p => tl.find(s => s.p.id === p.id)?.start || 0;
+  const list = castPicked().filter(({ o }) => o.voice).sort((a, b) => at(a.p) + (+a.o.start || 0) - at(b.p) - (+b.o.start || 0)).map(({ p, o }) => ({ k: p.id + ':' + o.id, o }));
+  if (!list.length) return toast('체크한 대사에 만든 음성이 없습니다 (줄의 🔊▶ 로 만들어 들을 수 있습니다)');
+  castPlay(list);
+};
+$('#dlgCast').addEventListener('close', castStop);
 $('#castHint').onchange = e => { S.directHint = e.target.value.trim(); saveSettings(); };
 $('#castQual').onchange = e => { S.directQuality = e.target.value; saveSettings(); };
 $('#castDl').onclick = () => { const list = castPicked().filter(({ o }) => o.voice); if (!list.length) return toast('선택한 대사에 만든 음성이 없습니다'); saveZip(list.map(({ p, o }) => voiceEntry(p, o)), '선택한_대사'); };
@@ -4254,11 +4344,26 @@ function renderChars() {
   const el = $('#charList'); el.innerHTML = '';
   if (!P.chars.length) el.innerHTML = '<p class="note">캐릭터를 등록하면 컷마다 레퍼런스가 자동으로 첨부되어 얼굴·의상이 덜 흔들립니다.</p>';
   P.chars.forEach(c => {
-    const d = document.createElement('div'); d.className = 'card';
+    const d = document.createElement('div'); d.className = 'card ch-card' + (c._open ? ' open' : '');
+    if (!c._open) { // 접힌 카드: 그림·이름·설명 한 줄·목소리 + 대사 배정. 누르면 펼쳐 편집
+      const v = resolveTts(c.tts), img = c.refs[0] && assetURL(c.refs[0]);
+      d.innerHTML = `<div class="row ch-head" role="button" tabindex="0" title="눌러서 편집" style="gap:10px;align-items:center;cursor:pointer">
+          <span class="ch-thumb">${img ? `<img src="${img}" alt="">` : '👤'}</span>
+          <span style="flex:1;min-width:0"><b class="ch-name">${esc(c.name || '이름 없음')}</b>
+            <span class="note ch-sub">${esc((c.desc || '설명 없음').replace(/\s+/g, ' ').slice(0, 40))}</span>
+            <span class="note ch-sub">🔊 ${esc((TTS_ENG[v.engine] || v.engine) + ' · ' + (voiceName(v.voice) || '목소리 없음'))}${c.refs.length ? ` · 그림 ${c.refs.length}장` : ''}</span></span>
+          <button type="button" class="b ghost sm chEdit">✏ 편집</button></div>
+        <div class="row" style="margin-top:6px"><button type="button" class="b sm castMe" title="이 캐릭터가 읽을 대사를 골라 배정합니다">🎙 대사 배정 (${linesOf(c.id)})…</button></div>`;
+      const open = e => { if (e.target.closest('.castMe')) return; c._open = true; renderChars(); setTimeout(() => $('#charList .ch-card.open .nm')?.focus(), 0); };
+      d.querySelector('.ch-head').onclick = open;
+      d.querySelector('.ch-head').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } };
+      d.querySelector('.castMe').onclick = () => openCast(c.id);
+      el.appendChild(d); return;
+    }
     d.innerHTML = `
-      <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
+      <div class="row"><input type="text" class="nm" placeholder="이름" aria-label="캐릭터 이름"><button type="button" class="b sm chSave" title="저장하고 접기">✓ 저장</button><button type="button" class="ib del" title="캐릭터 삭제">✕</button></div>
       <textarea class="ds" rows="3" placeholder="외형: 나이대, 얼굴형, 머리 모양·색, 눈, 의상, 체형, 상징 색"></textarea>
-      <details class="vBox"${hasOwnTts(c.tts) ? ' open' : ''}><summary>🔊 목소리 · ${esc((() => { const v = resolveTts(c.tts); return (TTS_ENG[v.engine] || v.engine) + ' ' + (voiceName(v.voice) || '(없음)'); })())}</summary>${voiceEditorHTML(c.tts || (c.tts = {}))}</details>
+      <details class="vBox" open><summary>🔊 목소리 · ${esc((() => { const v = resolveTts(c.tts); return (TTS_ENG[v.engine] || v.engine) + ' ' + (voiceName(v.voice) || '(없음)'); })())}</summary>${voiceEditorHTML(c.tts || (c.tts = {}))}</details>
       <div class="row"><button type="button" class="b sm castMe" title="이 캐릭터가 읽을 대사를 골라 배정합니다">🎙 대사 배정 (${linesOf(c.id)})…</button></div>
       <div class="refs"></div>
       <div class="row"><label class="b ghost sm">이미지 올리기<input type="file" accept="image/*" multiple hidden></label><button type="button" class="b ghost sm gen" ${c._busy ? 'disabled' : ''}>${c._busy ? '생성 중…' : '시트 생성'}</button></div>
@@ -4278,6 +4383,7 @@ function renderChars() {
     d.querySelector('input[type=file]').onchange = async e => { for (const f of e.target.files) c.refs.push(await addAsset(f)); save(); renderChars(); };
     d.querySelector('.gen').onclick = () => genSheet(c);
     d.querySelector('.castMe').onclick = () => openCast(c.id);
+    d.querySelector('.chSave').onclick = () => { c.name = nm.value; c.desc = ds.value; c._open = false; save(); renderChars(); refreshInspector(); toast(`‘${c.name || '이름 없음'}’ 저장했습니다`); };
     bindVoiceEditor(d.querySelector('.vBox'), c.tts, `안녕하세요, 저는 ${c.name || '이 캐릭터'}예요. 잘 부탁해요!`, () => { renderChars(); refreshInspector(); renderPanels(); });
     el.appendChild(d);
   });
@@ -7747,7 +7853,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#lightb
 $('#title').oninput = e => { P.title = e.target.value; save(); };
 $('#stylePrompt').oninput = e => { P.style.prompt = e.target.value; save(); };
 $('#styleUp').onchange = async e => { for (const f of e.target.files) P.style.refs.push(await addAsset(f)); e.target.value = ''; save(); renderStyle(); };
-$('#addChar').onclick = () => { P.chars.push({ id: uid(), name: `캐릭터 ${P.chars.length + 1}`, desc: '', refs: [], tts: {} }); save(); renderChars(); refreshInspector(); };
+$('#addChar').onclick = () => { P.chars.push({ id: uid(), name: `캐릭터 ${P.chars.length + 1}`, desc: '', refs: [], tts: {}, _open: true }); save(); renderChars(); refreshInspector(); };
 $('#addPanel').onclick = () => {
   const p = newPanel(), cur = selPanel();
   if (cur) { p.chars = [...cur.chars]; p.trans = cur.trans; p.prov = cur.prov; }

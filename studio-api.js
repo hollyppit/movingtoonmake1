@@ -892,8 +892,13 @@ const EL_TAGS = ['happy', 'sad', 'excited', 'angry', 'whispers', 'sighs', 'laugh
 async function directLines(env, b) {
   const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
   if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 200) return json({ error: '대사는 1~200개여야 합니다' }, 400);
-  const lines = b.lines.map(l => ({ id: String(l?.id || '').slice(0, 40), cut: +l?.cut || 0, who: String(l?.who || '').slice(0, 30), kind: String(l?.kind || '').slice(0, 20), text: String(l?.text || '').slice(0, 400), target: !!l?.target }))
-    .filter(l => l.id && l.text.trim());
+  const lines = b.lines.map(l => {
+    const x = { id: String(l?.id || '').slice(0, 40), cut: +l?.cut || 0, who: String(l?.who || '').slice(0, 30), kind: String(l?.kind || '').slice(0, 20), text: String(l?.text || '').slice(0, 400), target: !!l?.target };
+    const note = String(l?.note || '').trim().slice(0, 300), emo = String(l?.want || '').trim().slice(0, 20);
+    if (x.target && note) x.note = note;   // 연출자가 직접 적은 말투 — 그대로 따른다
+    if (x.target && emo) x.want = emo;     // 연출자가 고른 감정
+    return x;
+  }).filter(l => l.id && l.text.trim());
   const targets = new Set(lines.filter(l => l.target).map(l => l.id));
   if (!targets.size) return json({ error: '연출할 대사가 없습니다' }, 400);
   const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 400), voice: String(c?.voice || '').slice(0, 200) }));
@@ -910,6 +915,7 @@ async function directLines(env, b) {
     '5. Bubble kinds: thought = inner voice, close and quiet; shout = projected but with the real emotion under it; whisper = whispered; caption = neutral.\n' +
     '6. Narration = skilled audiobook storyteller, flowing intonation, breaths at commas, mood fitting the scene; title-like lines are calm scene introductions.\n' +
     (hint ? 'Director\'s note for this project (follow it): ' + hint + '\n' : '') +
+    '7. If a target line has "note", it is the director\'s explicit instruction for THAT line - follow it faithfully over your own judgment, and make every output field realize it (some TTS engines cannot read text, so tags, perf, tc, intensity, speed and pitch must carry the note: e.g. "숨죽여 작게" → whisper/tonedown, low intensity, slightly slower, pitch -1; "들떠서 빠르게" → happy/toneup, faster, pitch +2). If it has "want", keep that emotion as the core.\n' +
     'Output per target line:\n' +
     '- "emotion": nuanced Korean label, can be mixed (e.g. 겁먹은 걱정, 애써 태연한 척, 안도 섞인 울먹임).\n' +
     '- "intensity": 0..1 (see rule 4).\n' +
@@ -917,8 +923,9 @@ async function directLines(env, b) {
     '- "tags": up to 2 ElevenLabs v3 audio tags that open the line, from: ' + EL_TAGS.join(', ') + '.\n' +
     '- "perf": the SAME text with only ElevenLabs v3 audio tags in square brackets and pause punctuation ("…", ",") inserted where the actor would really breathe, hesitate, sigh or laugh. Do not change, add or remove any words. Use "" if nothing helps.\n' +
     '- "tc": the closest Typecast preset (normal, happy, sad, angry, whisper, toneup, tonedown), or "smart" when the feeling is subtle or mixed so the engine should infer it from context. Prefer "smart" unless one preset clearly fits.\n' +
-    '- "speed": 0.85..1.15 pace multiplier (small changes only).\n' +
-    'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":string,"intensity":number,"instr":string,"tags":[string],"perf":string,"tc":string,"speed":number}]}. Include every target id exactly once.';
+    '- "speed": 0.85..1.15 pace multiplier (small changes only; up to 0.75..1.3 when a note asks for clearly slow/fast).\n' +
+    '- "pitch": integer -4..4 semitone shift of the voice (0 normally; lower for hushed/heavy/cold, higher for excited/childish/surprised), used by engines that cannot read text.\n' +
+    'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":string,"intensity":number,"instr":string,"tags":[string],"perf":string,"tc":string,"speed":number,"pitch":number}]}. Include every target id exactly once.';
   const user = JSON.stringify({ characters: chars, scenes, script: lines });
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -930,7 +937,7 @@ async function directLines(env, b) {
   const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 연출을 읽지 못했습니다' }, 502);
   let out; try { out = JSON.parse(m[0]); } catch (e) { return json({ error: 'AI 응답 형식 오류' }, 502); }
   const num = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
-  const textOf = new Map(lines.map(l => [l.id, l.text]));
+  const textOf = new Map(lines.map(l => [l.id, l.text])), noted = new Set(lines.filter(l => l.note).map(l => l.id));
   const bare = s => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/[\s.,…!?~'"“”‘’·\-]/g, '');
   const res = (Array.isArray(out?.lines) ? out.lines : []).filter(l => l && targets.has(String(l.id))).map(l => {
     const id = String(l.id), tc = String(l.tc || '').toLowerCase();
@@ -941,7 +948,7 @@ async function directLines(env, b) {
       id, emotion: String(l.emotion || '평온').slice(0, 20), intensity: +num(l.intensity, 0, 1, 0.3).toFixed(2),
       instr: String(l.instr || '').slice(0, 260), tags: (Array.isArray(l.tags) ? l.tags : []).map(t => String(t).toLowerCase().replace(/[^a-z]/g, '')).filter(t => EL_TAGS.includes(t)).slice(0, 2),
       perf, tc: ['smart', 'normal', 'happy', 'sad', 'angry', 'whisper', 'toneup', 'tonedown'].includes(tc) ? tc : 'smart',
-      speed: +num(l.speed, 0.85, 1.15, 1).toFixed(2),
+      speed: +num(l.speed, noted.has(id) ? 0.75 : 0.85, noted.has(id) ? 1.3 : 1.15, 1).toFixed(2), pitch: Math.round(num(l.pitch, -4, 4, 0)),
     };
   });
   const seen = new Set(), uniq = res.filter(l => !seen.has(l.id) && seen.add(l.id));
