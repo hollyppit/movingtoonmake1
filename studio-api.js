@@ -887,7 +887,7 @@ async function googleTts(env, b, who) {
 }
 /* ---- AI 감정 연출: 대본 흐름·장면·캐릭터를 보고 대사마다 감정과 읽는 법을 정한다 ----
    반환 { lines: [{ id, emotion, intensity, instr, tags[], speed }] } — 엔진마다 브라우저가 알맞게 적용한다 */
-const DIRECT_MODEL = 'claude-sonnet-5-5';
+const DIRECT_MODEL = 'claude-sonnet-5-5', DIRECT_MODEL_HIGH = 'claude-opus-5-5'; // ‘정밀’ 은 더 섬세하지만 비싸다
 const EL_TAGS = ['happy', 'sad', 'excited', 'angry', 'whispers', 'sighs', 'laughs', 'chuckles', 'crying', 'nervous', 'curious', 'sarcastic', 'shouting', 'calm', 'mischievously', 'surprised', 'scared', 'tired', 'thoughtful', 'gasps', 'exhales', 'hesitates', 'serious', 'tender', 'cold', 'pleading', 'determined', 'embarrassed'];
 async function directLines(env, b) {
   const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
@@ -896,19 +896,33 @@ async function directLines(env, b) {
     .filter(l => l.id && l.text.trim());
   const targets = new Set(lines.filter(l => l.target).map(l => l.id));
   if (!targets.size) return json({ error: '연출할 대사가 없습니다' }, 400);
-  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 200) }));
+  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 400), voice: String(c?.voice || '').slice(0, 200) }));
   const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 120).map(s => ({ cut: +s?.cut || 0, desc: String(s?.desc || '').slice(0, 240) }));
-  const system = 'You are a voice director for a Korean motion webtoon (moving comic). You get the script in order (cut number, speaker, bubble kind, text), scene descriptions and character notes. ' +
-    'For every line marked "target": true, decide how it should be performed, judging from the story flow, the scene, the speaker\'s personality, punctuation and bubble kind ' +
-    '(shout = loud/intense, thought = inner voice, quiet and close, whisper = whispered, caption = neutral). Keep consecutive lines of one speaker consistent and avoid over-acting; ordinary lines can be "평온" with low intensity. ' +
-    'Narration must sound like a skilled audiobook storyteller, never flat, robotic or word-by-word: give it natural flowing intonation that follows the sentence, gentle emphasis on key images, breaths at commas, and a mood that fits the scene (wonder, warmth, tension...). For narration "instr" describe this storytelling delivery concretely (e.g. 신비로운 풍경을 들려주듯 부드럽게 흐르는 억양으로, 쉼표에서 살짝 숨 쉬며). Short title-like narration (place names, time) should be read like a calm scene introduction, not shouted. ' +
-    'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":"short Korean emotion label (e.g. 슬픔, 설렘, 분노, 긴장, 평온, 장난)","intensity":0..1,' +
-    '"instr":"one short Korean acting direction for a TTS voice actor: emotion, tone, pace, breath (e.g. 목이 메어 떨리는 목소리로 천천히, 끝을 흐리며)",' +
-    '"tags":[up to 2 ElevenLabs v3 audio tags from: ' + EL_TAGS.join(', ') + '],"speed":0.8..1.2}]}. Include every target id exactly once.';
+  const hint = String(b.hint || '').trim().slice(0, 400);
+  const model = b.quality === 'high' ? DIRECT_MODEL_HIGH : DIRECT_MODEL;
+  const system = 'You are an experienced Korean voice-acting director (애니메이션·웹툰 더빙 연출) for a Korean motion webtoon. You get the whole script in order (cut number, speaker, bubble kind, text), scene notes and character notes (age, personality). ' +
+    'For every line marked "target": true, direct a NATURAL, believable performance the way a good Korean dubbing actor would actually say it - not a label pasted on the line.\n' +
+    'How to judge:\n' +
+    '1. Read the whole exchange first. Each line answers or reacts to the previous one (often another speaker): find the subtext - what the character feels but does not say, their relationship, what just happened, and what they want from the other person.\n' +
+    '2. Fit the character: age and personality change everything (a scared 13-year-old boy sounds small, breathy and fast; a calm master speaks low and unhurried). Keep each character\'s voice consistent across lines and let emotions shift gradually unless the story turns.\n' +
+    '3. Read the punctuation as acting: leading ".."/"…" = hesitation or trailing in; "?" = real question vs. rhetorical; "!" = not always shouting; short broken lines = breathless or holding back.\n' +
+    '4. Be restrained and realistic. Most lines are mixed and subtle (intensity 0.2-0.6); only real climaxes go above 0.75. Never make every line dramatic. Plain informative lines stay natural with low intensity.\n' +
+    '5. Bubble kinds: thought = inner voice, close and quiet; shout = projected but with the real emotion under it; whisper = whispered; caption = neutral.\n' +
+    '6. Narration = skilled audiobook storyteller, flowing intonation, breaths at commas, mood fitting the scene; title-like lines are calm scene introductions.\n' +
+    (hint ? 'Director\'s note for this project (follow it): ' + hint + '\n' : '') +
+    'Output per target line:\n' +
+    '- "emotion": nuanced Korean label, can be mixed (e.g. 겁먹은 걱정, 애써 태연한 척, 안도 섞인 울먹임).\n' +
+    '- "intensity": 0..1 (see rule 4).\n' +
+    '- "instr": 1-2 concrete Korean sentences for a TTS voice actor covering voice quality, volume, pace, pitch movement, where to breathe or pause and how the ending falls or rises (e.g. "숨을 삼키고 작게, 이름을 조심스럽게 부르듯 끝을 살짝 올려. 대답을 기다리는 짧은 침묵").\n' +
+    '- "tags": up to 2 ElevenLabs v3 audio tags that open the line, from: ' + EL_TAGS.join(', ') + '.\n' +
+    '- "perf": the SAME text with only ElevenLabs v3 audio tags in square brackets and pause punctuation ("…", ",") inserted where the actor would really breathe, hesitate, sigh or laugh. Do not change, add or remove any words. Use "" if nothing helps.\n' +
+    '- "tc": the closest Typecast preset (normal, happy, sad, angry, whisper, toneup, tonedown), or "smart" when the feeling is subtle or mixed so the engine should infer it from context. Prefer "smart" unless one preset clearly fits.\n' +
+    '- "speed": 0.85..1.15 pace multiplier (small changes only).\n' +
+    'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":string,"intensity":number,"instr":string,"tags":[string],"perf":string,"tc":string,"speed":number}]}. Include every target id exactly once.';
   const user = JSON.stringify({ characters: chars, scenes, script: lines });
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: DIRECT_MODEL, max_tokens: Math.min(16000, 400 + targets.size * 160), system, messages: [{ role: 'user', content: user }] }),
+    body: JSON.stringify({ model, max_tokens: Math.min(32000, 600 + targets.size * 320), system, messages: [{ role: 'user', content: user }] }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
@@ -916,14 +930,23 @@ async function directLines(env, b) {
   const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 연출을 읽지 못했습니다' }, 502);
   let out; try { out = JSON.parse(m[0]); } catch (e) { return json({ error: 'AI 응답 형식 오류' }, 502); }
   const num = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
-  const res = (Array.isArray(out?.lines) ? out.lines : []).filter(l => l && targets.has(String(l.id))).map(l => ({
-    id: String(l.id), emotion: String(l.emotion || '평온').slice(0, 12), intensity: +num(l.intensity, 0, 1, 0.3).toFixed(2),
-    instr: String(l.instr || '').slice(0, 160), tags: (Array.isArray(l.tags) ? l.tags : []).map(t => String(t).toLowerCase().replace(/[^a-z]/g, '')).filter(t => EL_TAGS.includes(t)).slice(0, 2),
-    speed: +num(l.speed, 0.8, 1.2, 1).toFixed(2),
-  }));
+  const textOf = new Map(lines.map(l => [l.id, l.text]));
+  const bare = s => String(s || '').replace(/\[[^\]]*\]/g, '').replace(/[\s.,…!?~'"“”‘’·\-]/g, '');
+  const res = (Array.isArray(out?.lines) ? out.lines : []).filter(l => l && targets.has(String(l.id))).map(l => {
+    const id = String(l.id), tc = String(l.tc || '').toLowerCase();
+    // perf: 단어는 그대로, 태그·쉼만 넣었는지 확인 (허용한 태그만)
+    let perf = String(l.perf || '').replace(/\[([^\]]*)\]/g, (m, t) => { t = t.toLowerCase().replace(/[^a-z]/g, ''); return EL_TAGS.includes(t) ? `[${t}]` : ''; }).replace(/\s{2,}/g, ' ').trim().slice(0, 600);
+    if (!perf || bare(perf) !== bare(textOf.get(id))) perf = '';
+    return {
+      id, emotion: String(l.emotion || '평온').slice(0, 20), intensity: +num(l.intensity, 0, 1, 0.3).toFixed(2),
+      instr: String(l.instr || '').slice(0, 260), tags: (Array.isArray(l.tags) ? l.tags : []).map(t => String(t).toLowerCase().replace(/[^a-z]/g, '')).filter(t => EL_TAGS.includes(t)).slice(0, 2),
+      perf, tc: ['smart', 'normal', 'happy', 'sad', 'angry', 'whisper', 'toneup', 'tonedown'].includes(tc) ? tc : 'smart',
+      speed: +num(l.speed, 0.85, 1.15, 1).toFixed(2),
+    };
+  });
   const seen = new Set(), uniq = res.filter(l => !seen.has(l.id) && seen.add(l.id));
   if (!uniq.length) return json({ error: 'AI 가 연출을 내지 못했습니다. 다시 시도해 주세요.' }, 502);
-  return json({ lines: uniq, missing: [...targets].filter(id => !seen.has(id)), model: DIRECT_MODEL, usage: j.usage || null });
+  return json({ lines: uniq, missing: [...targets].filter(id => !seen.has(id)), model, usage: j.usage || null });
 }
 /* ---- AI 음악 감독 · 사운드 디자이너: 컷(이미지·장면·대사·길이)을 보고 배경음악 설계와 효과음 목록을 만든다 ---- */
 const SCORE_MODEL = 'claude-sonnet-5-5';
