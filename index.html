@@ -83,6 +83,13 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 #aiEdit .ai-quick .b { width: 100%; }
 #aiEdit .ai-cap { border-top: 1px solid var(--line-2); padding: 6px 12px; font-size: .84rem; }
 #aiEdit .ai-cap summary { cursor: pointer; color: var(--gold-l); font-weight: 600; }
+/* 펼친 칸은 패널 안에서 스크롤 (버튼이 화면 밖으로 밀려나지 않게) · 대화 기록은 줄어들 수 있게 */
+#aiEdit { max-height: min(720px, 86vh); }
+#aiEdit > :not(.ai-log) { flex: none; }
+#aiEdit .ai-log { min-height: 80px; }
+#aiEdit .ai-cap[open] { max-height: 42vh; overflow-y: auto; }
+#aiEdit #aiFill textarea { width: 100%; min-height: 110px; margin: 4px 0; }
+#aiEdit #aiFill label.chk { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
 #aiEdit .ai-cap-b { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 #aiEdit .ai-cap-b label { display: flex; align-items: center; gap: 6px; }
 #aiEdit .ai-cap-b select, #aiEdit .ai-cap-b textarea { width: 100%; }
@@ -683,6 +690,13 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
   <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
+  <details class="ai-cap" id="aiFill"><summary>📝 대본으로 컷 채우기</summary>
+    <p class="note" style="margin:4px 0">대본 전체를 붙여 넣으면 AI 가 컷 그림을 보고 나레이션·말풍선·생각·외침·자막으로 나눠 알맞은 컷과 자리에 넣습니다. 지문은 장면 메모로 들어갑니다. 적용 전에 미리보기에서 고칠 수 있습니다.</p>
+    <textarea id="fillScript" rows="6" placeholder="예)&#10;나레이션: 백 년도 더 된 옛날, 무주의 산속.&#10;백운: 앉아라. 긴 이야기가 될 테니..&#10;(다설이가 고개를 갸웃한다)&#10;다설이: 네?!"></textarea>
+    <label class="chk"><input type="radio" name="fillMode" value="append" checked> 이미 글이 있는 컷은 그대로 두고 덧붙이기</label>
+    <label class="chk"><input type="radio" name="fillMode" value="replace"> 대본이 들어가는 컷의 기존 글은 바꾸기</label>
+    <button type="button" class="b sm" id="fillGo" style="width:100%">📝 AI 로 컷에 나누기</button>
+  </details>
   <details class="ai-cap" id="aiCap"><summary>대본으로 자막 자동 생성</summary>
     <div class="ai-cap-b">
       <label><span>음성 트랙</span><select id="capTrack"></select></label>
@@ -784,6 +798,16 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </section>
   </div>
   <div class="dlg-f"><span class="note" style="flex:1;margin:0">탐색 목록의 목소리를 고르면 내 일레븐랩스 계정 ‘내 음성’에 추가한 뒤 씁니다. 요금제마다 추가할 수 있는 목소리 수가 다릅니다.</span><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
+<dialog id="dlgFill" style="width:min(1000px,96vw)">
+  <div class="dlg-h"><h3>📝 대본으로 컷 채우기 — 미리보기</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b" id="fillBody"></div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="fillSt" style="flex:1"></span>
+    <button type="button" class="b ghost sm" id="fillRedo">↻ 다시 나누기</button>
+    <button type="button" class="b sm" id="fillApply">적용</button>
+    <button type="button" class="b sm" id="fillApplyFull" title="적용한 뒤 목소리·감정·음성·타이밍·효과음·배경음악까지 이어서">적용하고 ✨ 전체 편집</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
 <dialog id="dlgArc" style="width:min(900px,96vw)">
@@ -7176,6 +7200,101 @@ async function storyForAI(st) {
   }
   return cuts;
 }
+/* ---- 대본으로 컷 채우기 ----
+   FILL.plan = { items:[{cut,kind,speaker,text,x,y,tx,ty}], scenes:[{cut,note}], newChars:[{name,desc,use}], unplaced:[], summary } (cut 은 0부터) */
+const FILL = { plan: null, busy: false, script: '', replace: false };
+const FILL_KIND_KO = { narration: '나레이션', speech: '말풍선', thought: '생각', shout: '외침', whisper: '속삭임', caption: '자막' };
+async function runFill(redo) {
+  if (!isServer()) return toast('대본으로 컷 채우기는 서버 모드에서만 됩니다');
+  if (!redo) { FILL.script = $('#fillScript').value.trim(); FILL.replace = $('input[name=fillMode]:checked')?.value === 'replace'; }
+  if (!FILL.script) return toast('대본을 붙여 넣어 주세요');
+  if (!P.panels.some(p => curAsset(p))) toast('컷 그림이 없어도 나눌 수 있지만, 그림이 있으면 훨씬 정확합니다', 3500);
+  const dlg = $('#dlgFill'); if (!dlg.open) dlg.showModal();
+  FILL.busy = true; FILL.plan = null; renderFill();
+  const st = t => ($('#fillSt').textContent = t);
+  try {
+    const cuts = await storyForAI(st); st('📝 AI 가 컷 그림을 보며 대본을 나누는 중… (1~2분)');
+    const r = await srvJSON('/api/tts', { op: 'scriptfill', cuts, script: FILL.script, replace: FILL.replace, chars: P.chars.map(c => ({ name: c.name || '', desc: c.desc || '' })) });
+    r.newChars = (r.newChars || []).map(c => ({ ...c, use: true }));
+    FILL.plan = r; st('');
+    logCall({ kind: 'AI 대본 나누기', provider: 'claude', ok: true, cost: (+S.cDirect || 0) * 3 });
+  } catch (e) { st('실패: ' + e.message); }
+  FILL.busy = false; renderFill();
+}
+function fillSpeakerOptions(cur) {
+  const pl = FILL.plan, names = ['나레이터', ...P.chars.map(c => c.name || '이름 없음'), ...(pl?.newChars || []).filter(c => c.use).map(c => c.name)];
+  if (cur && !names.includes(cur)) names.push(cur);
+  return `<option value="" ${!cur ? 'selected' : ''}>(자동)</option>` + [...new Set(names)].map(n => `<option ${n === cur ? 'selected' : ''}>${esc(n)}</option>`).join('');
+}
+function renderFill() {
+  const b = $('#fillBody'), pl = FILL.plan;
+  if (!pl) { b.innerHTML = `<p class="note" style="padding:20px;text-align:center">${FILL.busy ? '컷 그림과 대본을 읽고 있습니다… (1~2분)' : '결과가 없습니다. ‘다시 나누기’를 눌러 주세요.'}</p>`; $('#fillApply').disabled = $('#fillApplyFull').disabled = true; return; }
+  const byCut = new Map(); pl.items.forEach((it, i) => { if (!byCut.has(it.cut)) byCut.set(it.cut, []); byCut.get(it.cut).push(i); });
+  pl.scenes.forEach(s => { if (!byCut.has(s.cut)) byCut.set(s.cut, []); });
+  const cutsUsed = [...byCut.keys()].sort((a, c) => a - c);
+  b.innerHTML = `<p style="margin:0 0 6px">${esc(pl.summary || '')}</p>
+    <p class="note" style="margin:0 0 8px">컷 ${cutsUsed.length}개에 글 ${pl.items.length}개${FILL.replace ? ' · 이 컷들의 기존 글은 바뀝니다' : ' · 기존 글은 그대로 두고 덧붙입니다'}. 종류·읽는 사람·글·컷 번호를 고칠 수 있습니다.</p>
+    ${pl.newChars.length ? `<div class="box" style="margin-bottom:8px"><span class="lbl">대본에 새로 나온 인물 — 캐릭터로 추가</span>${pl.newChars.map((c, k) => `<label class="chk" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-nc="${k}" ${c.use ? 'checked' : ''}> <b>${esc(c.name)}</b> <span class="note" style="margin:0">${esc(c.desc)}</span></label>`).join('')}</div>` : ''}
+    ${cutsUsed.map(ci => { const p = P.panels[ci], img = p && curAsset(p) ? assetURL(curAsset(p)) : '', sc = pl.scenes.find(s => s.cut === ci);
+      return `<div class="card" style="padding:8px;margin:6px 0;display:flex;gap:10px">
+        <div style="flex:none;width:64px">${img ? `<img src="${img}" alt="" style="width:64px;border-radius:6px">` : '<div class="note" style="margin:0">그림 없음</div>'}<div class="note" style="margin:2px 0 0;text-align:center">컷 ${ci + 1}</div></div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+          ${sc ? `<input type="text" class="fScene" data-sc="${ci}" value="${esc(sc.note)}" title="장면 메모 (지문) — 컷 장면 칸이 비어 있으면 넣습니다" style="font-size:.8rem;font-style:italic">` : ''}
+          ${byCut.get(ci).map(i => { const it = pl.items[i]; return `<div class="row" data-fi="${i}" style="gap:4px;align-items:center">
+            <select class="fKind" style="flex:none;width:92px">${Object.entries(FILL_KIND_KO).map(([k, n]) => `<option value="${k}" ${k === it.kind ? 'selected' : ''}>${n}</option>`).join('')}</select>
+            <select class="fSpk" style="flex:none;width:110px">${fillSpeakerOptions(it.speaker)}</select>
+            <input type="text" class="fText" value="${esc(it.text)}" style="flex:1;min-width:0">
+            <input type="number" class="fCut" min="1" max="${P.panels.length}" value="${it.cut + 1}" title="컷 번호 (옮기기)" style="flex:none;width:58px">
+            <button type="button" class="ib del fDel" title="빼기">✕</button></div>`; }).join('')}
+        </div></div>`; }).join('')}
+    ${pl.unplaced?.length ? `<div class="box"><span class="lbl">컷에 넣지 못한 줄 — 컷 번호를 정해 넣을 수 있습니다</span>${pl.unplaced.map((t, k) => `<div class="row" data-up="${k}" style="gap:4px;align-items:center"><span style="flex:1">${esc(t)}</span><input type="number" class="uCut" min="1" max="${P.panels.length}" value="1" style="flex:none;width:58px"><button type="button" class="b ghost sm uAdd">넣기</button></div>`).join('')}</div>` : ''}`;
+  const rerender = () => renderFill();
+  $$('[data-nc]', b).forEach(c => (c.onchange = () => { pl.newChars[+c.dataset.nc].use = c.checked; rerender(); }));
+  $$('.fScene', b).forEach(i => (i.onchange = () => { const s = pl.scenes.find(x => x.cut === +i.dataset.sc); if (s) s.note = i.value.trim(); }));
+  $$('[data-fi]', b).forEach(row => {
+    const it = pl.items[+row.dataset.fi], q = s => $(s, row);
+    q('.fKind').onchange = e => { it.kind = e.target.value; if (it.kind === 'narration') it.speaker = '나레이터'; rerender(); };
+    q('.fSpk').onchange = e => { it.speaker = e.target.value; };
+    q('.fText').onchange = e => { it.text = e.target.value.trim(); };
+    q('.fCut').onchange = e => { const v = clamp(Math.trunc(+e.target.value) || 1, 1, P.panels.length) - 1; if (v !== it.cut) { it.cut = v; delete it.x; delete it.y; delete it.tx; delete it.ty; rerender(); } };
+    q('.fDel').onclick = () => { pl.items.splice(+row.dataset.fi, 1); rerender(); };
+  });
+  $$('[data-up]', b).forEach(row => { $('.uAdd', row).onclick = () => { const k = +row.dataset.up, t = pl.unplaced[k], ci = clamp(Math.trunc(+$('.uCut', row).value) || 1, 1, P.panels.length) - 1; pl.items.push({ cut: ci, kind: 'speech', speaker: '', text: t }); pl.unplaced.splice(k, 1); rerender(); }; });
+  $('#fillApply').disabled = $('#fillApplyFull').disabled = FILL.busy || !pl.items.length;
+}
+/* 적용: 새 캐릭터 → (바꾸기면) 기존 글 지우기 → 글 넣기(위치·꼬리·읽는 사람) → 장면 메모 → 읽는 속도에 맞춰 배치. Ctrl+Z 한 번으로 되돌린다 */
+function applyFill() {
+  const pl = FILL.plan; if (!pl?.items.length) return 0;
+  stop(); flushLocal();
+  pl.newChars.filter(c => c.use && !P.chars.some(x => (x.name || '').trim() === c.name)).forEach(c => P.chars.push({ id: uid(), name: c.name, desc: c.desc || '', refs: [], tts: {} }));
+  const touched = new Set(pl.items.map(it => it.cut));
+  if (FILL.replace) touched.forEach(ci => { const p = P.panels[ci]; if (!p) return; if (p.overlays.some(o => o.id === selOv)) selOv = null; p.overlays.forEach(dropVoice); p.overlays = []; }); // 바꾸기: 그 컷의 기존 글(과 음성) 지우기 — 그림·레이어는 그대로
+  pl.items.forEach(it => {
+    const p = P.panels[it.cut]; if (!p || !it.text?.trim()) return;
+    const o = newOverlay(it.kind, p); o.text = it.text.trim();
+    if (Number.isFinite(it.x) && Number.isFinite(it.y)) { o.x = it.x; o.y = it.y; }
+    else if (it.kind !== 'narration' && it.kind !== 'caption') { const k = p.overlays.filter(x => ROUNDK.includes(x.kind)).length, right = k % 2 === 1; o.x = right ? 0.64 : 0.36; o.y = clamp(0.2 + Math.floor(k / 2) * 0.15 + (right ? 0.07 : 0), 0.12, 0.66); }
+    if (o.tail) o.tail = Number.isFinite(it.tx) && Number.isFinite(it.ty) ? { x: it.tx, y: it.ty } : { x: o.x + (o.x > 0.5 ? 0.05 : -0.05), y: o.y + 0.13 };
+    const sid = it.speaker && it.speaker !== '나레이터' ? speakerIdByName(it.speaker) : it.speaker === '나레이터' && it.kind !== 'narration' ? 'narr' : null;
+    if (sid) o.speaker = sid;
+    o.start = 99; p.overlays.push(o); // 순서를 지키도록 맨 뒤에 두고, 아래에서 읽는 속도에 맞춰 배치
+  });
+  pl.scenes.forEach(s => { const p = P.panels[s.cut]; if (p && !String(p.prompt || '').trim() && s.note) p.prompt = s.note; });
+  touched.forEach(ci => { const p = P.panels[ci]; if (p) syncCut(p); });
+  save(); thumbSig = ''; renderAll(); flushLocal();
+  return pl.items.length;
+}
+async function fillApply(full) {
+  const n = applyFill(); if (!n) return;
+  $('#dlgFill').close(); FILL.plan = null;
+  aiSay('bot', `📝 대본을 글 ${n}개로 나눠 컷에 넣고 읽는 속도에 맞춰 배치했습니다 — 마음에 안 들면 Ctrl+Z 로 되돌립니다.`);
+  toast(`📝 대본 ${n}줄을 컷에 넣었습니다`, 3000);
+  if (full) $('#aiFull').click();
+}
+$('#fillGo').onclick = () => runFill();
+$('#fillRedo').onclick = () => runFill(true);
+$('#fillApply').onclick = () => fillApply(false);
+$('#fillApplyFull').onclick = () => fillApply(true);
 /* ---- 이야기 흐름 분석 (P.arc): 감정 연출·AI 편집·효과음·작곡이 함께 쓰는 전체 감정선 ----
    대본(컷 수·대사·읽는 사람)이 바뀌면 ‘오래됨’ 으로 보고, 다음 AI 작업 전에 다시 분석한다 */
 const arcSig = () => hash(P.panels.map(p => p.overlays.filter(o => o.text?.trim()).map(o => (o.speaker || '') + ':' + o.text.trim()).join('|')).join('#') + '#' + P.panels.length).toString(36);

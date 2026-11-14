@@ -1063,6 +1063,40 @@ async function arcPlan(env, b) {
     note: String(c?.note || '').slice(0, 160) })).filter(c => c.name);
   return json({ title: String(out?.title || '').slice(0, 40), logline: String(out?.logline || '').slice(0, 200), tone: String(out?.tone || '').slice(0, 80), beats, characters, model: SCORE_MODEL });
 }
+/* ---- 대본으로 컷 채우기: 대본 전체 + 컷 그림 → 컷마다 들어갈 나레이션·말풍선·자막·지문 ----
+   반환 { items:[{cut,kind,speaker,text,x,y,tx,ty}], scenes:[{cut,note}], newChars:[{name,desc}], unplaced:[text], summary } (cut 은 0부터) */
+const FILL_KINDS = ['narration', 'speech', 'thought', 'shout', 'whisper', 'caption'];
+async function scriptFill(env, b) {
+  const cuts = storyCuts(b), n = cuts.length;
+  const script = String(b.script || '').replace(/\r/g, '').trim().slice(0, 20000);
+  if (!script) return json({ error: '대본이 비어 있습니다' }, 400);
+  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 200) }));
+  const system = 'You are a webtoon letterer and editor for a Korean motion webtoon. You get the cut images in order (with existing text and scene notes) and a pasted Korean script that may mix narration, dialogue (often "이름: 대사"), inner thoughts, sound/stage directions (지문) and captions. ' +
+    'Distribute the script over the cuts the way a professional would: read each image to see who is in it and what happens, keep the script order, put each line in the cut whose picture matches it, and spread lines so no cut is overcrowded (about 1-4 text items per cut; use more cuts rather than cramming). ' +
+    'Every narration, dialogue, thought and caption line of the script must be placed exactly once; do not rewrite or invent lines (you may split a very long narration into 2 items at a sentence boundary). Stage directions are NOT text items: summarize them into that cut\'s scene note. ' +
+    'kind: "narration" for narrator/storytelling text, "speech" for normal dialogue, "thought" for inner voice (often in parentheses or described as 속마음/생각), "shout" for yelling (short lines with !), "whisper" for whispering, "caption" only for on-screen captions like time/place cards. ' +
+    'speaker: the character name exactly as in the character list when the line is theirs (match nicknames sensibly), "나레이터" for narration, or a new name if the script introduces someone not in the list (also list them in newChars with a short Korean description from the script). ' +
+    'Position: x,y = center of the bubble in 0..1 of the image, placed in empty/low-detail areas near the speaker without covering faces; for speech-type bubbles give tx,ty = the speaker\'s mouth/head position (where the tail points). Narration usually top (y≈0.1-0.18), captions bottom (y≈0.82). ' +
+    'Lines you truly cannot place go to "unplaced". ' + (b.replace ? 'Existing text in the cuts will be replaced, so ignore it. ' : 'Cuts may already have text; place new lines so they continue naturally and avoid those spots. ') +
+    'Reply with ONLY JSON, no markdown: {"summary":"1-2 Korean sentences","items":[{"cut":0,"kind":"speech","speaker":"","text":"","x":0.5,"y":0.3,"tx":0.4,"ty":0.45}],"scenes":[{"cut":0,"note":"short Korean scene/action note"}],"newChars":[{"name":"","desc":""}],"unplaced":[""]}';
+  const out = await askClaude(env, system, cuts, { request: 'distribute script', characters: chars, script }, 16000);
+  const num = (v, d) => (Number.isFinite(+v) ? Math.min(0.95, Math.max(0.05, +v)) : d);
+  const items = (Array.isArray(out?.items) ? out.items : []).map(x => {
+    const cut = Math.trunc(+x?.cut), text = String(x?.text || '').trim().slice(0, 300);
+    if (!(cut >= 0 && cut < n) || !text) return null;
+    const kind = FILL_KINDS.includes(x?.kind) ? x.kind : 'speech';
+    const it = { cut, kind, speaker: String(x?.speaker || '').trim().slice(0, 30), text };
+    if (Number.isFinite(+x?.x) && Number.isFinite(+x?.y)) { it.x = num(x.x, 0.5); it.y = num(x.y, 0.3); }
+    if (kind !== 'narration' && kind !== 'caption' && Number.isFinite(+x?.tx) && Number.isFinite(+x?.ty)) { it.tx = num(x.tx, 0.4); it.ty = num(x.ty, 0.45); }
+    return it;
+  }).filter(Boolean).slice(0, 400);
+  const scenes = (Array.isArray(out?.scenes) ? out.scenes : []).map(s => ({ cut: Math.trunc(+s?.cut), note: String(s?.note || '').trim().slice(0, 200) })).filter(s => s.cut >= 0 && s.cut < n && s.note);
+  const known = new Set(chars.map(c => c.name));
+  const newChars = (Array.isArray(out?.newChars) ? out.newChars : []).map(c => ({ name: String(c?.name || '').trim().slice(0, 30), desc: String(c?.desc || '').trim().slice(0, 160) })).filter(c => c.name && c.name !== '나레이터' && !known.has(c.name)).slice(0, 20);
+  const unplaced = (Array.isArray(out?.unplaced) ? out.unplaced : []).map(t => String(t || '').trim().slice(0, 300)).filter(Boolean).slice(0, 100);
+  if (!items.length) return json({ error: 'AI 가 대본을 컷에 나누지 못했습니다. 대본이나 컷 그림을 확인하고 다시 시도해 주세요.' }, 502);
+  return json({ summary: String(out?.summary || '').slice(0, 300), items, scenes, newChars, unplaced, model: SCORE_MODEL });
+}
 /* 배경음악 설계: 이야기 전개에 맞춰 컷 구간마다 섹션(분위기·악기·템포)을 나눈다. 섹션 길이 = 그 컷들 길이의 합 (3~120초) */
 async function scorePlan(env, b) {
   const cuts = storyCuts(b);
@@ -1238,6 +1272,7 @@ export async function handleTts(req, env) {
     if (b.op === 'scoreplan') return await scorePlan(env, b);
     if (b.op === 'sfxplan') return await sfxPlan(env, b);
     if (b.op === 'arc') return await arcPlan(env, b);
+    if (b.op === 'scriptfill') return await scriptFill(env, b);
     const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
     const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
     if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);
