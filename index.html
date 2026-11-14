@@ -689,7 +689,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
-  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
+  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiWizard" title="콘티·스케치 그림부터: 이야기 흐름 → 그림 완성(스케치는 그리기, 인물이 된 컷은 배경만+후보정) → 대본 채우기 → 목소리·효과음·음악까지 한 번에">🎬 한 번에 완성</button><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
   <details class="ai-cap" id="aiFill"><summary>📝 대본으로 컷 채우기</summary>
     <p class="note" style="margin:4px 0">대본 전체를 붙여 넣으면 AI 가 컷 그림을 보고 나레이션·말풍선·생각·외침·자막으로 나눠 알맞은 컷과 자리에 넣습니다. 지문은 장면 메모로 들어갑니다. 적용 전에 미리보기에서 고칠 수 있습니다.</p>
     <textarea id="fillScript" rows="6" placeholder="예)&#10;나레이션: 백 년도 더 된 옛날, 무주의 산속.&#10;백운: 앉아라. 긴 이야기가 될 테니..&#10;(다설이가 고개를 갸웃한다)&#10;다설이: 네?!"></textarea>
@@ -798,6 +798,15 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </section>
   </div>
   <div class="dlg-f"><span class="note" style="flex:1;margin:0">탐색 목록의 목소리를 고르면 내 일레븐랩스 계정 ‘내 음성’에 추가한 뒤 씁니다. 요금제마다 추가할 수 있는 목소리 수가 다릅니다.</span><button type="button" class="b ghost sm" data-close>닫기</button></div>
+</dialog>
+
+<dialog id="dlgWiz" style="width:min(1000px,96vw)">
+  <div class="dlg-h"><h3>🎬 한 번에 완성 — 콘티·스케치에서 완성 회차까지</h3><button class="ib" data-close aria-label="닫기">✕</button></div>
+  <div class="dlg-b" id="wizBody"></div>
+  <div class="dlg-f" style="flex-wrap:wrap;gap:6px"><span class="st" id="wizSt" style="flex:1"></span>
+    <button type="button" class="b danger sm" id="wizStop" hidden>⏹ 중지</button>
+    <button type="button" class="b sm" id="wizGo">🎬 시작</button>
+    <button type="button" class="b ghost sm" data-close>닫기</button></div>
 </dialog>
 
 <dialog id="dlgFill" style="width:min(1000px,96vw)">
@@ -7190,16 +7199,148 @@ const MUSIC_PRESETS = [
 const AISCORE = { hint: '', plan: null, busy: false }, AISFX = { plan: null, sel: new Set(), busy: false, done: new Set() };
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 /* 이야기 정보: 컷마다 길이·장면 메모·대사(읽는 사람·감정)·작은 그림(최대 60장) */
+async function assetB64(id, max) { // 이미지 파일 → 작은 JPEG base64 (AI 에 보내는 썸네일)
+  const im = await waitImg(id), k = Math.min(1, max / Math.max(im.naturalWidth || im.width, im.naturalHeight || im.height));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round((im.naturalWidth || im.width) * k)); c.height = Math.max(1, Math.round((im.naturalHeight || im.height) * k));
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(im, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.7).split(',')[1] || '';
+}
 async function storyForAI(st) {
   const tl = timeline(), every = Math.max(1, Math.ceil(tl.length / 60)), cuts = [];
   for (let i = 0; i < tl.length; i++) {
     const p = tl[i].p; let img = '';
-    if (i % every === 0 && curAsset(p)) { try { st && st(`컷 그림 준비 중… ${i + 1}/${tl.length}`); img = (await renderCutCanvas(p, { text: false, maxSide: 224 })).toDataURL('image/jpeg', 0.7).split(',')[1] || ''; } catch (e) { img = ''; } }
+    if (i % every === 0 && !curAsset(p) && hasSketch(p)) { try { img = await assetB64(p.sketch.assetId, 224); } catch (e) { img = ''; } } // 그림 없이 스케치만 있는 컷
+    else if (i % every === 0 && curAsset(p)) { try { st && st(`컷 그림 준비 중… ${i + 1}/${tl.length}`); img = (await renderCutCanvas(p, { text: false, maxSide: 224 })).toDataURL('image/jpeg', 0.7).split(',')[1] || ''; } catch (e) { img = ''; } }
     cuts.push({ dur: +tl[i].dur.toFixed(2), scene: (p.prompt || '').trim(), img,
       lines: p.overlays.filter(o => o.text?.trim()).sort((a, b) => (+a.start || 0) - (+b.start || 0)).map(o => ({ who: speakerOf(o).label, kind: KINDS[o.kind] || o.kind, text: o.text.trim(), emotion: emoOn(o) ? o.emo.emotion : '' })) });
   }
   return cuts;
 }
+/* ---- 🎬 한 번에 완성: 이야기 흐름 → AI 아트 디렉팅(컷마다 그리기/배경만/후보정만) → 이미지 → 대본 채우기 → 전체 편집 ----
+   WIZ.stage: 'setup' → 'review'(아트 디렉팅 확인) → 'running' → 'done' */
+const WIZ = { stage: 'setup', plan: null, opts: { scope: 'all', script: '', arc: true, art: true, fill: true, full: true }, stop: false, prog: '' };
+const WIZ_MODE = { paint: '🖌 완성 그림으로 그리기', background: '🏞 배경만 채우기 (인물 유지)', grade: '🎨 후보정만', skip: '건너뛰기' };
+const wizCuts = () => (WIZ.opts.scope === 'sel' && SELECT.size ? P.panels.filter(p => SELECT.has(p.id)) : P.panels);
+function openWizard() {
+  if (!isServer()) return toast('한 번에 완성은 서버 모드에서만 됩니다');
+  if (WIZ.stage === 'done' || WIZ.stage === 'review' && !WIZ.plan) WIZ.stage = 'setup';
+  $('#dlgWiz').showModal(); renderWiz();
+}
+function renderWiz() {
+  const b = $('#wizBody'), o = WIZ.opts, go = $('#wizGo'), stopB = $('#wizStop');
+  stopB.hidden = WIZ.stage !== 'running';
+  if (WIZ.stage === 'setup') {
+    const n = wizCuts().length, sk = wizCuts().filter(p => curAsset(p) || hasSketch(p)).length;
+    b.innerHTML = `<p style="margin:0 0 8px">컷 그림(콘티·스케치·완성된 인물 그림)을 AI 가 보고, 컷마다 알맞은 방법으로 완성합니다: <b>거친 스케치</b>는 구도를 살려 완성 그림으로 그리고, <b>인물이 어느 정도 완성된 컷</b>은 인물을 그대로 두고 배경만 채운 뒤 후보정합니다. 모든 단계는 이야기 흐름과 감정선에 맞춥니다.</p>
+      <div class="g2"><label><span class="lbl">대상</span><select id="wzScope"><option value="all" ${o.scope === 'all' ? 'selected' : ''}>전체 컷 (${P.panels.length}개)</option><option value="sel" ${o.scope === 'sel' ? 'selected' : ''} ${SELECT.size ? '' : 'disabled'}>체크한 컷 (${SELECT.size}개)</option></select></label>
+        <span class="note" style="align-self:end;margin:0">그림·스케치가 있는 컷 ${sk}/${n}개</span></div>
+      <div class="grp" style="margin-top:8px"><span class="lbl">단계</span>
+        <label class="chk"><input type="checkbox" id="wzArc" ${o.arc ? 'checked' : ''}> 📖 이야기 흐름·감정선 분석</label>
+        <label class="chk"><input type="checkbox" id="wzArt" ${o.art ? 'checked' : ''}> 🖌 그림 완성 — AI 아트 디렉팅 확인 후 생성 (컷당 약 $${(+S.cOa || 0.05).toFixed(2)})</label>
+        <label class="chk"><input type="checkbox" id="wzFill" ${o.fill ? 'checked' : ''}> 📝 대본으로 나레이션·말풍선 채우기 (아래 대본이 있을 때)</label>
+        <label class="chk"><input type="checkbox" id="wzFull" ${o.full ? 'checked' : ''}> ✨ 전체 편집 — 목소리·감정·음성·타이밍·효과음·배경음악</label></div>
+      <label class="grp"><span class="lbl">대본 (선택)</span><textarea id="wzScript" rows="6" placeholder="대본을 붙여 넣으면 그림이 완성된 뒤 컷에 나눠 넣습니다. 비워 두면 이미 있는 글을 씁니다.">${esc(o.script)}</textarea></label>
+      <p class="note">캐릭터 카드에 레퍼런스 그림이 있으면 얼굴·의상이 훨씬 안정적입니다. 크레딧이 드는 단계는 시작 전에 비용을 보여 주고 확인합니다. 모든 결과는 버전으로 남아 되돌릴 수 있습니다.</p>`;
+    const sync = () => { o.scope = $('#wzScope').value; o.arc = $('#wzArc').checked; o.art = $('#wzArt').checked; o.fill = $('#wzFill').checked; o.full = $('#wzFull').checked; o.script = $('#wzScript').value; };
+    $$('#wizBody input, #wizBody select, #wizBody textarea').forEach(x => (x.onchange = x.oninput = sync));
+    $('#wzScope').onchange = () => { sync(); renderWiz(); };
+    go.hidden = false; go.disabled = false; go.textContent = '🎬 시작'; return;
+  }
+  if (WIZ.stage === 'review') {
+    const pl = WIZ.plan, cnt = { paint: 0, background: 0, grade: 0, skip: 0 }; pl.cuts.forEach(c => cnt[c.mode]++);
+    const cost = (cnt.paint + cnt.background) * imgCost(P.panels[0] || {});
+    b.innerHTML = `<p style="margin:0 0 6px">${esc(pl.summary || '')}</p>
+      <p class="note" style="margin:0 0 8px">그리기 ${cnt.paint} · 배경만 ${cnt.background} · 후보정만 ${cnt.grade}${cnt.skip ? ' · 건너뛰기 ' + cnt.skip : ''} — 이미지 호출 ${cnt.paint + cnt.background}회, 약 $${cost.toFixed(2)}. 방법·묘사를 고친 뒤 진행하세요.</p>
+      ${pl.cuts.map((c, k) => { const p = P.panels[c.cut], im = p && (curAsset(p) ? assetURL(curAsset(p)) : hasSketch(p) ? assetURL(p.sketch.assetId) : '');
+        return `<div class="card" data-wz="${k}" style="padding:8px;margin:6px 0;display:flex;gap:10px">
+          <div style="flex:none;width:72px">${im ? `<img src="${im}" alt="" style="width:72px;border-radius:6px">` : '<div class="note" style="margin:0">그림 없음</div>'}<div class="note" style="margin:2px 0 0;text-align:center">컷 ${c.cut + 1}</div></div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+            <div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><select class="wzMode" style="flex:none">${Object.entries(WIZ_MODE).map(([m, n]) => `<option value="${m}" ${m === c.mode ? 'selected' : ''}>${n}</option>`).join('')}</select>
+              <span class="note" style="margin:0">${esc(c.why || '')}${c.location ? ' · ' + esc(c.location) : ''}${c.chars.length ? ' · 👤 ' + esc(c.chars.join(', ')) : ''}</span></div>
+            ${c.mode === 'paint' ? `<textarea class="wzScene" rows="3" placeholder="완성 그림 장면 묘사">${esc(c.scene)}</textarea>` : c.mode === 'background' ? `<textarea class="wzBg" rows="2" placeholder="채울 배경 (인물은 그대로)">${esc(c.bg)}</textarea>` : ''}
+            ${c.mode !== 'skip' ? `<span class="note" style="margin:0">🎨 후보정: 밝기 ${c.grade.b} · 대비 ${c.grade.c} · 채도 ${c.grade.s} · 색온도 ${c.grade.warm > 0 ? '+' : ''}${c.grade.warm} · 비네팅 ${c.grade.vig}</span>` : ''}
+          </div></div>`; }).join('')}`;
+    $$('[data-wz]', b).forEach(row => {
+      const c = pl.cuts[+row.dataset.wz];
+      $('.wzMode', row).onchange = e => { c.mode = e.target.value; renderWiz(); };
+      const sc = $('.wzScene', row); if (sc) sc.onchange = () => { c.scene = sc.value.trim(); };
+      const bg = $('.wzBg', row); if (bg) bg.onchange = () => { c.bg = bg.value.trim(); };
+    });
+    go.hidden = false; go.disabled = false; go.textContent = `이대로 진행 (약 $${cost.toFixed(2)})`; return;
+  }
+  b.innerHTML = `<pre style="white-space:pre-wrap;margin:0;font:inherit">${esc(WIZ.prog)}</pre>`;
+  go.hidden = WIZ.stage === 'running'; go.disabled = false; go.textContent = '처음부터 다시';
+}
+const wizLog = t => { WIZ.prog += (WIZ.prog ? '\n' : '') + t; $('#wizSt').textContent = t; if ($('#dlgWiz').open && WIZ.stage !== 'review' && WIZ.stage !== 'setup') renderWiz(); };
+/* 1단계: 흐름 분석 + 아트 디렉팅 → 확인 화면 */
+async function wizStart() {
+  const o = WIZ.opts, list = wizCuts(); if (!list.length) return toast('컷이 없습니다');
+  WIZ.stage = 'running'; WIZ.stop = false; WIZ.prog = ''; renderWiz();
+  try {
+    if (o.arc) { wizLog('📖 이야기 흐름·감정선을 분석하는 중…'); await ensureArc({ quiet: true }); if (P.arc) wizLog(`📖 ${P.arc.beats.length}개 구간: ${P.arc.beats.map(x => x.name).join(' → ')}`); }
+    if (WIZ.stop) return wizEnd('중지했습니다.');
+    if (o.art) {
+      wizLog('🖌 AI 아트 디렉터가 컷 그림을 하나씩 보고 있습니다… (1~2분)');
+      const cuts = await storyForAI(t => ($('#wizSt').textContent = t));
+      const only = list.map(p => P.panels.indexOf(p));
+      const r = await srvJSON('/api/tts', { op: 'artdirect', cuts, only: o.scope === 'sel' ? only : undefined, arc: arcForAI(), style: P.style?.prompt || '', chars: P.chars.map(c => ({ name: c.name || '', desc: c.desc || '' })) });
+      logCall({ kind: 'AI 아트 디렉팅', provider: 'claude', ok: true, cost: (+S.cDirect || 0) * 3 });
+      if (WIZ.stop) return wizEnd('중지했습니다.');
+      WIZ.plan = r; WIZ.stage = 'review'; $('#wizSt').textContent = '컷마다 방법과 묘사를 확인하세요'; renderWiz(); return;
+    }
+    await wizAfterArt();
+  } catch (e) { wizEnd('실패: ' + e.message); }
+}
+/* 2단계: 확인한 계획대로 그림 → 후보정 → 대본 → 전체 편집 */
+async function wizRun() {
+  const pl = WIZ.plan, todo = pl.cuts.filter(c => c.mode !== 'skip' && P.panels[c.cut]);
+  const calls = todo.filter(c => c.mode === 'paint' || c.mode === 'background').length;
+  if (calls && !confirm(`그림 ${calls}컷을 만듭니다 (약 $${(calls * imgCost(P.panels[0])).toFixed(2)}). 이전 그림은 버전으로 남습니다. 진행할까요?`)) return;
+  WIZ.stage = 'running'; WIZ.stop = false; WIZ.prog = ''; renderWiz(); stop(); flushLocal();
+  const nameId = n => P.chars.find(c => (c.name || '').trim() === n)?.id;
+  let i = 0, ok = 0, fail = 0;
+  const one = async c => {
+    const p = P.panels[c.cut]; if (!p) return;
+    const ids = c.chars.map(nameId).filter(Boolean); if (ids.length) p.chars = [...new Set([...(p.chars || []), ...ids])];
+    if (c.mode === 'paint') {
+      if (curAsset(p) && !hasSketch(p)) p.sketch = { assetId: curAsset(p) }; // 지금 그림(콘티)을 구도 레퍼런스로
+      if (hasSketch(p)) { p.skRef = true; p.skEdit = false; }
+      p.prompt = c.scene; wizLog(`🖌 컷 ${c.cut + 1} 그리는 중…`); await genPanel(p);
+    } else if (c.mode === 'background') {
+      if (!curAsset(p)) { p.prompt = c.bg; await genPanel(p); }
+      else { const keepSk = p.skEdit; p.skEdit = false; wizLog(`🏞 컷 ${c.cut + 1} 배경 채우는 중… (인물 유지)`); await aiEdit(p, c.bg + ' 인물(얼굴·선·채색·포즈)은 그대로 두고 배경만 바꿉니다.'); p.skEdit = keepSk; }
+      if (!p.prompt?.trim()) p.prompt = c.bg;
+    }
+    const failed = /^실패/.test(p._st || '') && c.mode === 'paint' || /^실패/.test(p._est || '') && c.mode === 'background';
+    if (failed) { fail++; wizLog(`⚠ 컷 ${c.cut + 1} 실패: ${String((c.mode === 'paint' ? p._st : p._est) || '').replace(/^실패:\s*/, '').slice(0, 120)}`); return; }
+    p.adj = Object.assign({ ...ADJ0 }, p.adj, c.grade); ok++; // 후보정 (되돌릴 수 있는 보정값)
+    save(); renderPanels(); requestDraw();
+  };
+  const worker = async () => { while (!WIZ.stop && i < todo.length) await one(todo[i++]); };
+  await Promise.all(Array.from({ length: Math.min(BULK_IMG_PAR, todo.length) }, worker));
+  save(); renderAll(); flushLocal();
+  wizLog(`✓ 그림·후보정 ${ok}컷${fail ? ` · 실패 ${fail}컷 (그 컷의 이미지 탭에서 다시 시도)` : ''}${WIZ.stop ? ' · 나머지는 중지됨' : ''}`);
+  if (WIZ.stop) return wizEnd('중지했습니다. 지금까지 만든 것은 남아 있습니다.');
+  await wizAfterArt();
+}
+/* 3단계: 대본 → 전체 편집 (각각 자기 창에서 확인) */
+async function wizAfterArt() {
+  const o = WIZ.opts;
+  if (o.fill && o.script.trim()) {
+    wizLog('📝 완성된 그림을 보고 대본을 컷에 나눕니다 — 미리보기에서 확인 후 ' + (o.full ? '‘적용하고 ✨ 전체 편집’' : '‘적용’') + '을 누르세요.');
+    $('#dlgWiz').close(); $('#fillScript').value = o.script; FILL.script = o.script; FILL.replace = false;
+    if (o.full) { $('#aiEdit').hidden = false; }
+    await runFill(true); return wizEnd('대본 미리보기로 넘어갔습니다.', true);
+  }
+  if (o.full) {
+    wizLog('✨ 전체 편집을 시작합니다 — AI 편집 창에서 진행 상황을 볼 수 있습니다.');
+    $('#dlgWiz').close(); $('#aiEdit').hidden = false; $('#aiFull').click(); return wizEnd('전체 편집으로 넘어갔습니다.', true);
+  }
+  wizEnd('완료했습니다.');
+}
+function wizEnd(msg, quiet) { WIZ.stage = 'done'; if (msg) wizLog(msg); if (!quiet) toast('🎬 ' + msg, 4000); renderWiz(); }
+$('#wizGo').onclick = () => { if (WIZ.stage === 'setup') wizStart(); else if (WIZ.stage === 'review') wizRun(); else { WIZ.stage = 'setup'; WIZ.plan = null; renderWiz(); } };
+$('#wizStop').onclick = () => { WIZ.stop = true; P.panels.forEach(p => p.overlays.forEach(o => o._abort?.abort())); wizLog('⏹ 멈추는 중… (진행 중인 컷까지만)'); };
 /* ---- 대본으로 컷 채우기 ----
    FILL.plan = { items:[{cut,kind,speaker,text,x,y,tx,ty}], scenes:[{cut,note}], newChars:[{name,desc,use}], unplaced:[], summary } (cut 은 0부터) */
 const FILL = { plan: null, busy: false, script: '', replace: false };
@@ -8527,6 +8668,7 @@ $('#capGo').onclick = captionsRun;
 $('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '컷 길이·전환·말풍선 타이밍·음악 볼륨에 더해 더빙(읽는 사람·감정·말투·음량)·음성 만들기·효과음·배경음악까지 편집합니다. 예: “백운 도사 대사는 더 낮고 느긋하게 다시 만들어줘”, “7~13컷은 긴장감 있게”. ✨ 알아서 전체 편집은 전부 한 번에 해 드립니다.'); $('#aiIn').focus(); } };
 $('#aiEditClose').onclick = () => { $('#aiEdit').hidden = true; };
 $('#aiArc').onclick = () => openArc();
+$('#aiWizard').onclick = () => openWizard();
 $('#arcRedo').onclick = () => { renderArc(); ensureArc({ force: true }).then(renderArc); setTimeout(renderArc, 50); };
 $('#aiFull').onclick = async () => {
   if (aiBusy) return;

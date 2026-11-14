@@ -1063,6 +1063,37 @@ async function arcPlan(env, b) {
     note: String(c?.note || '').slice(0, 160) })).filter(c => c.name);
   return json({ title: String(out?.title || '').slice(0, 40), logline: String(out?.logline || '').slice(0, 200), tone: String(out?.tone || '').slice(0, 80), beats, characters, model: SCORE_MODEL });
 }
+/* ---- AI 아트 디렉팅: 콘티·스케치 + 이야기 흐름 → 컷마다 완성 그림용 장면 묘사 ----
+   반환 { cuts:[{cut, scene, chars:[name], location}], summary } — scene 은 이미지 생성에 그대로 쓰는 한국어 묘사 */
+async function artDirect(env, b) {
+  const cuts = storyCuts(b), n = cuts.length;
+  const only = Array.isArray(b.only) && b.only.length ? new Set(b.only.map(x => Math.trunc(+x)).filter(x => x >= 0 && x < n)) : null;
+  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 300) }));
+  const style = String(b.style || '').slice(0, 400), arc = arcText(b.arc);
+  const system = 'You are the art director of a Korean motion webtoon. The cut images range from rough storyboards/sketches (콘티) to panels whose characters are already drawn and colored, to finished panels. For every cut' + (only ? ' listed in "target_cuts"' : '') + ', first judge how finished it is and choose a mode: ' +
+    '"paint" = rough sketch/storyboard or uncolored line art → an image model will paint the FINISHED full-color panel using the sketch as the composition reference; ' +
+    '"background" = the characters are already reasonably finished (clean line art and color) but the background is missing, flat or rough → KEEP the characters exactly as drawn and only paint/complete the background; ' +
+    '"grade" = already finished including background → only color grading. Prefer preserving the artist\'s finished character work: use "background" rather than "paint" whenever the characters are already decent. ' +
+    'For "paint", write "scene": (1) keep the sketch\'s composition, camera angle, framing, character placement, poses and gestures exactly - describe them precisely; (2) identify which characters from the character list appear and describe expression and action, keeping outfits consistent with the character notes; (3) fill the background completely and concretely (location, nature/architecture, props, time of day, weather) and keep the same location consistent across consecutive cuts. ' +
+    'For "background", write "bg": a Korean instruction that says to keep every character exactly as drawn (faces, line art, colors, pose) and describes the background to paint behind/around them, matching the existing art style and lighting direction. ' +
+    'For every cut also give "grade" for gentle non-destructive post-correction matching the beat: b (brightness 85-115), c (contrast 85-125), s (saturation 75-120), warm (-30 cold … 30 warm), vig (vignette 0-40). 100/100/100/0/0 means no change; keep it subtle. ' +
+    'Lighting, palette and atmosphere must follow the story beat and tension' + (arc ? ' from the story arc below' : '') + ' (calm warm light for peaceful beats, cold high-contrast light for crisis, soft hazy glow for flashbacks). Never ask for text, speech bubbles or lettering in the image. Write scene/bg in Korean, 2-4 dense sentences. ' +
+    (style ? 'Series art style (stay consistent): ' + style + '. ' : '') + (arc ? '\n' + arc + '\n' : '') +
+    'Reply with ONLY JSON, no markdown: {"summary":"1-2 Korean sentences on the overall visual direction","cuts":[{"cut":0,"mode":"paint|background|grade","why":"short Korean reason","scene":"","bg":"","chars":["character names present"],"location":"short Korean label","grade":{"b":100,"c":100,"s":100,"warm":0,"vig":0}}]}';
+  const out = await askClaude(env, system, cuts, { request: 'art direction', characters: chars, target_cuts: only ? [...only] : undefined }, 12000);
+  const names = new Set(chars.map(c => c.name)), seen = new Set();
+  const rng = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.round(Math.min(hi, Math.max(lo, +v))) : d);
+  const res = (Array.isArray(out?.cuts) ? out.cuts : []).map(c => {
+    const g = c?.grade || {}, mode = ['paint', 'background', 'grade'].includes(c?.mode) ? c.mode : 'paint';
+    return { cut: Math.trunc(+c?.cut), mode, why: String(c?.why || '').slice(0, 80), scene: String(c?.scene || '').trim().slice(0, 900), bg: String(c?.bg || '').trim().slice(0, 600),
+      chars: (Array.isArray(c?.chars) ? c.chars : []).map(x => String(x).trim()).filter(x => names.has(x)).slice(0, 6), location: String(c?.location || '').slice(0, 40),
+      grade: { b: rng(g.b, 85, 115, 100), c: rng(g.c, 85, 125, 100), s: rng(g.s, 75, 120, 100), warm: rng(g.warm, -30, 30, 0), vig: rng(g.vig, 0, 40, 0) } };
+  }).filter(c => c.cut >= 0 && c.cut < n && (!only || only.has(c.cut)) && !seen.has(c.cut) && seen.add(c.cut))
+    .map(c => (c.mode === 'paint' && !c.scene ? { ...c, mode: c.bg ? 'background' : 'grade' } : c.mode === 'background' && !c.bg ? { ...c, mode: c.scene ? 'paint' : 'grade' } : c)) // 필요한 글이 없으면 맞는 방식으로
+    .sort((a, c) => a.cut - c.cut);
+  if (!res.length) return json({ error: 'AI 가 장면 묘사를 만들지 못했습니다. 다시 시도해 주세요.' }, 502);
+  return json({ summary: String(out?.summary || '').slice(0, 300), cuts: res, model: SCORE_MODEL });
+}
 /* ---- 대본으로 컷 채우기: 대본 전체 + 컷 그림 → 컷마다 들어갈 나레이션·말풍선·자막·지문 ----
    반환 { items:[{cut,kind,speaker,text,x,y,tx,ty}], scenes:[{cut,note}], newChars:[{name,desc}], unplaced:[text], summary } (cut 은 0부터) */
 const FILL_KINDS = ['narration', 'speech', 'thought', 'shout', 'whisper', 'caption'];
@@ -1273,6 +1304,7 @@ export async function handleTts(req, env) {
     if (b.op === 'sfxplan') return await sfxPlan(env, b);
     if (b.op === 'arc') return await arcPlan(env, b);
     if (b.op === 'scriptfill') return await scriptFill(env, b);
+    if (b.op === 'artdirect') return await artDirect(env, b);
     const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
     const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
     if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);
