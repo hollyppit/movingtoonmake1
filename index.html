@@ -124,7 +124,10 @@ h3 { margin: 0 0 10px; font-family: var(--f-serif); font-weight: 600; font-size:
 .otl .bar-t .vmute { flex: none; cursor: pointer; padding: 0 3px; font-size: .78rem; line-height: 1; position: relative; z-index: 1; }
 .otl .bar-t .vmute:hover { transform: scale(1.15); }
 .cut-mix .cm-items { border-top: 1px dashed var(--line-2); padding-top: 4px; margin-top: 2px; }
-.cut-mix .cm-it, .cut-mix .cm-row { flex-wrap: nowrap; }
+.cut-mix .cm-it, .cut-mix .cm-row { flex-wrap: nowrap; min-width: 0; }
+.cut-mix .cm-row > span:first-of-type { flex: 0 1 7.2em !important; width: auto !important; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cut-mix input[type=range] { flex: 1 1 60px !important; min-width: 40px !important; width: auto; }
+.cut-mix .cm-it > span:first-of-type { flex: 1 1 6em !important; }
 .cut-mix .cm-it .ib { flex: none; }
 .grp.cut-mix { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; margin-bottom: 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-2); }
 [data-rec].danger { background: var(--cinnabar); border-color: var(--cinnabar); color: #fff; animation: recBlink 1.2s ease-in-out infinite; }
@@ -183,7 +186,12 @@ input[type=checkbox] { accent-color: var(--gold); width: 16px; height: 16px; }
 .st.err { color: var(--err); } .st.ok { color: var(--jade); }
 .grp { display: grid; gap: 6px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.g2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+/* 옆 창 안의 내용이 창 너비를 밀어내지 않게 (좁으면 줄어들고 줄바꿈) */
+#insp > *, .left .sec > *, .left .card > *, .g2 > * { min-width: 0; }
+#insp select, #insp input:not([type=checkbox]):not([type=radio]), .left select, .left input:not([type=checkbox]):not([type=radio]) { max-width: 100%; min-width: 0; }
+#insp .row:not(.cm-it):not(.cm-row) { flex-wrap: wrap; }
+.left .b, #insp .b { max-width: 100%; } .vClone { white-space: normal; text-align: left; line-height: 1.3; }
 .box { border: 1px solid var(--line-2); border-radius: 4px; padding: 12px; background: var(--panel); }
 details > summary { cursor: pointer; }
 pre { white-space: pre-wrap; word-break: break-all; font-size: .72rem; background: #EEF3FA; border: 1px solid var(--line-2); border-radius: 3px; padding: 10px; color: var(--ink-2); margin: 6px 0 0; max-height: 300px; overflow: auto; }
@@ -672,7 +680,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <button type="button" role="tab" data-tab="layer">레이어</button>
       <button type="button" role="tab" data-tab="text">말풍선</button>
       <button type="button" role="tab" data-tab="video">영상화</button>
-      <button type="button" role="tab" data-tab="audio">배경음악</button>
+      <button type="button" role="tab" data-tab="audio" title="대사 음성·효과음·배경음악 — 이 컷 소리와 전체 믹서">소리</button>
       <button type="button" role="tab" data-tab="cut">컷 설정</button>
     </nav>
     <div id="insp"></div>
@@ -809,7 +817,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
-  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiWizard" title="콘티·스케치 그림부터: 이야기 흐름 → 그림 완성(스케치는 그리기, 인물이 된 컷은 배경만+후보정) → 대본 채우기 → 목소리·감정·음성·타이밍까지 한 번에 (효과음·배경음악은 나중에 따로)">🎬 한 번에 완성</button><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 자막 정리까지 알아서 전체 편집합니다. 효과음·배경음악은 넣지 않습니다(배경음악 탭이나 AI 편집 대화로 따로). 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
+  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiWizard" title="콘티·스케치 그림부터: 이야기 흐름 → 그림 완성(스케치는 그리기, 인물이 된 컷은 배경만+후보정) → 대본 채우기 → 목소리·감정·음성·타이밍까지 한 번에 (효과음·배경음악은 나중에 따로)">🎬 한 번에 완성</button><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 자막 정리까지 알아서 전체 편집합니다. 효과음·배경음악은 넣지 않습니다(소리 탭이나 AI 편집 대화로 따로). 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiArc" title="AI 가 파악한 이야기 구간·긴장도·캐릭터 감정 흐름을 보고 고칩니다. 모든 AI 작업이 이것을 기준으로 삼습니다.">📖 이야기 흐름</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
   <details class="ai-cap" id="aiFill"><summary>📝 대본으로 컷 채우기</summary>
     <p class="note" style="margin:4px 0">대본 전체를 붙여 넣으면 AI 가 컷 그림을 보고 나레이션·말풍선·생각·외침·자막으로 나눠 알맞은 컷과 자리에 넣습니다. 지문은 장면 메모로 들어갑니다. 적용 전에 미리보기에서 고칠 수 있습니다.</p>
     <textarea id="fillScript" rows="6" placeholder="예)&#10;나레이션: 백 년도 더 된 옛날, 무주의 산속.&#10;백운: 앉아라. 긴 이야기가 될 테니..&#10;(다설이가 고개를 갸웃한다)&#10;다설이: 네?!"></textarea>
@@ -4995,14 +5003,13 @@ $('#insp').addEventListener('toggle', e => { const dt = e.target; if (dt.dataset
 function renderInspector() {
   const p = selPanel(), el = $('#insp'); if (!p) return;
   const inkTarget = (p.layers || []).find(l => l.id === selLayer && l.ink);
-  el.innerHTML = '<div class="row" style="padding:8px 0"><button type="button" class="b ghost sm" id="makeInkNew">✏ 효과음 펜</button>' + (inkTarget ? '<button type="button" class="b ghost sm" id="makeInkEdit">선택 효과음 다시 그리기</button>' : '') + '</div>' + ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
+  el.innerHTML = (inkTarget ? '<div class="row" style="padding:8px 0"><button type="button" class="b ghost sm" id="makeInkEdit">✏ 선택한 효과음 다시 그리기</button></div>' : '') + ({ img: tabImg, fix: tabFix, layer: tabLayer, text: tabText, video: tabVideo, audio: tabAudio, cut: tabCut })[tab](p);
   const after = ({ img: bindImg, fix: bindFix, layer: bindLayer, text: bindText, video: bindVideo, audio: bindAudio, cut: bindCut })[tab];
   after(p, el);
   const timelineScroll = $('#otl')?.scrollTop || 0;
   $('#timelineBody').innerHTML = '<div class="otl" id="otl" tabindex="0" aria-label="타임라인: 요소 선택 후 Ctrl+C, Ctrl+V로 복사·붙여넣기"></div>';
   bindTimeline(p, $('#timelineBody'));
   $('#otl').scrollTop = timelineScroll;
-  $('#makeInkNew', el).onclick = () => openInkEditor('make');
   if (inkTarget) $('#makeInkEdit', el).onclick = () => openInkEditor('make', inkTarget);
 }
 
@@ -5428,7 +5435,7 @@ function drawTimeline(p, view) {
     }).join('') +
     cutTracks(p).map(({ t, st, en, cutL, cutR }) => {
       const g = trackGroup(t), here = cutLvl(p, g) > 0 && trkCutLvl(p, t.id) > 0, on = !t.mute && lvl(mixOf()[g]) > 0 && monOf()[g] && here, cm = trkCutOf(p, t.id).mute;
-      return '<div class="row-t row-a"><div class="bar-a ' + g + (on ? '' : ' mute') + (cutL ? ' cl' : '') + (cutR ? ' cr' : '') + (t.id === selAud ? ' on' : '') + '" data-aid="' + t.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / V * 100).toFixed(3) + '%" title="' + esc(t.name) + ' — 누르면 배경음악 탭에서 편집 · 🔊 를 누르면 이 컷에서만 음소거">' +
+      return '<div class="row-t row-a"><div class="bar-a ' + g + (on ? '' : ' mute') + (cutL ? ' cl' : '') + (cutR ? ' cr' : '') + (t.id === selAud ? ' on' : '') + '" data-aid="' + t.id + '" style="left:' + pct(st) + ';width:' + ((en - st) / V * 100).toFixed(3) + '%" title="' + esc(t.name) + ' — 누르면 소리 탭에서 편집 · 🔊 를 누르면 이 컷에서만 음소거">' +
         '<span class="amute" role="button" title="' + (cm ? '이 컷에서 다시 켜기' : '이 컷에서만 음소거 (다른 컷은 그대로)') + '" aria-label="' + (cm ? '이 컷 음소거 풀기' : '이 컷에서만 음소거') + '">' + (cm || !on ? '🔇' : '🔊') + '</span><span class="lab">' + (g === 'sfx' ? '✨ ' : '🎵 ') + esc(t.name) + (cm ? ' (이 컷 꺼짐)' : on ? '' : ' (꺼짐)') + '</span></div></div>';
     }).join('') +
     (list.length ? '' : '<div class="timeline-empty">레이어나 말풍선을 추가하면 여기에 표시됩니다.</div>') +
@@ -5455,7 +5462,7 @@ function bindTimeline(p, el) {
       return;
     }
     const ab = ev.target.closest('.bar-a');
-    if (ab) { // 효과음·배경음악 줄: 🔊 = 음소거, 그 밖 = 배경음악 탭에서 편집
+    if (ab) { // 효과음·배경음악 줄: 🔊 = 음소거, 그 밖 = 소리 탭에서 편집
       const t = audTracks().find(x => x.id === ab.dataset.aid); if (!t) return;
       if (ev.target.closest('.amute')) { setTrkCut(p, t.id, { mute: !trkCutOf(p, t.id).mute }); save(); rescheduleLive(); drawTimeline(p); if (tab === 'audio' || tab === 'cut' || S.pvDub) renderInspector(); return; }
       selAud = t.id; setTab('audio'); drawTimeline(p); return;
@@ -7541,7 +7548,7 @@ async function addClip(p, file) {
   save(); refreshPanel(p);
 }
 
-/* ---- 배경음악 탭 (프로젝트 전체: 선택한 컷과 상관없이 같은 화면) ---- */
+/* ---- 소리 탭 (프로젝트 전체: 선택한 컷과 상관없이 같은 화면) ---- */
 let selAud = null;
 /* 효과음 만들기 (일레븐랩스 Sound Effects) — [버튼 이름, 영어 설명, 길이] */
 const SFX = { text: '', dur: 0, inf: 0.3, loop: false, busy: false, st: '' };
@@ -9073,7 +9080,7 @@ function captionPlan(caps, track, segs) {
   return out;
 }
 function fillCapTracks() {
-  $('#capTrack').innerHTML = P.audio.length ? P.audio.map((t, i) => '<option value="' + i + '">' + (i + 1) + '. ' + esc(t.name || '오디오') + '</option>').join('') : '<option value="">오디오 트랙이 없습니다 (배경음악 탭에서 추가)</option>';
+  $('#capTrack').innerHTML = P.audio.length ? P.audio.map((t, i) => '<option value="' + i + '">' + (i + 1) + '. ' + esc(t.name || '오디오') + '</option>').join('') : '<option value="">오디오 트랙이 없습니다 (소리 탭에서 추가)</option>';
 }
 $('#aiCap').addEventListener('toggle', () => { if ($('#aiCap').open) fillCapTracks(); });
 const capSig = o => [o.text, +o.start || 0, +o.dur || 0, o.size, o.x, o.y, o.font, o.color, o.anim].join('|');
@@ -9082,7 +9089,7 @@ async function captionsRun() {
   if (capBusy) return;
   if (!isServer()) return aiSay('bot err', '자동 자막은 서버 모드에서만 쓸 수 있습니다. 설정에서 서버 모드로 연결하세요.');
   const track = P.audio[+$('#capTrack').value], a = track && assets.get(track.assetId);
-  if (!a) return aiSay('bot err', '자막을 만들 음성 트랙을 고르세요. 먼저 배경음악 탭에서 음성 파일을 올려야 합니다.');
+  if (!a) return aiSay('bot err', '자막을 만들 음성 트랙을 고르세요. 먼저 소리 탭에서 음성 파일을 올려야 합니다.');
   if (a.blob.size > 25 * 1024 * 1024) return aiSay('bot err', '음성이 25MB를 넘어 전사할 수 없습니다. 더 짧게 나누어 올려 주세요.');
   const script = $('#capScript').value.trim();
   capBusy = true; $('#capGo').disabled = true;
@@ -9278,6 +9285,8 @@ document.addEventListener('keydown', e => {
     if (d) { e.preventDefault(); goCut(d); }
   }
 });
+document.addEventListener('pointerdown', e => { const h = document.querySelector('.tl-help[open]'); if (h && !h.contains(e.target)) h.open = false; }); // 사용법 팝업: 바깥을 누르면 닫기
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { const h = document.querySelector('.tl-help[open]'); if (h) h.open = false; } });
 ['#navPrev', '#navPrevSide'].forEach(q => ($(q).onclick = () => goCut(-1)));
 ['#navNext', '#navNextSide'].forEach(q => ($(q).onclick = () => goCut(1)));
 
