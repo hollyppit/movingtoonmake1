@@ -677,7 +677,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 <section id="aiEdit" aria-label="AI 편집 어시스턴트" hidden>
   <div class="ai-h"><h3>AI 편집</h3><button type="button" class="ib" id="aiEditClose" aria-label="닫기">✕</button></div>
   <div class="ai-log" id="aiLog" role="log" aria-live="polite"></div>
-  <div class="ai-quick"><button type="button" class="b sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다. Ctrl+Z로 되돌릴 수 있어요.">✨ 알아서 다듬기</button></div>
+  <div class="ai-quick" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="b sm" id="aiFull" title="더빙 감정·말투, 음성 만들기, 대사 타이밍·컷 길이, 효과음, 배경음악, 자막 정리까지 알아서 전체 편집합니다. 크레딧이 드는 작업은 적용 전에 한 번 묻습니다.">✨ 알아서 전체 편집</button><button type="button" class="b ghost sm" id="aiAuto" title="질문 없이 타임라인 전체를 보고 읽기 쉽게 알아서 고칩니다 (글 타이밍·컷 길이만). Ctrl+Z로 되돌릴 수 있어요.">타이밍만 다듬기</button></div>
   <details class="ai-cap" id="aiCap"><summary>대본으로 자막 자동 생성</summary>
     <div class="ai-cap-b">
       <label><span>음성 트랙</span><select id="capTrack"></select></label>
@@ -1088,7 +1088,7 @@ async function srv(path, opt = {}) {
   if (!r.ok) { const err = new GenError(d.provider || 'server', d.kind || (r.status === 401 ? 'auth' : r.status === 429 ? 'rate' : 'bad'), d.error || ('오류 ' + r.status)); err.data = d; throw err; }
   return d;
 }
-const srvJSON = (path, body) => srv(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const srvJSON = (path, body, opt) => srv(path, { ...(opt || {}), method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 /* 로컬 파일 → Storage 키. 한 번 올린 파일은 P.keys에 기억해 다시 올리지 않는다 */
 async function uploadBlob(blob, name) { return (await srv('/api/file?name=' + encodeURIComponent(name), { method: 'POST', body: blob })).key; }
 async function ensureKey(cid, blob, name) {
@@ -1181,7 +1181,7 @@ function referencedIds() {
   P.panels.forEach(p => {
     p.versions.forEach(v => ids.add(v.assetId)); p.clips.forEach(c => ids.add(c.assetId));
     (p.dirRefs || []).forEach(i => ids.add(i)); (p.mixRefs || []).forEach(i => ids.add(i)); if (p.sketch) ids.add(p.sketch.assetId);
-    p.overlays.forEach(o => { if (o.voice) { ids.add(o.voice.assetId); if (o.voice.sts?.src) ids.add(o.voice.sts.src); } }); // 목소리 변환은 원본 녹음도 남겨 다시 변환할 수 있게 한다
+    p.overlays.forEach(o => [o.voice, ...(o.voiceHist || [])].forEach(v => { if (v) { ids.add(v.assetId); if (v.sts?.src) ids.add(v.sts.src); } })); // 목소리 변환 원본 녹음 · 되돌리기용 이전 음성도 남긴다
   });
   if (P.bgm) ids.add(P.bgm);
   (P.audio || []).forEach(t => ids.add(t.assetId));
@@ -3175,21 +3175,27 @@ async function stsVoice(p, o, src) {
   if (!isServer()) return toast('목소리 변환은 서버 모드에서만 됩니다');
   const voice = stsTarget(o);
   if (!voice) return toast('읽는 사람의 엔진을 일레븐랩스로 정하거나, 설정에 일레븐랩스 기본 voice ID 를 넣어 주세요', 4500);
-  o._vbusy = true; o._vst = '목소리 바꾸는 중…'; refreshPanel(p);
+  if (o._vbusy) return;
+  o._abort = new AbortController(); const sig = o._abort.signal;
+  o._vbusy = true; o._vst = '목소리 바꾸는 중…'; refreshPanel(p); genUI();
   try {
     const srcId = typeof src === 'string' ? src : await addAsset(src);
     const a = assets.get(srcId); if (!a) throw new Error('원본 녹음을 찾지 못했습니다');
     const key = await ensureKey(srcId, a.blob);
-    const r = await srvJSON('/api/tts', { op: 'sts', key, voice, model: S.stsModel, denoise: !!S.stsDenoise });
+    const r = await srvJSON('/api/tts', { op: 'sts', key, voice, model: S.stsModel, denoise: !!S.stsDenoise }, { signal: sig });
+    if (sig.aborted) throw new Error('aborted');
     const id = await addAsset(await fetchKey(r.key)); P.keys[id] = r.key;
-    const buf = await audioBuf(id), old = o.voice?.assetId, oldSrc = o.voice?.sts?.src;
-    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice } };
-    dropAssetIfUnused(old); if (oldSrc && oldSrc !== srcId) dropAssetIfUnused(oldSrc);
+    const buf = await audioBuf(id);
+    pushVoiceHist(o);
+    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: '', vol: o.voice?.vol ?? 1, sts: { src: srcId, voice }, made: madeSnap(o) };
     o._vst = `✓ 목소리 변환 ${o.voice.dur.toFixed(1)}초`;
     { const n = afterVoice(p); if (n) o._vst += ' · ' + n; }
     logCall({ kind: '목소리 변환', provider: 'tts', ok: true, cost: (buf?.duration || 0) / 60 * (+S.cSts || 0) });
-  } catch (e) { o._vst = '실패: ' + e.message; logCall({ kind: '목소리 변환', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
-  o._vbusy = false; save(); refreshPanel(p); renderPanels();
+  } catch (e) {
+    if (isCancel(o, e)) o._vst = '취소했습니다';
+    else { o._vst = '실패: ' + e.message; logCall({ kind: '목소리 변환', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  }
+  delete o._abort; o._vbusy = false; save(); refreshPanel(p); renderPanels(); genUI();
 }
 /* 마이크 녹음: 한 번 누르면 시작, 다시 누르면 멈추고 변환 */
 const REC = { mr: null, chunks: [], o: null, t0: 0 };
@@ -3372,7 +3378,7 @@ function bindVoiceEditor(el, t, sampleText, onChange, findOpts) {
   };
 }
 /* v = resolveTts() 결과 { engine, voice, model, instr, speed } */
-async function ttsBlob(text, force, v) {
+async function ttsBlob(text, force, v, signal) {
   v = v || resolveTts();
   const eng = v.engine, gmV = v.voice || 'Kore', oaV = v.voice || 'coral', ins = String(v.instr || ''), spd = +v.speed || 1;
   if (isServer()) {
@@ -3383,7 +3389,7 @@ async function ttsBlob(text, force, v) {
     if (v.emotion) { body.emotion = v.emotion; body.emotion_intensity = v.emotion_intensity; }
     if (v.pitch) body.pitch = v.pitch;
     if (eng === 'typecast' && !v.voice) throw new Error('타입캐스트 voice ID 를 정해 주세요 (🔍 찾기)');
-    const r = await srvJSON('/api/tts', body);
+    const r = await srvJSON('/api/tts', body, { signal });
     return { blob: await fetchKey(r.key), key: r.key };
   }
   if (TTS_SRV_ONLY.has(eng)) throw new Error(TTS_ENG[eng] + ' 음성은 서버 모드에서만 만들 수 있습니다');
@@ -3416,29 +3422,67 @@ async function ttsBlob(text, force, v) {
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error?.message || 'HTTP ' + r.status); }
   return { blob: await r.blob() };
 }
+/* ---- 만들기 취소 · 일괄 중지 ----
+   대사마다 o._abort(AbortController) — 보낸 요청을 바로 끊는다 (서버가 이미 받은 요청은 크레딧이 쓰일 수 있음)
+   GEN = 지금 돌고 있는 일괄 만들기 { name, done, total, stop } */
+const GEN = { name: '', done: 0, total: 0, stop: false };
+const isCancel = (o, e) => o._abort?.signal.aborted || e?.name === 'AbortError' || /aborted|abort/i.test(e?.message || '');
+function cancelVoice(o) { o._abort?.abort(); }
+function stopGen() { GEN.stop = true; P.panels.forEach(p => p.overlays.forEach(o => o._abort?.abort())); toast('만들기를 멈춥니다…'); }
+function genUI() { if (document.querySelector('#dlgCast[open]')) renderCast(); castCount(); if (tab === 'cut' || tab === 'text') renderInspector(); }
+/* 일괄 만들기: 하나씩 차례로, 중지하면 남은 것은 건너뛴다 */
+async function runGen(name, list, fn) {
+  if (GEN.name) return toast('다른 일괄 만들기가 진행 중입니다 — 먼저 멈추거나 끝날 때까지 기다려 주세요');
+  Object.assign(GEN, { name, done: 0, total: list.length, stop: false }); genUI();
+  let ok = 0;
+  try { for (const it of list) { if (GEN.stop) break; await fn(it); GEN.done++; if (it.o?.voice && !/^(실패|취소)/.test(it.o._vst || '')) ok++; genUI(); } }
+  finally { const stopped = GEN.stop; Object.assign(GEN, { name: '', done: 0, total: 0, stop: false }); genUI(); toast(stopped ? `중지했습니다 — ${ok}개 만들었고 나머지는 건너뛰었습니다` : `음성 ${ok}개를 만들었습니다`, 3500); }
+}
+/* ---- 이전 음성으로 되돌리기: 대사마다 최근 음성 5개를 (만들 때의 읽는 사람·감정과 함께) 보관 ---- */
+const VHIST_MAX = 5;
+const madeSnap = o => ({ emo: o.emo ? JSON.parse(JSON.stringify(o.emo)) : null, speaker: o.speaker || '' });
+function pushVoiceHist(o) {
+  if (!o.voice) return;
+  (o.voiceHist ||= []).push(o.voice);
+  while (o.voiceHist.length > VHIST_MAX) { const x = o.voiceHist.shift(); dropAssetIfUnused(x.assetId); if (x.sts?.src) dropAssetIfUnused(x.sts.src); }
+}
+function restoreVoice(p, o) {
+  const prev = o.voiceHist?.pop(); if (!prev) return toast('되돌릴 이전 음성이 없습니다');
+  if (o.voice) o.voiceHist.push(o.voice); // 지금 음성은 보관 → 다시 누르면 되돌아온다
+  o.voice = prev;
+  if (prev.made) { o.emo = prev.made.emo ? JSON.parse(JSON.stringify(prev.made.emo)) : null; o.speaker = prev.made.speaker; } // 그 음성을 만들 때의 감정·읽는 사람도 함께
+  o._vst = `↩ 이전 음성 (${(+prev.dur || 0).toFixed(1)}초)`;
+  afterVoice(p); save(); refreshPanel(p); renderPanels(); genUI();
+}
 async function genVoice(p, o, force, noDirect) {
   if (!(o.text || '').trim()) return toast('텍스트가 비어 있습니다');
-  o._vbusy = true; o._vst = '음성 만드는 중…'; refreshPanel(p);
+  if (o._vbusy) return;
+  o._abort = new AbortController(); const sig = o._abort.signal;
+  o._vbusy = true; o._vst = '음성 만드는 중…'; refreshPanel(p); genUI();
   if (!noDirect && S.autoEmo && isServer() && !o.emo && o.kind !== 'caption') {
     o._vst = '🎭 AI 가 감정을 판단하는 중…'; refreshPanel(p);
     await aiDirect([{ p, o }], { quiet: true }).catch(e => toast('AI 감정 연출 실패 — 감정 없이 만듭니다: ' + e.message, 4000));
     o._vst = '음성 만드는 중…'; refreshPanel(p);
   }
   try {
+    if (sig.aborted) throw new Error('aborted');
     const { v, text } = applyEmo(o, voiceProfile(o));
     if (v.engine === 'eleven' && !elV3(v.model)) { const nb = neighborLines(p, o); v.prev = nb.prev; v.next = nb.next; } // 일레븐랩스: 같은 사람 앞뒤 문장으로 억양 잇기
     if (v.engine === 'typecast' && !v.emotion) { const nb = neighborLines(p, o, true); v.prev = nb.prev; v.next = nb.next; } // 타입캐스트 스마트 감정: 대화 흐름 전체
-    const r = await ttsBlob(text, force, v);
+    const r = await ttsBlob(text, force, v, sig);
+    if (sig.aborted) throw new Error('aborted');
     const id = await addAsset(r.blob); if (r.key) P.keys[id] = r.key;
     const buf = await audioBuf(id);
-    const old = o.voice?.assetId, oldSrc = o.voice?.sts?.src;
-    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: voiceSig(o), vol: o.voice?.vol ?? 1 };
-    dropAssetIfUnused(old); if (oldSrc) dropAssetIfUnused(oldSrc);
+    pushVoiceHist(o); // 예전 음성은 지우지 않고 보관 (↩ 로 되돌리기)
+    o.voice = { assetId: id, dur: buf ? +buf.duration.toFixed(2) : 0, sig: voiceSig(o), vol: o.voice?.vol ?? 1, made: madeSnap(o) };
     o._vst = `✓ 음성 ${o.voice.dur.toFixed(1)}초`;
     { const n = afterVoice(p); if (n) o._vst += ' · ' + n; }
     logCall({ kind: '음성', provider: 'tts', ok: true, cost: text.length / 1000 * (+S.cTts || 0) });
-  } catch (e) { o._vst = '실패: ' + e.message; logCall({ kind: '음성', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
-  o._vbusy = false; save(); refreshPanel(p); renderPanels();
+  } catch (e) {
+    if (isCancel(o, e)) o._vst = '취소했습니다' + (o.voice ? ' — 이전 음성을 그대로 둡니다' : '');
+    else { o._vst = '실패: ' + e.message; logCall({ kind: '음성', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+  }
+  delete o._abort; o._vbusy = false; save(); refreshPanel(p); renderPanels(); genUI();
 }
 /* ---- 읽는 속도에 맞춰 타임라인 배치 ----
    대사를 등장 순서대로 하나씩: 음성이 있으면 음성 길이, 없으면 글자 수 ÷ 읽기 속도만큼 보여 주고 다음 대사로 넘어간다.
@@ -3513,9 +3557,10 @@ async function genVoicesForPanel(p) {
   const list = p.overlays.filter(o => o.text?.trim() && o.kind !== 'caption' && !o.voice?.sts && (!o.voice || voiceStale(o))); // 목소리 변환한 대사는 녹음을 덮어쓰지 않는다
   if (!list.length) return toast('새로 만들 음성이 없습니다 (이미 최신이거나 텍스트 없음)');
   const chars = list.reduce((a, o) => a + o.text.length, 0);
-  if (!confirm(`${list.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다.`)) return;
+  if (GEN.name) return stopGen();
+  if (!confirm(`${list.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다. (진행 중에 ⏹ 중지로 멈출 수 있습니다)`)) return;
   await autoDirectBatch(list.map(o => ({ p, o })));
-  for (const o of list) await genVoice(p, o, false, true);
+  await runGen('panel', list.map(o => ({ p, o })), ({ o }) => genVoice(p, o, false, true));
 }
 
 /* ---- 목소리 배정 창: 읽는 사람을 고른 뒤, 대사를 여러 개 체크해서 한꺼번에 적용 ---- */
@@ -3550,12 +3595,15 @@ function renderCast() {
       <span class="note" style="margin:0;white-space:nowrap">${emoOn(r.o) ? (r.o.emo.manual ? '✋ ' : '🎭 ') + esc(r.o.emo.emotion || '') + ' · ' : ''}${esc(v.label)}${!r.o.speaker ? ' (자동)' : ''}${r.o.voice ? (voiceStale(r.o) ? ' · ⚠' : ' · 🔊') : ''}</span>
       <span class="cast-play" style="display:flex;gap:4px;flex:none">
         ${r.o.voice ? `<button type="button" class="ib cPlay" data-pk="${k}" title="${voiceStale(r.o) ? '지금 음성 듣기 (설정이 바뀌기 전 음성)' : '듣기'}">${CAST.playing === k ? '⏹' : '▶'}</button>` : ''}
-        ${r.o._vbusy ? '<span class="note" style="margin:0">만드는 중…</span>' : !r.o.voice || voiceStale(r.o) ? `<button type="button" class="ib cGen" data-pk="${k}" title="지금 설정(목소리·감정)으로 만들어서 바로 듣기 — 크레딧 사용">${r.o.voice ? '⟳▶' : '🔊▶'}</button>` : ''}
+        ${r.o._vbusy ? `<span class="note" style="margin:0">만드는 중…</span><button type="button" class="ib cStop" data-pk="${k}" title="이 대사 만들기 취소">⏹</button>` : !r.o.voice || voiceStale(r.o) ? `<button type="button" class="ib cGen" data-pk="${k}" title="지금 설정(목소리·감정)으로 만들어서 바로 듣기 — 크레딧 사용">${r.o.voice ? '⟳▶' : '🔊▶'}</button>` : ''}
+        ${r.o.voiceHist?.length && !r.o._vbusy ? `<button type="button" class="ib cUndo" data-pk="${k}" title="이전 음성으로 되돌리기 (${r.o.voiceHist.length}개 보관)">↩</button>` : ''}
       </span>
     </label>`;
   }).join('');
   const rowOf = k => { const [pid, oid] = k.split(':'), p = P.panels.find(x => x.id === pid); return { p, o: p?.overlays.find(x => x.id === oid) }; };
   $$('.cPlay', el).forEach(b => (b.onclick = e => { e.preventDefault(); e.stopPropagation(); const k = b.dataset.pk; if (CAST.playing === k) return castStop(); const { o } = rowOf(k); if (o?.voice) castPlay([{ k, o }]); }));
+  $$('.cStop', el).forEach(b => (b.onclick = e => { e.preventDefault(); e.stopPropagation(); const { o } = rowOf(b.dataset.pk); if (o) cancelVoice(o); }));
+  $$('.cUndo', el).forEach(b => (b.onclick = e => { e.preventDefault(); e.stopPropagation(); castStop(); const { p, o } = rowOf(b.dataset.pk); if (o) { restoreVoice(p, o); renderCast(); } }));
   $$('.cGen', el).forEach(b => (b.onclick = async e => {
     e.preventDefault(); e.stopPropagation(); const k = b.dataset.pk, { p, o } = rowOf(k); if (!o) return;
     castStop(); const genP = genVoice(p, o, !!o.voice && !voiceStale(o)); renderCast(); await genP;
@@ -3590,7 +3638,11 @@ function castPicked() {
   P.panels.forEach(p => p.overlays.forEach(o => { if (CAST.sel.has(p.id + ':' + o.id)) out.push({ p, o }); }));
   return out;
 }
-function castCount() { const n = castPicked().length; $('#castApply').textContent = n ? `선택한 ${n}개에 적용` : '선택한 대사에 적용'; $('#castApply').disabled = $('#castGen').disabled = $('#castEmo').disabled = !n; }
+function castCount() {
+  const n = castPicked().length, g = $('#castGen'); $('#castApply').textContent = n ? `선택한 ${n}개에 적용` : '선택한 대사에 적용'; $('#castApply').disabled = $('#castEmo').disabled = !n;
+  if (GEN.name) { g.disabled = false; g.textContent = GEN.stop ? '멈추는 중…' : `⏹ 중지 (${GEN.done}/${GEN.total})`; g.classList.add('danger'); } // 일괄 만들기 중에는 이 버튼이 ‘중지’
+  else { g.disabled = !n; g.textContent = '선택한 대사 음성 만들기'; g.classList.remove('danger'); }
+}
 /* 목소리 배정 창: 감정 직접 지정 (칩 = 감정, 슬라이더 = 강도 — 건드리지 않으면 감정마다 기본 강도) */
 const CASTEMO = { k: null };
 $('#castEmoChips').innerHTML = EMO_PRESETS.map(([n, ins]) => `<button type="button" class="chip" data-cemo="${n}" title="${esc(ins)}">${n}</button>`).join('');
@@ -3658,16 +3710,15 @@ $('#castApply').onclick = () => {
   toast(`${list.length}개 대사의 읽는 사람을 ‘${$('#castWho').selectedOptions[0].textContent.trim()}’(으)로 정했습니다${stale ? ` · 이미 만든 음성 ${stale}개는 다시 만들어야 합니다` : ''}`, 3500);
 };
 $('#castGen').onclick = async () => {
+  if (GEN.name) return stopGen();
   const list = castPicked().filter(({ o }) => o.kind !== 'caption' || o.speaker); // 자막은 읽는 사람을 직접 정했을 때만
   const todo = list.filter(({ o }) => !o.voice?.sts && (!o.voice || voiceStale(o)));
   const stsN = list.filter(({ o }) => o.voice?.sts && voiceStale(o)).length;
   if (!todo.length) return toast(stsN ? `목소리 변환한 대사 ${stsN}개는 말풍선 탭의 ‘같은 녹음으로 다시 변환’으로 바꿔 주세요` : '새로 만들 음성이 없습니다 (이미 최신)', 4000);
   const chars = todo.reduce((a, { o }) => a + o.text.length, 0);
-  if (!confirm(`${todo.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다.`)) return;
-  $('#castGen').disabled = true;
+  if (!confirm(`${todo.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다. (진행 중에 ⏹ 중지로 멈출 수 있습니다)`)) return;
   await autoDirectBatch(todo);
-  for (const { p, o } of todo) { await genVoice(p, o, false, true); renderCast(); }
-  $('#castGen').disabled = false; toast('음성을 만들었습니다');
+  await runGen('cast', todo, ({ p, o }) => genVoice(p, o, false, true));
 };
 
 /* ---- 오디오 엔진: 대사 음성 + 배경음악을 타임라인에 맞춰 재생하고, 내보내기 때는 녹화 스트림에도 보낸다 ---- */
@@ -4894,7 +4945,8 @@ function tabText(p) {
       ${(() => { const v = voiceProfile(o); return `<span class="lbl">대사 음성 · ${esc(v.label)} — ${esc(TTS_ENG[v.engine] || v.engine)} ${esc(voiceName(v.voice) || '(목소리 없음)')}${isServer() ? ' · 서버' : ''}</span>`; })()}
       <label><span class="lbl">읽는 사람</span><select id="vSpk">${speakerOptions(o)}</select></label>
       <div class="row">
-        <button type="button" class="b ghost sm" id="vGen" ${o._vbusy ? 'disabled' : ''}>${o._vbusy ? '만드는 중…' : !o.voice ? '🔊 음성 만들기' : o.voice.sts ? '🔊 글로 새로 만들기(녹음 대신)' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>
+        ${o._vbusy ? `<span class="note" style="margin:0">만드는 중…</span><button type="button" class="b danger sm" id="vStop" title="이 대사 만들기 취소">⏹ 취소</button>` : `<button type="button" class="b ghost sm" id="vGen">${!o.voice ? '🔊 음성 만들기' : o.voice.sts ? '🔊 글로 새로 만들기(녹음 대신)' : voiceStale(o) ? '⚠ 다시 만들기' : '🔄 다시 만들기'}</button>`}
+        ${o.voiceHist?.length && !o._vbusy ? `<button type="button" class="b ghost sm" id="vUndo" title="바로 전 음성으로 되돌리기 (그때의 읽는 사람·감정도 함께) — 다시 누르면 지금 음성으로 돌아옵니다">↩ 이전 음성 (${o.voiceHist.length})</button>` : ''}
         ${o.voice ? `<button type="button" class="b ghost sm" id="vPlay">▶ 듣기</button><button type="button" class="b ghost sm" id="vDl" title="이 대사 음성을 파일로 받기">⬇ 받기</button><button type="button" class="b ghost sm" id="vMute" aria-pressed="${!!o.voice.mute}">${o.voice.mute ? '🔇 음소거됨' : '🔊 음소거'}</button><button type="button" class="b danger sm" id="vDel">음성 빼기</button>` : ''}
       </div>
       ${emoBlockHTML(o)}
@@ -6945,7 +6997,7 @@ function bindText(p, el) {
     const off = $('#bubOff', el); if (off) off.onclick = () => { o.shapeImg = null; save(); renderInspector(); requestDraw(); };
     $$('[data-bub]', el).forEach(b => (b.onclick = () => { o.shapeImg = b.dataset.bub; getImg(o.shapeImg); save(); renderInspector(); requestDraw(); }));
   }
-  $('#vGen', el).onclick = () => { if (o.voice?.sts && !confirm('목소리 변환한 음성을 글 읽기(TTS) 음성으로 바꿉니다. 원본 녹음은 지워집니다. 계속할까요?')) return; genVoice(p, o, !!o.voice && !voiceStale(o)); };
+  const vg = $('#vGen', el); if (vg) vg.onclick = () => { if (o.voice?.sts && !confirm('목소리 변환한 음성을 글 읽기(TTS) 음성으로 바꿉니다. (지금 음성은 ↩ 이전 음성으로 되돌릴 수 있습니다) 계속할까요?')) return; genVoice(p, o, !!o.voice && !voiceStale(o)); };
   $('#vSpk', el).onchange = e => { o.speaker = e.target.value; save(); renderInspector(); renderPanels(); renderChars(); };
   $('#vRec', el).onclick = () => toggleRecord(p, o);
   bindEmo(p, o, el);
@@ -6959,7 +7011,9 @@ function bindText(p, el) {
   const vdl = $('#vDl', el); if (vdl) vdl.onclick = () => saveOne(voiceEntry(p, o));
   const vds = $('#vStsDl', el); if (vds) vds.onclick = () => saveOne({ id: o.voice.sts.src, base: voiceEntry(p, o).base + '_원본녹음' });
   const vm = $('#vMute', el); if (vm) vm.onclick = () => { o.voice.mute = !o.voice.mute; save(); renderInspector(); };
-  const vd = $('#vDel', el); if (vd) vd.onclick = () => { const id = o.voice.assetId, src = o.voice.sts?.src; o.voice = null; o._vst = ''; dropAssetIfUnused(id); if (src) dropAssetIfUnused(src); save(); renderInspector(); };
+  const vd = $('#vDel', el); if (vd) vd.onclick = () => { if (o.voiceHist?.length && !confirm(`보관한 이전 음성 ${o.voiceHist.length}개도 함께 지워집니다. 뺄까요?`)) return; dropVoice(o); save(); renderInspector(); renderPanels(); };
+  const vu = $('#vUndo', el); if (vu) vu.onclick = () => { restoreVoice(p, o); renderInspector(); };
+  const vx = $('#vStop', el); if (vx) vx.onclick = () => cancelVoice(o);
   const tc = $('#tailChk', el); if (tc) tc.onchange = () => { o.tail = tc.checked ? { x: o.x - 0.08, y: o.y + 0.1 } : null; save(); requestDraw(); };
   $('#ovNow', el).onclick = () => { o.start = +scrubT.toFixed(1); save(); renderInspector(); requestDraw(); };
   $('#ovDup', el).onclick = () => { const n = { ...JSON.parse(JSON.stringify(o)), id: uid(), y: clamp(o.y + 0.08, 0, 1), start: +(o.start + 0.8).toFixed(1) }; delete n.bubbleGroup; if (n.tail) n.tail.y = clamp(n.tail.y + 0.08, 0, 1); p.overlays.push(n); selOv = n.id; save(); renderInspector(); renderPanels(); requestDraw(); };
@@ -7311,7 +7365,10 @@ function mixDownload(row) {
   if (id === 'narr' || id === 'dlg') return saveZip(it[id].map(v => voiceEntry(v.p, v.o)), id === 'narr' ? '나레이션' : '캐릭터대사');
   if (id === 'sfx' || id === 'bgm') return saveZip(it[id].map(trackEntry), id === 'sfx' ? '효과음' : '배경음악');
 }
-function dropVoice(o) { const a = o.voice?.assetId, s = o.voice?.sts?.src; o.voice = null; o._vst = ''; if (a) dropAssetIfUnused(a); if (s) dropAssetIfUnused(s); }
+function dropVoice(o) { // 음성 빼기 = 지금 음성과 보관한 이전 음성까지 모두 지운다
+  const all = [o.voice, ...(o.voiceHist || [])].filter(Boolean); o.voice = null; o.voiceHist = []; o._vst = '';
+  all.forEach(v => { dropAssetIfUnused(v.assetId); if (v.sts?.src) dropAssetIfUnused(v.sts.src); });
+}
 function dropTrack(t) { const tr = audTracks(), i = tr.indexOf(t); if (i < 0) return; tr.splice(i, 1); if (audPrev?._id === t.id) { audPrev.pause(); audPrev = null; } dropAssetIfUnused(t.assetId); }
 function mixDelete(row) {
   const { k, x, id, o } = mixTarget(row), it = mixItems();
@@ -7561,7 +7618,7 @@ function dubHTML(p) {
       EMO_PRESETS.map(([n]) => `<option value="${n}" ${cur === n ? 'selected' : ''}>${n}</option>`).join(''); };
   return `<div class="grp dub"><div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><span class="lbl" style="margin:0;flex:1">🎙 이 컷 더빙 — ${list.length}줄 · 음성 ${voiced}개${stale ? ` · ⚠ ${stale}개 다시 만들어야 함` : ''}</span>
       <button type="button" class="b ghost sm" id="dubPlayAll" ${voiced ? '' : 'disabled'}>${DUB.playing ? '⏹ 멈추기' : '▶ 이 컷 이어 듣기'}</button>
-      <button type="button" class="b sm" id="dubMakeAll" ${list.some(o => !o.voice || voiceStale(o)) ? '' : 'disabled'}>⟳ 필요한 것 모두 만들기</button></div>
+      ${GEN.name ? `<button type="button" class="b danger sm" id="dubStopAll">${GEN.stop ? '멈추는 중…' : `⏹ 중지 (${GEN.done}/${GEN.total})`}</button>` : `<button type="button" class="b sm" id="dubMakeAll" ${list.some(o => !o.voice || voiceStale(o)) ? '' : 'disabled'}>⟳ 필요한 것 모두 만들기</button>`}</div>
     ${list.map(o => { const v = voiceProfile(o), st = o.voice ? (voiceStale(o) ? '⚠' : `${(+o.voice.dur || 0).toFixed(1)}초`) : '없음';
       return `<div class="card dub-row" data-dub="${o.id}" style="padding:8px;margin:6px 0;display:flex;flex-direction:column;gap:6px">
         <div class="row" style="gap:6px;align-items:center"><span class="note" style="margin:0;white-space:nowrap">${(+o.start || 0).toFixed(1)}s · ${esc(OV_SHORT[o.kind] || KINDS[o.kind] || o.kind)}</span>
@@ -7571,7 +7628,8 @@ function dubHTML(p) {
           <select class="dSpk" aria-label="읽는 사람" style="max-width:150px">${speakerOptions(o)}</select>
           <select class="dEmo" aria-label="감정" style="max-width:130px">${emoOpt(o)}</select>
           ${o.voice ? `<button type="button" class="ib dPlay" title="듣기">${DUB.playing === o.id ? '⏹' : '▶'}</button>` : ''}
-          ${o._vbusy ? '<span class="note" style="margin:0">만드는 중…</span>' : `<button type="button" class="ib dMake" title="지금 설정으로 ${o.voice ? '다시 ' : ''}만들고 바로 듣기 (크레딧 사용)">${o.voice ? '⟳' : '🔊'}▶</button>`}
+          ${o._vbusy ? '<span class="note" style="margin:0">만드는 중…</span><button type="button" class="ib dStop" title="이 대사 만들기 취소">⏹</button>' : `<button type="button" class="ib dMake" title="지금 설정으로 ${o.voice ? '다시 ' : ''}만들고 바로 듣기 (크레딧 사용)">${o.voice ? '⟳' : '🔊'}▶</button>`}
+          ${o.voiceHist?.length && !o._vbusy ? `<button type="button" class="ib dUndo" title="이전 음성으로 되돌리기 (${o.voiceHist.length}개 보관 · 그때의 읽는 사람·감정도 함께)">↩</button>` : ''}
           ${o.voice ? `<button type="button" class="ib dMute" title="${o.voice.mute ? '음소거 풀기' : '음소거'}">${o.voice.mute ? '🔇' : '🔈'}</button>
             <input type="range" class="dVol" min="0" max="2" step="0.05" value="${o.voice.vol ?? 1}" title="음량 ${Math.round((o.voice.vol ?? 1) * 100)}%" style="width:70px">
             <button type="button" class="ib del dDel" title="음성 빼기 (글자는 남김)">🗑</button>` : ''}
@@ -7602,12 +7660,12 @@ async function dubMake(p, o) {
 function bindDub(p, el) {
   const box = $('.dub', el); if (!box) return;
   const pa = $('#dubPlayAll', box); if (pa) pa.onclick = () => DUB.playing ? dubStop() : dubPlay(p, dubLines(p).filter(o => o.voice));
+  const sa = $('#dubStopAll', box); if (sa) sa.onclick = () => stopGen();
   const ma = $('#dubMakeAll', box); if (ma) ma.onclick = async () => {
     const todo = dubLines(p).filter(o => !o.voice || voiceStale(o)); if (!todo.length) return;
-    if (!confirm(`이 컷 대사 ${todo.length}개의 음성을 만듭니다. 크레딧이 사용됩니다.`)) return;
+    if (!confirm(`이 컷 대사 ${todo.length}개의 음성을 만듭니다. 크레딧이 사용됩니다. (진행 중에 ⏹ 중지로 멈출 수 있습니다)`)) return;
     dubStop(); await autoDirectBatch(todo.filter(o => !o.voice?.sts).map(o => ({ p, o })));
-    for (const o of todo) { if (o.voice?.sts) await stsVoice(p, o, o.voice.sts.src); else await genVoice(p, o, false, true); if (tab === 'cut') renderInspector(); }
-    toast('이 컷 음성을 만들었습니다 — ▶ 이 컷 이어 듣기로 들어 보세요');
+    await runGen('dub', todo.map(o => ({ p, o })), ({ o }) => (o.voice?.sts ? stsVoice(p, o, o.voice.sts.src) : genVoice(p, o, false, true)));
   };
   $$('.dub-row', box).forEach(row => {
     const o = p.overlays.find(x => x.id === row.dataset.dub); if (!o) return;
@@ -7623,9 +7681,11 @@ function bindDub(p, el) {
     };
     const dp = q('.dPlay'); if (dp) dp.onclick = () => DUB.playing === o.id ? dubStop() : dubPlay(p, [o]);
     const dm = q('.dMake'); if (dm) dm.onclick = () => (o.voice?.sts ? stsVoice(p, o, o.voice.sts.src).then(() => { renderInspector(); dubPlay(p, [o]); }) : dubMake(p, o)); // 목소리 변환한 대사는 같은 녹음으로 다시 변환
+    const ds = q('.dStop'); if (ds) ds.onclick = () => cancelVoice(o);
+    const du = q('.dUndo'); if (du) du.onclick = () => { dubStop(); restoreVoice(p, o); renderInspector(); };
     const mu = q('.dMute'); if (mu) mu.onclick = () => { o.voice.mute = !o.voice.mute; redraw(); };
     const vo = q('.dVol'); if (vo) { vo.oninput = () => { o.voice.vol = +vo.value; vo.title = `음량 ${Math.round(o.voice.vol * 100)}%`; }; vo.onchange = () => save(); }
-    const dd = q('.dDel'); if (dd) dd.onclick = () => { if (!confirm('이 대사의 음성을 뺄까요? (글자는 남습니다)')) return; dropVoice(o); redraw(); };
+    const dd = q('.dDel'); if (dd) dd.onclick = () => { if (!confirm(`이 대사의 음성을 뺄까요? (글자는 남습니다${o.voiceHist?.length ? ` · 보관한 이전 음성 ${o.voiceHist.length}개도 지워집니다` : ''})`)) return; dropVoice(o); redraw(); };
     const go = async () => {
       const note = q('.dNote').value.trim(); if (!note) return toast('말투를 적어 주세요');
       const want = o.emo?.manual && EMO_PRESETS.some(x => x[0] === o.emo.emotion) ? o.emo.emotion : '';
@@ -7657,7 +7717,7 @@ function tabCut(p) {
   </div>
   ${dubHTML(p)}
   <div class="grp"><span class="lbl">대사 음성</span><div class="row">
-    <button type="button" class="b ghost sm" id="voiceAll">이 컷 대사 음성 모두 만들기</button>
+    <button type="button" class="b ${GEN.name ? 'danger' : 'ghost'} sm" id="voiceAll">${GEN.name ? `⏹ 일괄 만들기 중지 (${GEN.done}/${GEN.total})` : '이 컷 대사 음성 모두 만들기'}</button>
     <button type="button" class="b ghost sm" id="fitVoice">대사·음성 길이에 컷 맞춤</button>
   </div><label class="chk"><input type="checkbox" id="autoFit" ${S.autoFit ? 'checked' : ''}> 음성이 컷보다 길면 컷 길이를 자동으로 늘리기 (권장)</label></div>
   <p class="note">정지 이미지 + 카메라 모션만으로도 무빙툰이 됩니다. 클링은 움직임이 꼭 필요한 컷에만 쓰면 비용이 크게 줄어듭니다.</p>`;
@@ -7985,9 +8045,31 @@ const aiChat = [];
 const editSummary = () => ({
   aspect: P.aspect, total_sec: +totalDur().toFixed(2), selected_panel: P.panels.findIndex(p => p.id === sel) + 1,
   panels: P.panels.map((p, i) => ({ panel: i + 1, dur: panelDur(p), trans: p.trans, motion: p.motion, motionAmt: p.motionAmt, has_video_clip: usesClip(p), read_need: +readNeed(p).toFixed(1), prompt: String(p.prompt || '').slice(0, 80),
-    overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size, color: o.color, fill: o.fill, fillA: o.fillA, stroke: o.stroke })) })),
-  audio: P.audio.map((t, i) => ({ track: i + 1, name: t.name, start: +t.start || 0, vol: t.vol, fadeIn: t.fadeIn, fadeOut: t.fadeOut, loop: !!t.loop })),
+    overlays: p.overlays.map((o, j) => ({ overlay: j + 1, kind: o.kind, text: String(o.text || '').slice(0, 80), start: +o.start || 0, dur: +o.dur || 0, anim: o.anim, size: o.size, color: o.color, fill: o.fill, fillA: o.fillA, stroke: o.stroke,
+      ...(o.kind === 'caption' && !o.speaker ? {} : { reader: speakerOf(o).label, emotion: emoOn(o) ? `${o.emo.emotion || '직접'} ${Math.round((+o.emo.intensity || 0) * 100)}%${o.emo.manual ? ' (직접)' : ''}` : o.emo ? '없음' : '자동',
+        voice: o.voice ? `${(+o.voice.dur || 0).toFixed(1)}초${voiceStale(o) ? ' ⚠다시 만들어야 함' : ''}${o.voice.mute ? ' 음소거' : ''}${(o.voice.vol ?? 1) !== 1 ? ' 음량' + o.voice.vol : ''}` : '없음' }) })) })),
+  audio: P.audio.map((t, i) => ({ track: i + 1, name: t.name, kind: trackGroup(t), start: +t.start || 0, vol: t.vol, fadeIn: t.fadeIn, fadeOut: t.fadeOut, loop: !!t.loop, mute: !!t.mute })),
+  // 더빙: 읽는 사람 목록(목소리·설명)과 고를 수 있는 감정
+  cast: [{ name: '나레이터', voice: (() => { const v = resolveTts(P.narrTts); return `${TTS_ENG[v.engine] || v.engine} ${voiceName(v.voice)}`; })() },
+    ...P.chars.map(c => { const v = resolveTts(c.tts); return { name: c.name || '이름 없음', desc: String(c.desc || '').slice(0, 120), voice: `${TTS_ENG[v.engine] || v.engine} ${voiceName(v.voice)}` }; })],
+  emotion_presets: EMO_PRESETS.map(x => x[0]),
 });
+/* AI 편집의 더빙 대상 고르기: speakers / panels / kinds / lines 를 모두 만족하는 대사 (조건이 없으면 전체 대사) */
+function dubTargets(op, pans, ovs) {
+  const names = Array.isArray(op.speakers) ? op.speakers.map(s => String(s).trim()) : null;
+  const pset = Array.isArray(op.panels) && op.panels.length ? new Set(op.panels.map(n => pans[Math.trunc(+n) - 1]).filter(Boolean)) : null;
+  const kinds = Array.isArray(op.kinds) && op.kinds.length ? new Set(op.kinds) : null;
+  const lineSet = Array.isArray(op.lines) && op.lines.length ? new Set(op.lines.map(l => ovs.get(pans[Math.trunc(+l?.panel) - 1])?.[Math.trunc(+l?.overlay) - 1]).filter(Boolean)) : null;
+  const out = [];
+  pans.forEach(p => ovs.get(p).forEach(o => {
+    if (!o.text?.trim() || (o.kind === 'caption' && !o.speaker)) return;
+    if (pset && !pset.has(p)) return; if (kinds && !kinds.has(o.kind)) return; if (lineSet && !lineSet.has(o)) return;
+    if (names && names.length && !names.includes(speakerOf(o).label)) return;
+    out.push({ p, o });
+  }));
+  return out;
+}
+const speakerIdByName = n => { n = String(n || '').trim(); if (!n) return null; if (n === '나레이터') return 'narr'; if (n === '기본 목소리') return 'base'; const c = P.chars.find(x => (x.name || '').trim() === n); return c ? c.id : null; };
 /* 글 읽는 시간: 공백 뺀 글자당 0.15초(최소 1.2초). 컷이 글을 다 보여 주려면 가장 늦게 끝나는 글의 등장 시각 + 읽는 시간이 필요하다 */
 const readSec = o => Math.max(1.2, [...String(o.text || '').replace(/\s/g, '')].length * 0.15);
 const readNeed = p => p.overlays.reduce((m, o) => (o.kind === 'flash' || !String(o.text || '').trim() ? m : Math.max(m, (+o.start || 0) + readSec(o))), 0);
@@ -8002,6 +8084,8 @@ function applyOvStyle(o, op) {
 }
 function applyEditOps(ops) {
   const done = [], skipped = [];
+  // 시간이 걸리거나 크레딧이 드는 일은 모아 두었다가 순서대로: 말투 변환 → 음성 만들기 → 타이밍 맞춤 → 효과음 → 배경음악
+  const jobs = { notes: [], remake: new Set(), make: [], sync: [], sfx: [], bgm: null };
   // 번호는 요청 시점(요약)의 컷·오버레이·트랙을 가리키므로, 적용 중 순서가 바뀌어도 흔들리지 않게 미리 붙잡아 둔다
   const pans = P.panels.slice(), ovs = new Map(pans.map(p => [p, p.overlays.slice()])), tracks = P.audio.slice();
   const panelAt = n => pans[Math.trunc(+n) - 1];
@@ -8064,9 +8148,81 @@ function applyEditOps(ops) {
       if (fi !== null) t.fadeIn = +clamp(fi, 0, 10).toFixed(2);
       if (fo !== null) t.fadeOut = +clamp(fo, 0, 10).toFixed(2);
       done.push(label);
+    } else if (op.tool === 'set_dub') {
+      const list = dubTargets(op, pans, ovs); if (!list.length) return skipped.push('더빙(대상 없음)');
+      const sid = op.speaker != null ? speakerIdByName(op.speaker) : undefined;
+      if (op.speaker != null && sid == null) skipped.push(`더빙 읽는 사람 ‘${op.speaker}’(없음)`);
+      const k = aiNum(op.intensity), vol = aiNum(op.volume), emo = typeof op.emotion === 'string' ? op.emotion.trim() : '';
+      const preset = EMO_PRESETS.some(x => x[0] === emo) ? emo : '', note = typeof op.note === 'string' ? op.note.trim().slice(0, 260) : '';
+      list.forEach(({ o }) => {
+        if (sid) o.speaker = sid;
+        if (emo === '자동') o.emo = null;
+        else if (emo === '없음') o.emo = { on: false, manual: true, ai: false, emotion: '', intensity: 0, instr: '', tags: [], speed: 1 };
+        else if (preset) setEmo(o, preset, { intensity: k ?? undefined });
+        else if (k !== null && o.emo) { o.emo.intensity = +clamp(k, 0, 1).toFixed(2); o.emo.manual = true; o.emo.ai = false; }
+        if (o.voice && vol !== null) o.voice.vol = +clamp(vol, 0, 2).toFixed(2);
+        if (o.voice && typeof op.mute === 'boolean') o.voice.mute = op.mute;
+      });
+      if (note) jobs.notes.push({ list, note, want: preset });
+      if (op.remake === true) list.forEach(x => jobs.remake.add(x));
+      done.push(`더빙 ${list.length}줄`);
+    } else if (op.tool === 'make_voices') {
+      const list = dubTargets({ panels: op.panels, speakers: op.speakers }, pans, ovs); jobs.make.push(...list); done.push(`음성 만들기 예약 ${list.length}줄`);
+    } else if (op.tool === 'sync_to_voices') {
+      const list = Array.isArray(op.panels) && op.panels.length ? op.panels.map(panelAt).filter(Boolean) : pans;
+      jobs.sync.push({ list, hold: op.hold === 'read' ? 'read' : op.hold === 'end' ? 'end' : '' }); done.push(`타이밍 맞춤 ${list.length}컷`);
+    } else if (op.tool === 'add_sfx') {
+      const tl = timeline(), startOf = q => tl.find(s => s.p === q);
+      (Array.isArray(op.items) ? op.items : []).slice(0, 30).forEach(x => {
+        const q = panelAt(x?.panel), seg = q && startOf(q); if (!seg || !String(x?.prompt || '').trim()) return;
+        const at = clamp(aiNum(x.at) ?? 0, 0, Math.max(0, seg.dur - 0.3)), loop = !!x.loop, endP = loop ? startOf(panelAt(x.to_panel) || q) : null;
+        const start = +(seg.start + at).toFixed(2), len = loop && endP ? Math.max(1, +(endP.start + endP.dur - start).toFixed(2)) : 0;
+        jobs.sfx.push({ label: String(x.label || '효과음').slice(0, 24), prompt: String(x.prompt).slice(0, 400), dur: clamp(aiNum(x.dur) ?? (loop ? 10 : 2), 0.5, 30), loop, start, len, vol: clamp(aiNum(x.vol) ?? 0.7, 0.2, 1) });
+      });
+      if (jobs.sfx.length) done.push(`효과음 예약 ${jobs.sfx.length}개`); else skipped.push('효과음(대상 없음)');
+    } else if (op.tool === 'compose_bgm') {
+      jobs.bgm = { hint: typeof op.hint === 'string' ? op.hint.slice(0, 300) : '' }; done.push('배경음악 설계');
     } else skipped.push(label);
   });
-  return { done, skipped };
+  return { done, skipped, jobs };
+}
+/* AI 편집 뒤처리: 말투를 엔진 값으로 → (확인 후) 음성 만들기 → 타이밍 맞춤 → (확인 후) 효과음 → 배경음악 설계 창 */
+async function runEditJobs(jobs, say) {
+  for (const j of jobs.notes) { try { await applyNote(j.list, j.note, j.want); } catch (e) { say('bot err', '말투 변환 실패 — OpenAI·Gemini 에만 글 그대로 적용됩니다: ' + e.message); } }
+  const seen = new Set(), voiceList = [...jobs.make, ...jobs.remake].filter(({ o }) => !seen.has(o) && seen.add(o) && o.text?.trim() && (!o.voice || voiceStale(o)));
+  if (voiceList.length) {
+    const chars = voiceList.reduce((a, { o }) => a + o.text.length, 0);
+    if (confirm(`AI 편집: 대사 ${voiceList.length}개(약 ${chars}자)의 음성을 만듭니다. 크레딧이 사용됩니다. (진행 중 ⏹ 중지 가능)`)) {
+      const m = say('bot', `🎙 음성 ${voiceList.length}개를 만드는 중… `), sb = document.createElement('button');
+      sb.type = 'button'; sb.className = 'b danger sm'; sb.textContent = '⏹ 중지'; sb.onclick = () => { stopGen(); sb.disabled = true; sb.textContent = '멈추는 중…'; }; m.appendChild(sb);
+      await autoDirectBatch(voiceList.filter(({ o }) => !o.voice?.sts));
+      await runGen('ai', voiceList, ({ p, o }) => (o.voice?.sts ? stsVoice(p, o, o.voice.sts.src) : genVoice(p, o, false, true)));
+      sb.remove();
+    } else say('bot', '음성 만들기는 건너뛰었습니다 — ⚠ 표시된 대사는 나중에 만들 수 있습니다.');
+  }
+  if (jobs.sync.length) {
+    let n = 0;
+    jobs.sync.forEach(({ list, hold }) => { const keep = S.syncHold; if (hold) S.syncHold = hold; list.forEach(q => { if (syncCut(q)) n++; }); S.syncHold = keep; });
+    if (n) { save(); renderAll(); say('bot', `⏱ ${n}컷의 대사 타이밍과 컷 길이를 음성에 맞췄습니다.`); }
+  }
+  if (jobs.sfx.length) {
+    if (!isServer()) say('bot err', '효과음 만들기는 서버 모드에서만 됩니다.');
+    else if (confirm(`AI 편집: 효과음 ${jobs.sfx.length}개를 만들어 넣습니다. 크레딧이 사용됩니다.\n\n${jobs.sfx.map(x => '· ' + x.label).join('\n')}`)) {
+      let ok = 0;
+      for (const x of jobs.sfx) {
+        try {
+          const r = await srvJSON('/api/tts', { op: 'sfx', text: x.prompt, duration: x.dur, loop: x.loop, influence: 0.35 });
+          const assetId = await addAsset(await fetchKey(r.key)); P.keys[assetId] = r.key; const buf = await audioBuf(assetId); if (!buf) continue;
+          audTracks().push({ id: uid(), kind: 'sfx', assetId, name: ('효과음 · ' + x.label).slice(0, 40), start: x.start, trimIn: 0, len: x.loop ? x.len : 0, vol: x.vol, fadeIn: x.loop ? 0.6 : 0, fadeOut: x.loop ? 0.8 : 0.1, loop: x.loop, duck: x.loop, srcDur: +buf.duration.toFixed(3), mute: false });
+          ok++; logCall({ kind: '효과음', provider: 'tts', ok: true, cost: +S.cSfx || 0 }); save(); renderPanels();
+        } catch (e) { logCall({ kind: '효과음', provider: 'tts', ok: false, err: e.kind || 'bad', msg: e.message }); }
+      }
+      say('bot', `✨ 효과음 ${ok}개를 넣었습니다.`); if (tab === 'audio') renderInspector();
+    } else say('bot', '효과음은 건너뛰었습니다.');
+  }
+  if (jobs.bgm) { AISCORE.hint = jobs.bgm.hint || AISCORE.hint; say('bot', '🎼 배경음악 설계를 엽니다 — 설계안을 확인하고 ‘이대로 작곡’을 누르세요.'); openScore(true); }
+  const stale = P.panels.reduce((a, p) => a + p.overlays.filter(o => o.voice && voiceStale(o)).length, 0);
+  return stale;
 }
 function aiSay(cls, text) {
   const d = document.createElement('div'); d.className = 'ai-m ' + cls; d.textContent = text;
@@ -8082,15 +8238,26 @@ async function aiSend(instruction, auto = false) {
   try {
     const d = await srvJSON('/api/edit', { instruction, summary: editSummary(), history: aiChat, auto });
     wait.remove();
-    let note = '';
+    let note = '', jobs = null;
     if (d.ops && d.ops.length) {
       stop(); flushLocal(); // 적용 직전 상태를 기록에 남겨 Ctrl+Z 로 돌아올 수 있게 한다
-      const r = applyEditOps(d.ops);
+      const r = applyEditOps(d.ops); jobs = r.jobs;
       if (r.done.length) { save(); thumbSig = ''; renderAll(); flushLocal(); }
-      note = '\n\n✓ ' + r.done.length + '곳 수정' + (r.skipped.length ? ' · 건너뜀 ' + r.skipped.length + '곳(' + r.skipped.join(', ') + ')' : '') + ' — 마음에 안 들면 Ctrl+Z로 되돌립니다.';
+      note = '\n\n✓ ' + r.done.length + '곳 수정' + (r.done.length ? ' (' + r.done.slice(0, 12).join(' · ') + (r.done.length > 12 ? ' …' : '') + ')' : '') + (r.skipped.length ? ' · 건너뜀 ' + r.skipped.length + '곳(' + r.skipped.join(', ') + ')' : '') + ' — 마음에 안 들면 Ctrl+Z로 되돌립니다.';
     }
     const msg = (d.message || (d.ops && d.ops.length ? '수정했습니다.' : '수정할 내용이 없습니다.')) + note;
     aiSay('bot', msg);
+    if (jobs) { // 더빙·효과음·음악처럼 시간이 걸리는 일은 이어서
+      const stale = await runEditJobs(jobs, aiSay);
+      save(); renderAll(); flushLocal();
+      if (stale) { // 설정만 바뀌고 아직 다시 만들지 않은 음성 → 버튼으로
+        const m = aiSay('bot', `⚠ 설정이 바뀐 대사 ${stale}개는 음성을 다시 만들어야 들립니다. `);
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'b sm'; b.textContent = `⟳ ${stale}개 다시 만들기`;
+        b.onclick = async () => { b.disabled = true; const list = []; P.panels.forEach(p => p.overlays.forEach(o => { if (o.voice && voiceStale(o)) list.push({ p, o }); }));
+          await runEditJobs({ notes: [], remake: new Set(list), make: [], sync: [{ list: [...new Set(list.map(x => x.p))], hold: '' }], sfx: [], bgm: null }, aiSay); b.remove(); };
+        m.appendChild(b);
+      }
+    }
     aiChat.push({ role: 'user', text: instruction }, { role: 'assistant', text: msg.slice(0, 500) });
     if (aiChat.length > 16) aiChat.splice(0, aiChat.length - 16);
   } catch (e) { wait.remove(); aiSay('bot err', '오류: ' + (e.message || e)); }
@@ -8144,8 +8311,9 @@ async function captionsRun() {
   finally { capBusy = false; $('#capGo').disabled = false; }
 }
 $('#capGo').onclick = captionsRun;
-$('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '타임라인을 보고 컷 길이·전환·말풍선 타이밍·음악 볼륨을 고쳐 드립니다. 한 번에 하나씩 요청하면 가장 정확합니다.'); $('#aiIn').focus(); } };
+$('#aiEditBtn').onclick = () => { const el = $('#aiEdit'); el.hidden = !el.hidden; if (!el.hidden) { if (!$('#aiLog').children.length) aiSay('bot', '컷 길이·전환·말풍선 타이밍·음악 볼륨에 더해 더빙(읽는 사람·감정·말투·음량)·음성 만들기·효과음·배경음악까지 편집합니다. 예: “백운 도사 대사는 더 낮고 느긋하게 다시 만들어줘”, “7~13컷은 긴장감 있게”. ✨ 알아서 전체 편집은 전부 한 번에 해 드립니다.'); $('#aiIn').focus(); } };
 $('#aiEditClose').onclick = () => { $('#aiEdit').hidden = true; };
+$('#aiFull').onclick = () => aiSend('영상 전체를 알아서 완성도 있게 편집해줘(전체 편집). 나레이터·캐릭터 목소리는 이미 정해져 있으니 그대로 두고, 어색하거나 빠진 감정·말투를 장면과 캐릭터에 맞게 자연스럽게 다듬은 뒤, 음성이 없거나 ⚠인 대사는 만들고, 대사 타이밍과 컷 길이를 음성에 맞춰줘. 소리가 비어 있는 장면엔 꼭 필요한 환경음·효과음만 넣고, 배경음악이 없으면 설계를 시작해. 자막·말풍선 스타일이 들쭉날쭉하면 정리해. 컷 순서·그림·글 내용은 바꾸지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiAuto').onclick = () => aiSend('타임라인 전체를 보고 읽기 쉽게 알아서 다듬어줘. 글 읽는 시간이 모자란 컷은 맞추고, 말풍선 등장 타이밍이 겹치거나 너무 빠르면 정리해. 컷 순서·그림·글 내용·음악은 건드리지 마. 질문하지 말고 바로 적용해.', true);
 $('#aiForm').onsubmit = e => { e.preventDefault(); const v = $('#aiIn').value.trim(); if (!v) return; $('#aiIn').value = ''; aiSend(v); };
 $('#aiIn').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#aiForm').requestSubmit(); } };

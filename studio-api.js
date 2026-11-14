@@ -600,6 +600,28 @@ const EDIT_TOOLS = [
   { name: 'move_panel', description: '컷의 순서를 옮긴다.', input_schema: { type: 'object', required: ['panel', 'to'], properties: { panel: { type: 'integer', description: '옮길 컷 번호(1부터)' }, to: { type: 'integer', description: '옮겨 갈 자리(1부터)' } } } },
   { name: 'set_audio', description: '오디오 트랙(배경음악 등)의 시작·볼륨·페이드를 바꾼다.', input_schema: { type: 'object', required: ['track'], properties: {
     track: { type: 'integer', description: '오디오 트랙 번호(1부터)' }, start: { type: 'number' }, vol: { type: 'number', description: '0~1' }, fadeIn: { type: 'number' }, fadeOut: { type: 'number' } } } },
+  { name: 'set_dub', description: '대사 더빙(TTS)을 여러 줄 한꺼번에 고친다: 읽는 사람·감정·말투·음량·음소거. 대상은 speakers/panels/kinds/lines 조합(모두 만족하는 대사). 대상 조건을 하나도 안 주면 대사 전체. 같은 지시를 받는 대사들은 한 번에 묶어 부른다.', input_schema: { type: 'object', properties: {
+    speakers: { type: 'array', items: { type: 'string' }, description: '대상 읽는 사람 이름(요약 cast의 name, 예: "나레이터", "백운 도사")' },
+    panels: { type: 'array', items: { type: 'integer' }, description: '대상 컷 번호들(1부터)' },
+    kinds: { type: 'array', items: { type: 'string', enum: EDIT_KINDS }, description: '대상 말풍선 종류' },
+    lines: { type: 'array', items: { type: 'object', properties: { panel: { type: 'integer' }, overlay: { type: 'integer' } } }, description: '특정 대사들(컷 번호, 오버레이 번호)' },
+    speaker: { type: 'string', description: '읽는 사람을 이 이름(cast의 name)으로 바꾼다' },
+    emotion: { type: 'string', description: '감정 프리셋 이름(요약 emotion_presets 중 하나), "자동"(AI가 판단) 또는 "없음"' },
+    intensity: { type: 'number', description: '감정 강도 0~1 (절제된 연기는 0.2~0.5)' },
+    note: { type: 'string', description: '구체적인 한국어 말투 지시(예: "낮고 느긋하게, 문장 끝을 무겁게 내려"). 읽는 법을 바꿔 달라는 요청엔 이것을 쓴다' },
+    volume: { type: 'number', description: '음성 음량 배율 0~2 (1=그대로)' }, mute: { type: 'boolean', description: '음소거' },
+    remake: { type: 'boolean', description: '바뀐 대사의 음성을 바로 다시 만든다(크레딧 사용). 사용자가 음성을 새로 만들라/적용해서 들려 달라고 했을 때만 true' } } } },
+  { name: 'make_voices', description: '음성이 없거나(⚠ 설정이 바뀐) 대사의 음성을 만든다(크레딧 사용 · 적용 전에 사용자에게 한 번 확인받음). 대상 생략 시 전체.', input_schema: { type: 'object', properties: {
+    panels: { type: 'array', items: { type: 'integer' } }, speakers: { type: 'array', items: { type: 'string' } } } } },
+  { name: 'sync_to_voices', description: '대사 등장 시각을 음성 길이(없으면 글 길이)에 맞춰 차례로 배치하고 컷 길이를 맞춘다. 음성을 만든 뒤에 적용된다. 대상 생략 시 전체.', input_schema: { type: 'object', properties: {
+    panels: { type: 'array', items: { type: 'integer' } }, hold: { type: 'string', enum: ['end', 'read'], description: 'end=말풍선을 컷 끝까지 남김, read=읽는 동안만' } } } },
+  { name: 'add_sfx', description: '효과음·환경음을 만들어 넣는다(크레딧 사용 · 사용자에게 한 번 확인받음). 요약의 audio에 이미 있는 소리는 다시 넣지 않는다. 환경음은 loop=true와 to_panel로 여러 컷에 걸친다.', input_schema: { type: 'object', required: ['items'], properties: {
+    items: { type: 'array', maxItems: 30, items: { type: 'object', required: ['panel', 'prompt'], properties: {
+      panel: { type: 'integer' }, at: { type: 'number', description: '컷 시작 기준 초' }, to_panel: { type: 'integer', description: '환경음이 끝나는 컷' },
+      label: { type: 'string', description: '짧은 한국어 이름' }, prompt: { type: 'string', description: '효과음 생성기용 자세한 영어 설명' },
+      dur: { type: 'number', description: '0.5~30초' }, loop: { type: 'boolean' }, vol: { type: 'number', description: '0.2~1' } } } } } } },
+  { name: 'compose_bgm', description: '이야기 전개에 맞춘 배경음악 설계를 시작한다(사용자가 설계안을 확인한 뒤 작곡). 배경음악이 없거나 사용자가 원할 때.', input_schema: { type: 'object', properties: {
+    hint: { type: 'string', description: '원하는 음악 느낌(선택)' } } } },
 ];
 export async function handleEdit(req, env) {
   if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
@@ -619,11 +641,15 @@ export async function handleEdit(req, env) {
       '(4) 사용자는 되묻는 것보다 알아서 판단해 주기를 원합니다. 도구 결과는 언제든 Ctrl+Z로 되돌릴 수 있으니, 지시가 다소 열려 있어도(예: "알아서 다듬어줘") 질문하지 말고 요약을 보고 스스로 문제를 찾아 보수적으로 고칩니다. ' +
       '다듬을 때 볼 것: 글 읽는 시간이 모자란 컷(read_need가 dur보다 큰 컷 → fit_reading_time), 한 컷에서 말풍선이 한꺼번에 뜨거나 겹쳐 읽기 어려운 타이밍, 너무 긴 컷, 음악이 대사를 덮는 볼륨. 사용자가 "그대로 둬"라고 한 항목과 요청하지 않은 글·그림·순서·음악 추가는 건드리지 않습니다. 정말로 진행할 수 없을 때(예: 대상이 전혀 특정되지 않음)만 짧게 한 번 되묻습니다. ' +
       '(5) 이전 대화에서 되물은 질문에 사용자가 답했다면 더 묻지 말고 그 답대로 바로 도구를 호출합니다. (6) 컷이 많으면 컷마다 도구를 부르지 말고 fit_reading_time처럼 한 번에 처리하는 도구를 우선합니다. ' +
-      '(7) 마지막에 무엇을 어떻게 바꿨는지, 어떤 가정을 했는지 한국어로 1~3문장으로 알립니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
-    const user = '현재 타임라인:\n' + JSON.stringify(sm).slice(0, 60000) + '\n\n지시: ' + instruction;
+      '(7) 마지막에 무엇을 어떻게 바꿨는지, 어떤 가정을 했는지 한국어로 1~3문장으로 알립니다. ' +
+      '(8) 더빙(대사 음성): 요약의 cast(나레이터·캐릭터와 목소리·설명)와 각 오버레이의 reader·emotion·voice를 보고 set_dub로 고칩니다. 캐릭터 단위 요청("백운 도사는 더 무겁게")은 speakers로, 장면 단위("7~13컷 긴장감 있게")는 panels로 묶어 한두 번에 처리하고, 대사마다 따로 부르지 않습니다. ' +
+      '감정은 emotion_presets 중 가장 가까운 것을 고르고, 미묘한 말투는 note에 구체적으로 적습니다. 캐릭터 나이·성격(cast desc)과 장면 흐름에 맞게, 과장하지 말고 자연스럽게. 사용자가 음성을 새로 만들어 달라고 했을 때만 remake:true를 씁니다(크레딧이 듭니다). ' +
+      '(9) 전체 편집("알아서 전체 편집/다듬어", 자동 모드): 영상 전체를 완성도 있게 만듭니다 — ① 어색하거나 빠진 감정·말투를 set_dub로 다듬고 ② 음성이 없거나 ⚠인 대사가 있으면 make_voices ③ 그다음 sync_to_voices로 대사 타이밍과 컷 길이를 음성에 맞추고 ④ 장면에 소리가 비어 있으면 add_sfx로 꼭 필요한 환경음·효과음만(컷당 0~2개, 과하지 않게) ⑤ 배경음악 트랙이 없으면 compose_bgm ⑥ 자막·말풍선 색·크기·전환이 들쭉날쭉하면 정리. ' +
+      '이미 잘 된 것은 건드리지 말고, 크레딧이 드는 make_voices·add_sfx·compose_bgm은 적용 전에 사용자가 한 번 확인합니다.' + (b.auto ? ' [자동 모드] 이번 요청은 질문 없이 반드시 도구로 바로 적용합니다.' : '');
+    const user = '현재 타임라인:\n' + JSON.stringify(sm).slice(0, 150000) + '\n\n지시: ' + instruction;
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 8000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
+      body: JSON.stringify({ model: EDIT_MODEL, max_tokens: 12000, system, tools: EDIT_TOOLS, messages: [...history, { role: 'user', content: user }] }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
