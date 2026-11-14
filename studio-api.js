@@ -789,6 +789,8 @@ async function elevenTts(env, b, who) {
   const key = env[ENV.eleven]; if (!key) return noKey('ELEVENLABS_API_KEY');
   const voice = String(b.voice || b.voiceId || '').trim(); if (!voice) return json({ error: '일레븐랩스 voice ID 가 비어 있습니다', kind: 'bad' }, 400);
   const body = { text: String(b.text || '').slice(0, 5000), model_id: b.model || 'eleven_multilingual_v2', voice_settings: { speed: Math.min(1.2, Math.max(0.7, +b.speed || 1)) } };
+  // 감정 연출: 안정성↓·스타일↑ 일수록 감정 폭이 커진다 (v3 는 대신 [태그] 를 글에 넣는다)
+  for (const [k, n] of [['stability', 'stability'], ['similarity', 'similarity_boost'], ['style', 'style']]) if (b[k] != null && b[k] !== '' && Number.isFinite(+b[k])) body.voice_settings[n] = Math.min(1, Math.max(0, +b[k]));
   const r = await fetch('https://api.elevenlabs.io/v1/text-to-speech/' + encodeURIComponent(voice) + '?output_format=mp3_44100_128', {
     method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' }, body: JSON.stringify(body),
   });
@@ -851,6 +853,88 @@ async function googleTts(env, b, who) {
   if (!j.audioContent) return json({ error: '음성이 반환되지 않았습니다', kind: 'empty' }, 502);
   return json({ key: await r2Put(env, unb64(j.audioContent), 'audio/mpeg', 'mp3', who) });
 }
+/* ---- AI 감정 연출: 대본 흐름·장면·캐릭터를 보고 대사마다 감정과 읽는 법을 정한다 ----
+   반환 { lines: [{ id, emotion, intensity, instr, tags[], speed }] } — 엔진마다 브라우저가 알맞게 적용한다 */
+const DIRECT_MODEL = 'claude-sonnet-5-5';
+const EL_TAGS = ['happy', 'sad', 'excited', 'angry', 'whispers', 'sighs', 'laughs', 'chuckles', 'crying', 'nervous', 'curious', 'sarcastic', 'shouting', 'calm', 'mischievously', 'surprised', 'scared', 'tired', 'thoughtful', 'gasps', 'exhales', 'hesitates', 'serious', 'tender', 'cold', 'pleading', 'determined', 'embarrassed'];
+async function directLines(env, b) {
+  const key = env[ENV.anthropic]; if (!key) return json({ error: 'ANTHROPIC_API_KEY 없음', kind: 'auth' }, 502);
+  if (!Array.isArray(b.lines) || !b.lines.length || b.lines.length > 200) return json({ error: '대사는 1~200개여야 합니다' }, 400);
+  const lines = b.lines.map(l => ({ id: String(l?.id || '').slice(0, 40), cut: +l?.cut || 0, who: String(l?.who || '').slice(0, 30), kind: String(l?.kind || '').slice(0, 20), text: String(l?.text || '').slice(0, 400), target: !!l?.target }))
+    .filter(l => l.id && l.text.trim());
+  const targets = new Set(lines.filter(l => l.target).map(l => l.id));
+  if (!targets.size) return json({ error: '연출할 대사가 없습니다' }, 400);
+  const chars = (Array.isArray(b.chars) ? b.chars : []).slice(0, 30).map(c => ({ name: String(c?.name || '').slice(0, 30), desc: String(c?.desc || '').slice(0, 200) }));
+  const scenes = (Array.isArray(b.scenes) ? b.scenes : []).slice(0, 120).map(s => ({ cut: +s?.cut || 0, desc: String(s?.desc || '').slice(0, 240) }));
+  const system = 'You are a voice director for a Korean motion webtoon (moving comic). You get the script in order (cut number, speaker, bubble kind, text), scene descriptions and character notes. ' +
+    'For every line marked "target": true, decide how it should be performed, judging from the story flow, the scene, the speaker\'s personality, punctuation and bubble kind ' +
+    '(shout = loud/intense, thought = inner voice, quiet and close, whisper = whispered, narration = narrator tone fitting the mood, caption = neutral). Keep consecutive lines of one speaker consistent and avoid over-acting; ordinary lines can be "평온" with low intensity. ' +
+    'Reply with ONLY JSON, no markdown: {"lines":[{"id":string,"emotion":"short Korean emotion label (e.g. 슬픔, 설렘, 분노, 긴장, 평온, 장난)","intensity":0..1,' +
+    '"instr":"one short Korean acting direction for a TTS voice actor: emotion, tone, pace, breath (e.g. 목이 메어 떨리는 목소리로 천천히, 끝을 흐리며)",' +
+    '"tags":[up to 2 ElevenLabs v3 audio tags from: ' + EL_TAGS.join(', ') + '],"speed":0.8..1.2}]}. Include every target id exactly once.';
+  const user = JSON.stringify({ characters: chars, scenes, script: lines });
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model: DIRECT_MODEL, max_tokens: Math.min(16000, 400 + targets.size * 160), system, messages: [{ role: 'user', content: user }] }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
+  const txt = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+  const m = txt.match(/\{[\s\S]*\}/); if (!m) return json({ error: 'AI 응답에서 연출을 읽지 못했습니다' }, 502);
+  let out; try { out = JSON.parse(m[0]); } catch (e) { return json({ error: 'AI 응답 형식 오류' }, 502); }
+  const num = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : d);
+  const res = (Array.isArray(out?.lines) ? out.lines : []).filter(l => l && targets.has(String(l.id))).map(l => ({
+    id: String(l.id), emotion: String(l.emotion || '평온').slice(0, 12), intensity: +num(l.intensity, 0, 1, 0.3).toFixed(2),
+    instr: String(l.instr || '').slice(0, 160), tags: (Array.isArray(l.tags) ? l.tags : []).map(t => String(t).toLowerCase().replace(/[^a-z]/g, '')).filter(t => EL_TAGS.includes(t)).slice(0, 2),
+    speed: +num(l.speed, 0.8, 1.2, 1).toFixed(2),
+  }));
+  const seen = new Set(), uniq = res.filter(l => !seen.has(l.id) && seen.add(l.id));
+  if (!uniq.length) return json({ error: 'AI 가 연출을 내지 못했습니다. 다시 시도해 주세요.' }, 502);
+  return json({ lines: uniq, missing: [...targets].filter(id => !seen.has(id)), model: DIRECT_MODEL, usage: j.usage || null });
+}
+const elKey = env => { const k = env[ENV.eleven]; if (!k) throw Object.assign(new Error('ELEVENLABS_API_KEY 없음 (서버 환경변수에 넣어 주세요)'), { status: 502 }); return k; };
+/* 일레븐랩스 음성 라이브러리(공유 목소리) 검색 — 사이트의 ‘탐색’ 화면과 같은 필터 */
+const LIB_PARAMS = { search: 120, language: 10, locale: 20, accent: 40, gender: 20, age: 20, category: 20, sort: 30, page: 4 };
+async function elevenLibrary(env, q) {
+  const key = elKey(env), u = new URL('https://api.elevenlabs.io/v1/shared-voices');
+  u.searchParams.set('page_size', String(Math.min(100, Math.max(1, +q.get('page_size') || 40))));
+  for (const [k, max] of Object.entries(LIB_PARAMS)) { const v = (q.get(k) || '').trim(); if (v) u.searchParams.set(k, v.slice(0, max)); }
+  for (const k of ['use_cases', 'descriptives']) q.getAll(k).filter(Boolean).slice(0, 10).forEach(v => u.searchParams.append(k, v.slice(0, 40)));
+  if (q.get('featured') === 'true') u.searchParams.set('featured', 'true');
+  const r = await fetch(u, { headers: { 'xi-api-key': key } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.detail?.message || (typeof j.detail === 'string' ? j.detail : '') || 'HTTP ' + r.status), { status: 502 });
+  const lang = (q.get('language') || '').trim();
+  return {
+    hasMore: !!j.has_more, total: +j.total_count || 0,
+    voices: (j.voices || []).map(v => {
+      const vl = (v.verified_languages || []).filter(x => x && x.language);
+      const mine = vl.find(x => x.language === lang && x.preview_url) || null;
+      return {
+        id: v.voice_id, owner: v.public_owner_id, name: v.name, description: v.description || '',
+        gender: v.gender || '', age: v.age || '', accent: mine?.accent || v.accent || '', descriptive: v.descriptive || '', useCase: v.use_case || '',
+        category: v.category || '', language: mine?.language || v.language || '', locale: mine?.locale || v.locale || '',
+        trial: mine?.preview_url || v.preview_url || '', image: v.image_url || '',
+        langs: [...new Set(vl.map(x => x.language))].length, users1y: +v.cloned_by_count || 0, chars1y: +v.usage_character_count_1y || 0,
+        added: !!v.is_added_by_user, freeOk: v.free_users_allowed !== false, rate: v.fiat_rate ?? v.rate ?? null, notice: v.notice_period ?? null,
+      };
+    }),
+  };
+}
+/* 라이브러리 목소리를 내 계정 목소리로 추가 → 계정에서 쓰는 voice_id. 이미 추가돼 있으면 내 목록에서 찾아 돌려준다 */
+async function elevenAddVoice(env, b) {
+  const key = elKey(env), owner = String(b.owner || '').trim(), voice = String(b.voice || '').trim();
+  if (!owner || !voice || /[/?#]/.test(owner + voice)) return json({ error: 'owner 와 voice 가 필요합니다' }, 400);
+  const r = await fetch('https://api.elevenlabs.io/v1/voices/add/' + encodeURIComponent(owner) + '/' + encodeURIComponent(voice), {
+    method: 'POST', headers: { 'xi-api-key': key, 'Content-Type': 'application/json' }, body: JSON.stringify({ new_name: String(b.name || voice).slice(0, 100) }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.ok && j.voice_id) return json({ voiceId: j.voice_id });
+  const mine = await TTS.eleven.voices(env).catch(() => []);
+  const hit = mine.find(v => v.original === voice || v.id === voice);
+  if (hit) return json({ voiceId: hit.id, already: true });
+  return json({ error: j.detail?.message || (typeof j.detail === 'string' ? j.detail : '') || 'HTTP ' + r.status, kind: ttsKind(r.status) }, 502);
+}
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
 const GEMINI_VOICES = ['Kore', 'Puck', 'Zephyr', 'Charon', 'Aoede', 'Fenrir', 'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
 /* 엔진 하나 = { synth, voices } — 새 엔진은 여기에 한 줄 더하면 된다 */
@@ -860,10 +944,15 @@ const TTS = {
   eleven: {
     synth: elevenTts,
     voices: async env => {
-      const key = env[ENV.eleven]; if (!key) throw Object.assign(new Error('ELEVENLABS_API_KEY 없음'), { status: 502 });
+      const key = elKey(env);
       const r = await fetch('https://api.elevenlabs.io/v2/voices?page_size=100', { headers: { 'xi-api-key': key } });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw Object.assign(new Error(j.detail?.message || 'HTTP ' + r.status), { status: 502 });
-      return (j.voices || []).map(v => ({ id: v.voice_id, name: v.name + (v.category && v.category !== 'premade' ? ' (내 목소리)' : ''), trial: v.preview_url || '' }));
+      return (j.voices || []).map(v => ({
+        id: v.voice_id, name: v.name + (v.category && v.category !== 'premade' ? ' (내 목소리)' : ''), trial: v.preview_url || '',
+        gender: v.labels?.gender || '', age: v.labels?.age || '', accent: v.labels?.accent || '', descriptive: v.labels?.descriptive || v.labels?.description || '',
+        useCase: v.labels?.use_case || '', language: v.labels?.language || '', category: v.category || '', description: v.description || '',
+        original: v.sharing?.original_voice_id || '',
+      }));
     },
   },
   google: {
@@ -886,7 +975,9 @@ export async function handleTts(req, env) {
   const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
   try {
     if (req.method === 'GET') {
-      const u = new URL(req.url), eng = TTS[u.searchParams.get('provider') || ''];
+      const u = new URL(req.url);
+      if (u.searchParams.get('op') === 'library') return json(await elevenLibrary(env, u.searchParams));
+      const eng = TTS[u.searchParams.get('provider') || ''];
       if (u.searchParams.get('op') !== 'voices' || !eng) return json({ error: 'op=voices 와 provider(openai·gemini·google·eleven)가 필요합니다' }, 400);
       return json({ voices: await eng.voices(env, u.searchParams.get('lang')) });
     }
@@ -895,6 +986,8 @@ export async function handleTts(req, env) {
     if (b.op === 'sts') return await elevenSts(env, b, who);
     if (b.op === 'sfx') return await elevenSfx(env, b, who);
     if (b.op === 'music') return await elevenMusic(env, b, who);
+    if (b.op === 'addvoice') return await elevenAddVoice(env, b);
+    if (b.op === 'direct') return await directLines(env, b);
     const prov = b.provider || (b.voiceId ? 'eleven' : 'openai'); // 예전 클라이언트는 일레븐랩스를 provider 없이 보냈다
     const eng = TTS[prov]; if (!eng) return json({ error: '모르는 음성 엔진: ' + prov }, 400);
     if (!String(b.text || '').trim()) return json({ error: '텍스트가 비어 있습니다' }, 400);
