@@ -760,6 +760,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
       <select id="castScope"><option value="cur">이 컷만</option><option value="all">모든 컷</option></select>
       <select id="castFilter"><option value="">모든 종류</option><option value="speech">말풍선류</option><option value="narration">나레이션·자막</option><option value="none">읽는 사람 미지정(자동)</option></select>
       <button type="button" class="b ghost sm" id="castAll">전체 선택</button><button type="button" class="b ghost sm" id="castNone">선택 해제</button>
+      <button type="button" class="b ghost sm" id="castReset" style="margin-left:auto" title="읽는 사람 → 자동, 감정·말투 → 지움(자동 AI 연출로). 만든 음성은 남습니다.">↺ 설정 초기화</button>
     </div>
     <p class="note">Shift+클릭으로 범위를 고를 수 있습니다.</p>
     <div class="box" id="castEmoBox" style="display:flex;flex-direction:column;gap:6px;margin:4px 0">
@@ -3779,6 +3780,25 @@ function openCast(who) {
 $('#castScope').onchange = $('#castFilter').onchange = () => { CAST.last = -1; renderCast(); };
 $('#castAll').onclick = () => { castRows().forEach(r => CAST.sel.add(r.p.id + ':' + r.o.id)); renderCast(); };
 $('#castNone').onclick = () => { CAST.sel.clear(); renderCast(); };
+/* 설정 초기화: 체크한 대사(없으면 지금 목록 전체)의 읽는 사람·감정·말투를 처음 상태로 */
+$('#castReset').onclick = () => {
+  const picked = castPicked(), list = picked.length ? picked : castRows().map(r => ({ p: r.p, o: r.o }));
+  const touched = list.filter(({ o }) => o.speaker || o.emo);
+  if (!touched.length) return toast('초기화할 설정이 없습니다 (이미 모두 자동)');
+  const scope = picked.length ? `체크한 대사 ${list.length}개` : `지금 목록의 대사 ${list.length}개 전부`;
+  if (!confirm(`${scope}의 설정을 초기화할까요?
+
+· 읽는 사람 → 자동 (종류에 따라 나레이터·기본 목소리)
+· 감정·말투 → 지움 (자동 AI 감정 연출이 다시 판단)
+
+만든 음성은 지우지 않습니다. Ctrl+Z 로 되돌릴 수 있습니다.`)) return;
+  castStop();
+  touched.forEach(({ o }) => { delete o.speaker; delete o.emo; });
+  CASTEMO.k = null; $('#castEmoK').value = 0.5; $('#castEmoKv').textContent = '기본'; $('#castEmoInstr').value = '';
+  save(); renderCast(); refreshInspector(); renderPanels(); renderChars();
+  const stale = touched.filter(({ o }) => o.voice && voiceStale(o)).length;
+  toast(`대사 ${touched.length}개의 설정을 초기화했습니다${stale ? ` · 이미 만든 음성 ${stale}개는 다시 만들어야 바뀐 설정이 들립니다` : ''}`, 4000);
+};
 $('#castApply').onclick = () => {
   const who = $('#castWho').value, list = castPicked();
   list.forEach(({ o }) => { o.speaker = who; });
