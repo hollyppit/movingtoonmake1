@@ -556,8 +556,11 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
 .arc-bar i { display: block; background: linear-gradient(180deg, #7F9FDB, #3A64B8); border-radius: 4px 4px 0 0; opacity: .85; }
 .arc-bar span { font-size: .66rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
 /* 캐릭터 카드: 접힌 모양 */
-.ch-card .ch-thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: 1px solid var(--line-2); }
-.ch-card .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ch-card .ch-thumb, .ci-row .ch-thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--panel-2); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: 1px solid var(--line-2); }
+.ch-card .ch-thumb img, .ci-row .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
+dialog label.ci-row { display: flex; flex-direction: row; align-items: center; gap: 10px; margin: 0; padding: 8px 10px; cursor: pointer; }
+dialog label.ci-row > input { flex: none; margin: 0; }
+dialog label.ci-row > button { flex: none; width: auto; }
 .ch-card .ch-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ch-card .ch-sub { display: block; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .76rem; }
 .ch-card:not(.open) .ch-head:hover .ch-name { text-decoration: underline; }
@@ -628,7 +631,7 @@ header.bar .bar-r { flex-wrap:wrap; max-width:100%; }
     </section>
     <div class="sec-rz" data-rz="style"></div>
     <section class="sec" data-sk="chars">
-      <div class="sec-h"><h3>캐릭터</h3><button type="button" class="b ghost sm" id="addChar">+ 추가</button></div>
+      <div class="sec-h"><h3>캐릭터</h3><span class="row" style="gap:4px;margin:0"><button type="button" class="b ghost sm" id="importChars" title="다른 프로젝트에 저장한 캐릭터 카드·목소리를 하나씩 또는 한꺼번에 가져옵니다">⇩ 불러오기</button><button type="button" class="b ghost sm" id="addChar">+ 추가</button></span></div>
       <div id="narrBox" class="grp"></div>
       <div id="charList" class="grp"></div>
     </section>
@@ -7319,6 +7322,121 @@ async function openPageImport() {
   };
 }
 
+/* 다른 프로젝트의 캐릭터 카드(설명·레퍼런스 그림·목소리)와 나레이터 목소리 가져오기.
+   카드마다 골라(개별) 또는 전체 선택으로(세트) 가져온다. 같은 이름 캐릭터는 덮어쓰거나 따로 추가할 수 있다. */
+async function openCharImport() {
+  const src = { pr: null, title: '', keys: {}, files: null, added: new Set(), closed: false };
+  const dlg = document.createElement('dialog'); dlg.style.width = 'min(720px, 94vw)';
+  dlg.innerHTML = '<form method="dialog" style="padding:18px 20px"><h3>다른 프로젝트에서 캐릭터 불러오기</h3>' +
+    '<p class="note">다른 프로젝트에 저장한 캐릭터 카드(이름·설명·레퍼런스 그림)와 목소리 설정을 가져옵니다. 카드를 하나씩 고르거나, 전체 선택으로 한 세트를 한꺼번에 가져올 수 있습니다.</p>' +
+    '<div id="ciSrc"></div><div id="ciBody"></div><div class="row" style="margin-top:12px;justify-content:flex-end"><button class="b ghost sm" value="x">닫기</button></div></form>';
+  document.body.append(dlg);
+  const q = s => dlg.querySelector(s), st = t => { q('#ciSt').textContent = t; };
+  q('#ciSrc').innerHTML = (isServer() ? '<div class="row" style="align-items:center"><select id="ciProj" style="flex:1"><option value="">내 프로젝트에서 고르기…</option></select><button type="button" class="b sm" id="ciLoad">불러오기</button></div>' : '') +
+    '<div class="row" style="margin-top:6px"><label class="b ghost sm">백업 파일(.mmstudio.json)에서<input type="file" id="ciFile" accept=".json,application/json" hidden></label></div><div class="st" id="ciSt"></div>';
+  dlg.addEventListener('close', () => { src.closed = true; src.added.forEach(id => dropAssetIfUnused(id)); dlg.remove(); }); // 미리보기용 파일 정리 (가져온 것은 남는다)
+  dlg.showModal();
+
+  const ensureAssets = async ids => {
+    for (const id of ids) {
+      if (src.closed || !id || assets.has(id)) continue;
+      try {
+        const blob = src.files && src.files[id] ? await (await fetch(src.files[id])).blob() : src.keys[id] ? await fetchKey(src.keys[id]) : null;
+        if (blob) { assets.set(id, { blob, url: URL.createObjectURL(blob) }); src.added.add(id); }
+      } catch (e) { /* 그림 하나가 없어도 나머지는 가져온다 */ }
+    }
+  };
+  const voiceLine = t => { const v = resolveTts(t || {}); return (TTS_ENG[v.engine] || v.engine) + ' · ' + (voiceName(v.voice) || '목소리 없음'); };
+  const sameName = c => P.chars.find(x => x.name && c.name && x.name.trim() === c.name.trim());
+
+  const showChars = async () => {
+    const body = q('#ciBody'), chars = src.pr.chars || [];
+    const hasNarr = Object.keys(src.pr.narrTts || {}).length > 0;
+    if (!chars.length && !hasNarr) { body.innerHTML = '<p class="note" style="margin-top:12px">‘' + esc(src.title) + '’에는 저장된 캐릭터가 없습니다.</p>'; return; }
+    body.innerHTML = '<div class="sec-h" style="margin-top:12px"><h3>‘' + esc(src.title) + '’ · 캐릭터 ' + chars.length + '명</h3><span class="row" style="gap:4px;margin:0"><button type="button" class="b ghost sm" id="ciAll">전체 선택 (세트)</button><button type="button" class="b ghost sm" id="ciNone">선택 해제</button></span></div>' +
+      '<div id="ciList" style="display:grid;gap:6px;max-height:min(52vh,460px);overflow:auto;padding-right:2px">' +
+      (hasNarr ? '<label class="card ci-row"><input type="checkbox" data-narr="1"><span class="ch-thumb">🎙</span><span style="flex:1;min-width:0"><b>나레이터 목소리</b><span class="note ch-sub" style="display:block">🔊 ' + esc(voiceLine(src.pr.narrTts)) + '</span></span></label>' : '') +
+      chars.map((c, i) => {
+        const dup = sameName(c);
+        return '<label class="card ci-row"><input type="checkbox" data-i="' + i + '"><span class="ch-thumb" data-th="' + i + '">👤</span>' +
+          '<span style="flex:1;min-width:0"><b>' + esc(c.name || '이름 없음') + '</b>' + (dup ? ' <span class="note" style="margin:0">· 같은 이름 있음</span>' : '') +
+          '<span class="note ch-sub" style="display:block">' + esc((c.desc || '설명 없음').replace(/\s+/g, ' ').slice(0, 50)) + '</span>' +
+          '<span class="note ch-sub" style="display:block">🔊 ' + esc(voiceLine(c.tts)) + (c.refs?.length ? ' · 그림 ' + c.refs.length + '장' : '') + '</span></span>' +
+          '<button type="button" class="b ghost sm" data-one="' + i + '" title="이 캐릭터만 바로 가져옵니다">이것만</button></label>';
+      }).join('') + '</div>' +
+      '<div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap"><span class="lbl" style="margin:0">같은 이름 캐릭터가 있으면</span><select id="ciDup"><option value="replace">덮어쓰기 (대사 배정 유지)</option><option value="add">따로 추가</option></select><span style="flex:1"></span><button type="button" class="b" id="ciGo">가져오기</button></div>';
+    const boxes = () => [...body.querySelectorAll('#ciList input[type=checkbox]')];
+    const sync = () => { const n = boxes().filter(b => b.checked).length; q('#ciGo').textContent = n ? '선택한 ' + n + '개 가져오기' : '가져올 카드를 고르세요'; q('#ciGo').disabled = !n; };
+    body.querySelector('#ciList').onchange = sync;
+    q('#ciAll').onclick = () => { boxes().forEach(b => (b.checked = true)); sync(); };
+    q('#ciNone').onclick = () => { boxes().forEach(b => (b.checked = false)); sync(); };
+    $$('[data-one]', body).forEach(b => (b.onclick = e => { e.preventDefault(); e.stopPropagation(); doImport([+b.dataset.one], false); }));
+    q('#ciGo').onclick = () => doImport(boxes().filter(b => b.checked && b.dataset.i != null).map(b => +b.dataset.i), !!body.querySelector('[data-narr]')?.checked);
+    sync();
+    for (const [i, c] of chars.entries()) { // 썸네일은 목록을 먼저 보인 뒤 하나씩 채운다
+      if (src.closed || !c.refs?.[0]) continue;
+      await ensureAssets([c.refs[0]]);
+      const th = body.querySelector('[data-th="' + i + '"]'), u = assetURL(c.refs[0]);
+      if (th && u) th.innerHTML = '<img src="' + u + '" alt="">';
+    }
+  };
+
+  const doImport = async (idxs, narr) => {
+    if (!idxs.length && !narr) return;
+    const go = q('#ciGo'); go.disabled = true;
+    const mode = q('#ciDup').value, names = [];
+    let missing = 0;
+    try {
+      if (narr) { P.narrTts = JSON.parse(JSON.stringify(src.pr.narrTts || {})); names.push('나레이터 목소리'); }
+      for (const [n, i] of idxs.entries()) {
+        const sc = src.pr.chars[i]; st('가져오는 중… ' + (n + 1) + ' / ' + idxs.length);
+        await ensureAssets(sc.refs || []);
+        const refs = [];
+        for (const id of sc.refs || []) {
+          const a = assets.get(id); if (!a) { missing++; continue; }
+          src.added.delete(id); await DB.put('assets', id, a.blob).catch(() => {}); // 이 프로젝트 파일로 보관
+          if (!src.files && src.keys[id]) P.keys[id] = src.keys[id];
+          refs.push(id);
+        }
+        const data = { name: sc.name || '', desc: sc.desc || '', refs, tts: JSON.parse(JSON.stringify(sc.tts || {})) };
+        const dup = sameName(sc);
+        if (dup && mode === 'replace') { const old = dup.refs; Object.assign(dup, data, { _open: false }); old.forEach(id => refs.includes(id) || dropAssetIfUnused(id)); }
+        else P.chars.push(Object.assign({ id: uid() }, data, { name: dup ? data.name + ' (가져옴)' : data.name }));
+        names.push(sc.name || '이름 없음');
+      }
+      save(); renderChars(); refreshInspector(); renderPanels();
+      toast((names.length === 1 ? `‘${names[0]}’을(를) 가져왔습니다` : `${names.length}개를 가져왔습니다 — ${names.slice(0, 4).join(', ')}${names.length > 4 ? ' 외' : ''}`) + (missing ? ` (찾지 못한 그림 ${missing}장 제외)` : ''), 4200);
+      dlg.close();
+    } catch (e) { st('실패: ' + e.message); go.disabled = false; }
+  };
+
+  const loadCloud = async (id, title) => {
+    st('프로젝트 불러오는 중…');
+    try {
+      const d = await srv('/api/projects?id=' + encodeURIComponent(id));
+      src.pr = migrate(Object.assign({}, d.data, { title: d.title || title, log: [] })); src.keys = src.pr.keys || {}; src.files = null; src.title = d.title || title || '(제목 없음)';
+      st(''); await showChars();
+    } catch (e) { st('불러오지 못했습니다: ' + e.message); }
+  };
+  if (isServer()) {
+    try {
+      const d = await srv('/api/projects'), sel = q('#ciProj');
+      (d.projects || []).filter(pr => !(pr.id === P.cloudId && (P.cloudOwner || null) === curUid())).forEach(pr => { const o = document.createElement('option'); o.value = pr.id; o.textContent = (pr.title || '(제목 없음)') + ' · ' + new Date(pr.updated_at).toLocaleDateString('ko-KR'); sel.append(o); });
+      const load = () => { if (sel.value) loadCloud(sel.value, sel.selectedOptions[0].textContent.replace(/ · [^·]*$/, '')); else st('프로젝트를 고르세요'); };
+      q('#ciLoad').onclick = load; sel.onchange = () => sel.value && load();
+    } catch (e) { st('프로젝트 목록을 불러오지 못했습니다: ' + e.message + ' — 백업 파일로는 가져올 수 있습니다.'); }
+  }
+  q('#ciFile').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      st('백업 파일 읽는 중…'); const j = JSON.parse(await f.text());
+      if (j.app !== 'mantra-movingtoon-studio' || !j.project) throw new Error('이 스튜디오의 백업 파일이 아닙니다');
+      src.pr = migrate(j.project); src.keys = src.pr.keys || {}; src.files = j.assets || {}; src.title = src.pr.title || f.name;
+      st(''); await showChars();
+    } catch (err) { st('불러오지 못했습니다: ' + err.message); }
+  };
+}
+
 /* 한 줄 → 대사 하나. 모양 자동 판별 + 위치·시각 자동 배치 */
 function parseLine(raw, forced) {
   let t = raw.trim(), kind = 'speech';
@@ -8807,6 +8925,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#lightb
 $('#title').oninput = e => { P.title = e.target.value; save(); };
 $('#stylePrompt').oninput = e => { P.style.prompt = e.target.value; save(); };
 $('#styleUp').onchange = async e => { for (const f of e.target.files) P.style.refs.push(await addAsset(f)); e.target.value = ''; save(); renderStyle(); };
+$('#importChars').onclick = () => openCharImport();
 $('#addChar').onclick = () => { P.chars.push({ id: uid(), name: `캐릭터 ${P.chars.length + 1}`, desc: '', refs: [], tts: {}, _open: true }); save(); renderChars(); refreshInspector(); };
 $('#addPanel').onclick = () => {
   const p = newPanel(), cur = selPanel();
