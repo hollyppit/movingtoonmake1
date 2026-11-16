@@ -492,20 +492,32 @@ export async function handlePolish(req, env) {
 
 /* ---------- 프롬프트 변환: 거친 초안(한국어 등)을 이미지·수정·영상 모델이 잘 알아듣는 영어 프롬프트로 바꾼다 — Claude ---------- */
 const PROMPT_MODEL = 'claude-sonnet-5-5';
-const PROMPT_COMMON = 'You are a prompt engineer for AI image and video generators that produce webtoon and motion-comic frames. The user writes a rough draft, usually in Korean and often vague or colloquial. Rewrite it into a precise English prompt. ' +
-  'Keep every concrete fact the user stated (who, what, where, emotion, props, camera, lighting) and never contradict it. Resolve vague parts with sensible, cinematic webtoon choices instead of leaving them open. ' +
-  'Left/right words, including Korean "카메라 오른쪽" or "화면 왼쪽", mean the left/right side AS SEEN IN THE IMAGE; "카메라를 바라본다" means looking straight into the lens. ' +
-  'Refer to characters by the given names; do not re-describe their appearance (reference sheets are attached separately) and do not invent clothing or features that conflict with the given descriptions. ' +
+const PROMPT_COMMON = 'You are a prompt engineer for AI image and video generators that produce webtoon and motion-comic frames. The user writes a rough draft, usually in Korean and often short, vague or colloquial. Rewrite it into a precise English prompt that an image model will follow literally. ' +
+  'Keep every concrete fact the user stated (who, what, where, emotion, props, camera, lighting) and never contradict it. If the draft asks for several things, include ALL of them; never drop or soften a request. Resolve vague parts with sensible, cinematic webtoon choices instead of leaving them open. ' +
+  'Translate feelings into visible details the model can draw: e.g. "놀란" becomes raised eyebrows, wide eyes with small pupils and an open mouth; "자연스럽게" becomes the specific anatomy or physics that is wrong and how it should look. Use short, plain, unambiguous sentences; avoid metaphors and words like "slightly" unless the user asked for a subtle change. ' +
+  'Left/right words, including Korean "카메라 오른쪽" or "화면 왼쪽", mean the left/right side AS SEEN IN THE IMAGE; "카메라를 바라본다" means looking straight into the lens. Body-part sides such as "오른손" mean the character\'s own right hand; when an image is attached, also say where that hand is in the frame. ' +
+  'Refer to characters by the given names, and when an image is attached also identify them by position and visible features so the image model can find them; do not re-describe their whole appearance (reference sheets are attached separately) and do not invent clothing or features that conflict with the given descriptions. ' +
   'Do not add text, speech balloons, captions or sound-effect lettering. Do not add characters, objects or story the user did not ask for. Do not mention art style (it is added separately). ' +
-  'Reply with ONLY JSON, no markdown: {"prompt": "...", "note": "..."} where note is ONE short Korean sentence (max 70 characters) explaining how you interpreted anything ambiguous, or an empty string if nothing was ambiguous.';
+  'Reply with ONLY JSON, no markdown: {"prompt": "...", "note": "..."} where note is ONE short Korean sentence (max 70 characters) telling the user how you interpreted the request (which character or part, what exactly will change), so they can catch a misunderstanding.';
 const PROMPT_TASK = {
-  scene: 'Task: write the SCENE prompt for ONE still frame (see "aspect"). Use 3-6 sentences covering: shot size and camera angle, composition (where each character and key object sits in the frame), pose and action, facial expression and gaze direction of each character, setting and time of day, lighting and mood. Merge the "extra" request into the scene. If has_image is true the frame is regenerated from an existing image; still describe the full intended scene.',
+  scene: 'Task: write the SCENE prompt for ONE still frame (see "aspect"). Use 3-6 sentences covering: shot size and camera angle, composition (where each character and key object sits in the frame), pose and action, facial expression and gaze direction of each character, setting and time of day, lighting and mood. Merge the "extra" request into the scene; if "extra" conflicts with the draft, "extra" wins because it is the newer request. If the current version of the frame is attached, keep what it already shows (characters, setting, layout) unless the draft or extra asks to change it, and describe the full intended scene.',
   edit: 'Task: write an EDIT INSTRUCTION to apply to an existing image. When the image is attached, LOOK at it first and work out exactly which character, body part, object or region the draft is about; name it by its visible features and its position in the frame (e.g. "the dark-haired boy in the center: his eyebrows, eyes and mouth"), never by a vague word like "it" or "the person". ' +
-    'Then write 2-4 imperative sentences: first exactly what to change, in concrete visual terms (shape, size, direction, color, expression details such as raised eyebrows or open mouth), and where; then what in and around that region must stay as it is (identity, face shape, hairstyle, outfit, pose, framing). ' +
-    'If the draft asks for something the image already shows, strengthen it clearly so the change is visible. Do not describe the rest of the picture. In the note, say in Korean which part of the picture you took the draft to mean.',
-  mix: 'Task: write a COMPOSITING INSTRUCTION. The first image is the base picture; the other images are ATTACHMENT 1..N (see "attachments" for N). Write 1-3 imperative sentences stating exactly what to take from which ATTACHMENT and where and how to place or apply it in the base picture (position, size, pose, which part of the base to replace or keep). Always call them ATTACHMENT 1, ATTACHMENT 2, ... — Korean wording such as "첨부 1", "두 번째 첨부", "첨부한 이미지" maps to these numbers (an unnumbered "첨부한 이미지" with only one attachment means ATTACHMENT 1). Do not describe parts that stay unchanged.',
+    'Then write 2-4 imperative sentences: first exactly what to change, in concrete visual terms (shape, size, direction, color, expression details such as raised eyebrows or open mouth), and where; then what in and around that region must stay as it is (identity, face shape, hairstyle, outfit, pose, framing) — but never list as "keep" anything the draft asks to change. ' +
+    'If the draft asks for something the image already shows, strengthen it clearly so the change is visible. Do not describe the rest of the picture.',
+  mix: 'Task: write a COMPOSITING INSTRUCTION. The first image is the base picture; the other images are ATTACHMENT 1..N (see "attachments" for N). Always call them ATTACHMENT 1, ATTACHMENT 2, ... — Korean wording such as "첨부 1", "두 번째 첨부", "첨부한 이미지" maps to these numbers (an unnumbered "첨부한 이미지" with only one attachment means ATTACHMENT 1). ' +
+    'When the images are attached, LOOK at them: name the exact thing to take from each ATTACHMENT by its visible features (e.g. "the red umbrella held by the girl in ATTACHMENT 1"), and say where it goes in the base picture by naming what is already there (e.g. "in the right hand of the boy on the left"), with its size relative to existing characters, its pose or angle, and anything in the base it replaces or covers. ' +
+    'Write 2-4 imperative sentences. Do not describe parts that stay unchanged.',
+  element: 'Task: write a prompt for ONE isolated element (a character, prop, creature or effect) that will be cut out and placed on a webtoon frame as a separate layer. Describe only that element in 1-3 sentences: what it is, pose or shape, viewing angle, notable details, colors and materials. Do not describe a background or scenery.',
   motion: 'Task: write an IMAGE-TO-VIDEO MOTION prompt for a short clip (see "len" seconds) that animates a still frame ("scene" tells you what it shows). Describe only motion over time: character movement and expressions, hair/cloth/environment motion, camera movement (push-in, pan, tilt, handheld shake or static) and pacing, as a short sequence that fits the duration. Keep motion natural and moderate unless the draft asks for dramatic action. Do not change the composition, art style, character design or colors. Do not write dialogue. End the prompt with: Keep the exact same art style, character design and colors. No text.',
 };
+/* 함께 보내는 그림마다 붙이는 설명. guide: 'sketch' = 손으로 그린 안내 선, 'mask' = 반투명 빨강으로 칠한 수정 영역 */
+function promptImageLabel(mode, i, guide) {
+  if (mode === 'mix') return i === 0 ? 'Image 1 — the BASE picture:' : 'Image ' + (i + 1) + ' — ATTACHMENT ' + i + ':';
+  if (mode === 'scene') return 'The current version of this frame (it will be regenerated):';
+  if (guide === 'mask') return 'The picture to edit. The area painted in translucent red is the ONLY region that will be changed; write the instruction for what that red area should become (the red paint itself is just a marker):';
+  if (guide === 'sketch') return 'The picture to edit. The rough marker lines drawn over it are hand-drawn guides from the user showing the intended pose, position or framing; describe the change they indicate together with the draft:';
+  return 'The picture to edit:';
+}
 export async function handlePrompt(req, env) {
   if (req.method !== 'POST') return json({ error: 'POST만 됩니다' }, 405);
   const who = await authUser(req, env); if (!who) return json({ error: '인증이 필요합니다. Google로 로그인하거나 관리자 비밀번호를 확인하세요.' }, 401);
@@ -515,16 +527,24 @@ export async function handlePrompt(req, env) {
     const mode = PROMPT_TASK[b.mode] ? b.mode : 'scene', draft = String(b.draft || '').slice(0, 2000);
     if (!draft.trim() && !String(b.extra || '').trim()) return json({ error: '초안이 비었습니다' }, 400);
     const chars = (Array.isArray(b.characters) ? b.characters : []).slice(0, 6).map(c => ({ name: String(c.name || '').slice(0, 40), appearance: String(c.desc || '').slice(0, 300) }));
+    // 그림을 함께 보내면 Claude 가 보고 ‘누구의 어디를 어떻게’ 를 구체적으로 짚는다 (image: 키 하나, images: 키 배열 — 최대 5장)
+    const keys = (Array.isArray(b.images) ? b.images : b.image ? [b.image] : []).filter(k => typeof k === 'string' && k).slice(0, 5);
+    const guide = b.guide === 'mask' || b.guide === 'sketch' ? b.guide : '';
     const user = JSON.stringify({
       draft, extra: String(b.extra || '').slice(0, 1000), scene: String(b.scene || '').slice(0, 1000), characters: chars,
-      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!(b.hasImage || b.image), len: +b.len || 5, audio: !!b.audio, attachments: Math.min(8, +b.attachments || 0),
+      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!(b.hasImage || keys.length), len: +b.len || 5, audio: !!b.audio, attachments: Math.min(8, +b.attachments || 0),
     });
-    // 수정할 이미지를 함께 보내면 Claude 가 그림을 보고 ‘어디를 어떻게’ 를 구체적으로 짚는다
     let content = user;
-    if (typeof b.image === 'string' && b.image) {
-      const img = await r2Get(env, b.image, who);
-      const mt = /png|webp|gif/.exec(img.type || '') ? 'image/' + /png|webp|gif/.exec(img.type)[0] : 'image/jpeg';
-      if (img.bytes.length <= 3.7 * 1024 * 1024) content = [{ type: 'image', source: { type: 'base64', media_type: mt, data: b64(img.bytes) } }, { type: 'text', text: user }];
+    if (keys.length) {
+      const parts = []; let total = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const img = await r2Get(env, keys[i], who);
+        total += img.bytes.length; if (img.bytes.length > 3.7 * 1024 * 1024 || total > 16 * 1024 * 1024) continue;
+        const t = /png|webp|gif/.exec(img.type || '');
+        parts.push({ type: 'text', text: promptImageLabel(mode, i, guide) });
+        parts.push({ type: 'image', source: { type: 'base64', media_type: t ? 'image/' + t[0] : 'image/jpeg', data: b64(img.bytes) } });
+      }
+      if (parts.length) content = [...parts, { type: 'text', text: user }];
     }
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },

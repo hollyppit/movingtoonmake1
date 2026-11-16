@@ -1904,7 +1904,8 @@ const charCtx = p => p.chars.map(id => P.chars.find(c => c.id === id)).filter(Bo
 async function convertDraft(mode, body) {
   try {
     const d = await srvJSON('/api/prompt', { mode, aspect: P.aspect === 'custom' ? W + ':' + H : P.aspect || '9:16', ...body });
-    logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: true, cost: 0.004 });
+    const nImg = (body.images || []).length || (body.image ? 1 : 0); // 그림을 함께 보내면 입력이 늘어 조금 더 든다
+    logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: true, cost: +(0.004 + 0.005 * nImg).toFixed(3) });
     return { text: d.prompt, note: d.note || '' };
   } catch (e) { logCall({ kind: '프롬프트 변환', provider: 'anthropic', ok: false, err: e.kind || 'bad', msg: e.message }); throw e; }
 }
@@ -1914,7 +1915,11 @@ async function sceneFor(p, force) {
   if (!isServer() || (!force && !wantAuto())) return null;
   if (!p.prompt.trim() && !(p.extra || '').trim()) return null;
   const c = !force && convFresh(p); if (c) return c.text;
-  const r = await convertDraft('scene', { draft: p.prompt, extra: p.extra || '', characters: charCtx(p), hasImage: !!curAsset(p) });
+  // 지금 그림을 기준으로 다시 그릴 때는 그 그림도 보여 줘서 ‘그 사람’, ‘배경은 그대로’ 같은 말을 그림에 맞춰 풀게 한다
+  const cur = curAsset(p), useImg = cur && (p.regenLvl || 'keep') !== 'new';
+  let image;
+  if (useImg) { try { const [rb] = await refBlobs([{ id: cur }]); image = await ensureKey(rb.cid, rb.blob); } catch (e) { image = undefined; } }
+  const r = await convertDraft('scene', { draft: p.prompt, extra: p.extra || '', characters: charCtx(p), hasImage: !!cur, image });
   p.conv = { sig: sceneSig(p), text: r.text, note: r.note, at: Date.now() }; save();
   return r.text;
 }
@@ -1938,10 +1943,9 @@ async function safeScene(p) {
 }
 /* 수정 지시 다듬기: 지금 그림(imageKey)을 함께 보여 줘서 ‘어느 인물의 어디를 어떻게’ 를 구체적인 영어 지시로 바꾼다.
    { text, note } — 실패하면 입력한 글 그대로 */
-async function safeEdit(p, instr, imageKey) {
+async function safeEdit(p, instr, imageKey, guide) { // guide: 'sketch'(안내 선을 얹은 그림) · 'mask'(빨갛게 칠한 영역)
   if (!isServer() || !wantAuto() || !(instr || '').trim()) return { text: instr, note: '' };
-  p._est = '✨ 그림을 보고 지시문 다듬는 중…'; refreshPanel(p);
-  try { return await convertDraft('edit', { draft: instr, characters: charCtx(p), image: imageKey }); }
+  try { return await convertDraft('edit', { draft: instr, characters: charCtx(p), image: imageKey, guide }); }
   catch (e) { toast('지시문 다듬기 실패 → 입력한 글 그대로 수정합니다: ' + e.message, 6000); return { text: instr, note: '' }; }
 }
 function convUI(p, kind) {
@@ -1999,7 +2003,7 @@ async function regenPanel(p) {
     if (useSk) base = await overlaySketch(base, p);
     const plan = refPlan(p.chars), dir = dirItems(p, useSk);
     const strength = lvl === 'keep'
-      ? 'Keep the composition, camera angle, pose and layout almost the same; redraw it cleanly with fresh, improved details.'
+      ? 'Keep the composition, camera angle, pose and layout almost the same; redraw it cleanly with fresh, improved details. Wherever the scene description below differs from the attached image, follow the scene description — those differences are the requested changes.'
       : 'Keep the overall idea and main subject, but you may change the pose, camera angle and composition noticeably.';
     const all = [...plan, ...dir];
     const prompt = [
@@ -2238,11 +2242,13 @@ async function maskApply() {
     const maskCv = mkMaskCanvas(), feather = $('#mkFeather').checked;
     const base = await toApiImage(MK.base), guide = await toApiImage(await mkGuide(maskCv));
     const guideKey = isServer() ? await ensureKey(null, guide) : undefined; // 빨갛게 칠한 영역이 보이는 그림
-    const plan = refPlan(p.chars), ci = (await safeEdit(p, instr + (guideKey ? '\n(첨부 그림에서 반투명 빨간색으로 칠한 영역만 바꾼다)' : ''), guideKey)).text;
+    if (isServer() && wantAuto()) st('✨ 칠한 영역을 보고 지시문 다듬는 중…');
+    const plan = refPlan(p.chars), conv = await safeEdit(p, instr, guideKey, 'mask'), ci = conv.text;
+    if (ci !== instr && conv.note) toast('이해한 지시: ' + conv.note, 6000);
     st('수정 중… (보통 10~40초)');
     const prompt = [
       'Edit the FIRST attached image. The SECOND attached image is the same picture with the area to change painted in translucent red.',
-      'Change ONLY inside the red-marked area: ' + ci.trim().replace(/\.$/, '') + '.',
+      'Change ONLY inside the red-marked area, and make the change there clearly visible: ' + ci.trim().replace(/\.$/, '') + '.',
       'Everything outside the red area must stay exactly identical to the first image — same composition, camera angle, characters, faces, outfits, colors, line work and art style. Blend the edited area seamlessly into its surroundings. Never draw the red marking in the result.',
       plan.length ? refLines(plan, 2) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
@@ -2496,10 +2502,11 @@ function initDraw() {
 initDraw();
 
 /* ---- 이미지 합성: 현재 컷 이미지를 바탕으로, 첨부한 이미지를 지시대로 합친다 ---- */
-async function safeMix(p, instr, n) {
-  if (!isServer() || !wantAuto()) return instr;
-  try { return (await convertDraft('mix', { draft: instr, attachments: n, characters: charCtx(p) })).text; }
-  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 합성합니다: ' + e.message, 6000); return instr; }
+/* 합성 지시 다듬기: 바탕 그림과 첨부 그림을 함께 보여 줘서 ‘무엇을 어디에’ 를 그림 속 대상으로 짚는다. { text, note } */
+async function safeMix(p, instr, n, imageKeys) {
+  if (!isServer() || !wantAuto()) return { text: instr, note: '' };
+  try { return await convertDraft('mix', { draft: instr, attachments: n, characters: charCtx(p), images: imageKeys }); }
+  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 합성합니다: ' + e.message, 6000); return { text: instr, note: '' }; }
 }
 async function aiMix(p) {
   const refs = (p.mixRefs || []).filter(id => assets.has(id)), instr = (p.mixPrompt || '').trim();
@@ -2511,8 +2518,15 @@ async function aiMix(p) {
   p._ebusy = true; p._est = label + ' 중…'; refreshPanel(p);
   try {
     const base = await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
-    const att = []; for (const id of refs) att.push({ blob: await toApiImage(assets.get(id).blob) });
-    const plan = refPlan(p.chars), ci = await safeMix(p, instr, refs.length);
+    const att = []; for (const id of refs) att.push({ blob: await toApiImage(assets.get(id).blob), cid: id + ':api' });
+    let baseKey;
+    if (isServer() && wantAuto()) { // 같은 업로드를 다듬기와 생성에 함께 쓴다
+      p._est = '✨ 그림을 보고 합성 지시 다듬는 중…'; refreshPanel(p);
+      baseKey = await ensureKey(null, base);
+      for (const a of att) a.key = await ensureKey(a.cid, a.blob);
+    }
+    const plan = refPlan(p.chars), conv = await safeMix(p, instr, refs.length, baseKey ? [baseKey, ...att.map(a => a.key)] : undefined), ci = conv.text;
+    p._est = label + ' 중…' + (ci !== instr ? '\n이해한 지시: ' + (conv.note || ci) : ''); refreshPanel(p);
     const prompt = [
       'Edit the FIRST attached image (the base picture) by combining it with the other attached images.',
       'Attached images: ' + refs.map((_, i) => 'image ' + (i + 2) + ' = ATTACHMENT ' + (i + 1)).join(', ') + '. Image 1 is the base picture.',
@@ -2521,11 +2535,12 @@ async function aiMix(p) {
       plan.length ? refLines(plan, 1 + refs.length) + '\n(Character sheets: only to keep those characters consistent.)' : '',
       NO_TEXT,
     ].filter(Boolean).join('\n\n');
-    const r = await generateImage({ prompt, images: [{ blob: base }, ...att, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
+    const r = await generateImage({ prompt, images: [{ blob: base, key: baseKey }, ...att, ...(await refBlobs(plan))], purpose: label, prov: p.prov });
     const id = await addResult(r);
     p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: label + ': ' + instr, edit: true });
     p.cur = p.versions.length - 1; resetFraming(p);
-    p._est = r.fellBack ? '✓ ' + PROV[r.first] + ' 실패 → ' + PROV[r.provider] + '로 합성' : '✓ ' + PROV[r.provider] + '로 합성 — 이전 이미지는 버전에 남아 있습니다 (첨부 이미지는 그대로 두었으니 지시만 고쳐 다시 해 볼 수 있습니다)';
+    p._est = (r.fellBack ? '✓ ' + PROV[r.first] + ' 실패 → ' + PROV[r.provider] + '로 합성' : '✓ ' + PROV[r.provider] + '로 합성 — 이전 이미지는 버전에 남아 있습니다 (첨부 이미지는 그대로 두었으니 지시만 고쳐 다시 해 볼 수 있습니다)') +
+      (ci !== instr ? '\n이해한 지시: ' + (conv.note || ci) : '');
   } catch (e) { p._est = '실패:\n' + e.message; }
   p._ebusy = false; save(); refreshPanel(p);
 }
@@ -2609,13 +2624,15 @@ async function aiEdit(p, instr) {
   try {
     const base = useSk ? await overlaySketch(await toApiImage(assets.get(curAsset(p)).blob), p) : await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
     const baseKey = isServer() ? await ensureKey(null, base) : undefined;
-    const plan = refPlan(p.chars), conv = await safeEdit(p, instr, baseKey), ins = conv.text;
+    if (isServer() && wantAuto() && instr.trim()) { p._est = '✨ 그림을 보고 지시문 다듬는 중…'; refreshPanel(p); }
+    const plan = refPlan(p.chars), conv = await safeEdit(p, instr, baseKey, useSk ? 'sketch' : ''), ins = conv.text;
     p._est = 'AI 수정 중…' + (ins !== instr ? '\n이해한 지시: ' + (conv.note || ins) : ''); refreshPanel(p);
+    // ‘무엇을 바꿀지’ 를 먼저, 분명하게. 유지 목록은 ‘지시가 건드리지 않는 것’ 으로 한정해야 표정·옷 수정이 유지 지시와 부딪치지 않는다
     const prompt = [
-      'Edit the FIRST attached image.',
+      'Edit the FIRST attached image. Apply the requested change fully and make it clearly visible — do not return a nearly unchanged image.',
       useSk ? SK_EDIT : '',
-      'Change only this: ' + (ins.trim() || 'what the hand-drawn guide strokes indicate'),
-      'Keep everything else identical — composition, camera angle, character faces, hairstyles, outfits, art style, colors and lighting.',
+      'Requested change: ' + (ins.trim() || 'what the hand-drawn guide strokes indicate'),
+      'Everything the requested change does not touch must stay identical to the original: composition, camera angle, the other characters, faces and identity, hairstyles, outfits, background, art style, colors and lighting.',
       plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
     ].filter(Boolean).join('\n\n');
@@ -5786,9 +5803,15 @@ async function genLayerImage(p) {
   p._lyBusy = true; p._lySt = 'AI로 그리는 중…'; refreshPanel(p);
   try {
     const chars = p.chars.map(id => P.chars.find(c => c.id === id)).filter(Boolean);
+    let el = desc; // 한국어 한 줄 설명을 이미지 모델이 그대로 따를 수 있는 영어 묘사로 바꾼다 (실패하면 원문)
+    if (isServer() && wantAuto()) {
+      p._lySt = '✨ 설명 다듬는 중…'; refreshPanel(p);
+      try { el = (await convertDraft('element', { draft: desc, characters: charCtx(p) })).text || desc; } catch (e) { el = desc; }
+      p._lySt = 'AI로 그리는 중…'; refreshPanel(p);
+    }
     const prompt = [
       P.style.prompt.trim() ? 'Art style: ' + P.style.prompt.trim() : '',
-      'A single isolated element: ' + desc + '.',
+      'A single isolated element: ' + el.trim().replace(/\.$/, '') + '.',
       chars.length ? 'If a character appears, match these designs exactly:\n' + chars.map(c => '- ' + (c.name || 'character') + ': ' + (c.desc || '')).join('\n') : '',
       'Show only this one element, centered and fully visible with generous margin, on a pure solid white (#FFFFFF) background with no scenery, no floor shadow, no text, no letters, no watermark.',
     ].filter(Boolean).join('\n\n');
