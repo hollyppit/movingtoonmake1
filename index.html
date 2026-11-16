@@ -1801,7 +1801,7 @@ async function generateImage({ prompt, images = [], purpose, prov, size, aspect,
 async function serverImage({ prompt, images, purpose, order, size, aspect, mask }) {
   const t0 = performance.now();
   const refs = [];
-  for (const im of images) refs.push(await ensureKey(im.cid, im.blob));
+  for (const im of images) refs.push(im.key || await ensureKey(im.cid, im.blob));
   const logAttempts = list => (list || []).forEach(a => logCall({
     kind: purpose, provider: a.provider, ok: !!a.ok, err: a.ok ? undefined : (a.kind || 'bad'), msg: a.ok ? '' : String(a.error || '').slice(0, 300),
     cost: a.ok ? (a.provider === 'openai' ? +S.cOa : +S.cGm) : 0, ms: a.ms, refs: refs.length,
@@ -1936,10 +1936,13 @@ async function safeScene(p) {
   catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 생성합니다: ' + e.message, 6000); return null; }
   finally { if (need) { p._st = keep; refreshPanel(p); } }
 }
-async function safeEdit(p, instr) {
-  if (!isServer() || !wantAuto() || !(instr || '').trim()) return instr;
-  try { return (await convertDraft('edit', { draft: instr, characters: charCtx(p) })).text; }
-  catch (e) { toast('프롬프트 변환 실패 → 입력한 글 그대로 수정합니다: ' + e.message, 6000); return instr; }
+/* 수정 지시 다듬기: 지금 그림(imageKey)을 함께 보여 줘서 ‘어느 인물의 어디를 어떻게’ 를 구체적인 영어 지시로 바꾼다.
+   { text, note } — 실패하면 입력한 글 그대로 */
+async function safeEdit(p, instr, imageKey) {
+  if (!isServer() || !wantAuto() || !(instr || '').trim()) return { text: instr, note: '' };
+  p._est = '✨ 그림을 보고 지시문 다듬는 중…'; refreshPanel(p);
+  try { return await convertDraft('edit', { draft: instr, characters: charCtx(p), image: imageKey }); }
+  catch (e) { toast('지시문 다듬기 실패 → 입력한 글 그대로 수정합니다: ' + e.message, 6000); return { text: instr, note: '' }; }
 }
 function convUI(p, kind) {
   const c = kind === 'scene' ? convFresh(p) : motionFresh(p), what = kind === 'scene' ? '이미지' : '영상 움직임';
@@ -2234,15 +2237,17 @@ async function maskApply() {
   try {
     const maskCv = mkMaskCanvas(), feather = $('#mkFeather').checked;
     const base = await toApiImage(MK.base), guide = await toApiImage(await mkGuide(maskCv));
-    const plan = refPlan(p.chars), ci = await safeEdit(p, instr);
+    const guideKey = isServer() ? await ensureKey(null, guide) : undefined; // 빨갛게 칠한 영역이 보이는 그림
+    const plan = refPlan(p.chars), ci = (await safeEdit(p, instr + (guideKey ? '\n(첨부 그림에서 반투명 빨간색으로 칠한 영역만 바꾼다)' : ''), guideKey)).text;
+    st('수정 중… (보통 10~40초)');
     const prompt = [
       'Edit the FIRST attached image. The SECOND attached image is the same picture with the area to change painted in translucent red.',
-      'Change ONLY inside the red-marked area: ' + ci + '.',
+      'Change ONLY inside the red-marked area: ' + ci.trim().replace(/\.$/, '') + '.',
       'Everything outside the red area must stay exactly identical to the first image — same composition, camera angle, characters, faces, outfits, colors, line work and art style. Blend the edited area seamlessly into its surroundings. Never draw the red marking in the result.',
       plan.length ? refLines(plan, 2) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
     ].filter(Boolean).join('\n\n');
-    const r = await generateImage({ prompt, images: [{ blob: base }, { blob: guide }, ...(await refBlobs(plan))], purpose: '부분 수정', prov: p.prov });
+    const r = await generateImage({ prompt, images: [{ blob: base }, { blob: guide, key: guideKey }, ...(await refBlobs(plan))], purpose: '부분 수정', prov: p.prov });
     const out = await mkComposite(MK.base, r.blob, maskCv, feather);
     const id = await addAsset(out.blob);
     p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: '부분 수정: ' + instr, edit: true });
@@ -2603,7 +2608,9 @@ async function aiEdit(p, instr) {
   p._ebusy = true; p._est = 'AI 수정 중…'; refreshPanel(p);
   try {
     const base = useSk ? await overlaySketch(await toApiImage(assets.get(curAsset(p)).blob), p) : await toApiImage(await bakePanel(p, 'image/jpeg', 0.92));
-    const plan = refPlan(p.chars), ins = await safeEdit(p, instr);
+    const baseKey = isServer() ? await ensureKey(null, base) : undefined;
+    const plan = refPlan(p.chars), conv = await safeEdit(p, instr, baseKey), ins = conv.text;
+    p._est = 'AI 수정 중…' + (ins !== instr ? '\n이해한 지시: ' + (conv.note || ins) : ''); refreshPanel(p);
     const prompt = [
       'Edit the FIRST attached image.',
       useSk ? SK_EDIT : '',
@@ -2612,11 +2619,12 @@ async function aiEdit(p, instr) {
       plan.length ? refLines(plan, 1) + '\n(Use them only to keep the characters consistent.)' : '',
       NO_TEXT,
     ].filter(Boolean).join('\n\n');
-    const r = await generateImage({ prompt, images: [{ blob: base }, ...(await refBlobs(plan))], purpose: 'AI 수정', prov: p.prov });
+    const r = await generateImage({ prompt, images: [{ blob: base, key: baseKey }, ...(await refBlobs(plan))], purpose: 'AI 수정', prov: p.prov });
     const id = await addResult(r);
     p.versions.push({ assetId: id, src: r.provider, at: Date.now(), prompt: '수정: ' + instr, edit: true });
     p.cur = p.versions.length - 1; resetFraming(p);
-    p._est = r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 수정` : `✓ ${PROV[r.provider]}로 수정 (보정값은 이미지에 반영되어 초기화됨)`;
+    p._est = (r.fellBack ? `✓ ${PROV[r.first]} 실패 → ${PROV[r.provider]}로 수정` : `✓ ${PROV[r.provider]}로 수정 (보정값은 이미지에 반영되어 초기화됨)`) +
+      (ins !== instr ? '\n이해한 지시: ' + (conv.note || ins) : '');
   } catch (e) { p._est = '실패:\n' + e.message; }
   p._ebusy = false; save(); refreshPanel(p);
 }

@@ -500,7 +500,9 @@ const PROMPT_COMMON = 'You are a prompt engineer for AI image and video generato
   'Reply with ONLY JSON, no markdown: {"prompt": "...", "note": "..."} where note is ONE short Korean sentence (max 70 characters) explaining how you interpreted anything ambiguous, or an empty string if nothing was ambiguous.';
 const PROMPT_TASK = {
   scene: 'Task: write the SCENE prompt for ONE still frame (see "aspect"). Use 3-6 sentences covering: shot size and camera angle, composition (where each character and key object sits in the frame), pose and action, facial expression and gaze direction of each character, setting and time of day, lighting and mood. Merge the "extra" request into the scene. If has_image is true the frame is regenerated from an existing image; still describe the full intended scene.',
-  edit: 'Task: write an EDIT INSTRUCTION to apply to an existing image. Output one or two imperative sentences stating exactly what to change (and where in the frame). Do not describe the unchanged parts of the picture.',
+  edit: 'Task: write an EDIT INSTRUCTION to apply to an existing image. When the image is attached, LOOK at it first and work out exactly which character, body part, object or region the draft is about; name it by its visible features and its position in the frame (e.g. "the dark-haired boy in the center: his eyebrows, eyes and mouth"), never by a vague word like "it" or "the person". ' +
+    'Then write 2-4 imperative sentences: first exactly what to change, in concrete visual terms (shape, size, direction, color, expression details such as raised eyebrows or open mouth), and where; then what in and around that region must stay as it is (identity, face shape, hairstyle, outfit, pose, framing). ' +
+    'If the draft asks for something the image already shows, strengthen it clearly so the change is visible. Do not describe the rest of the picture. In the note, say in Korean which part of the picture you took the draft to mean.',
   mix: 'Task: write a COMPOSITING INSTRUCTION. The first image is the base picture; the other images are ATTACHMENT 1..N (see "attachments" for N). Write 1-3 imperative sentences stating exactly what to take from which ATTACHMENT and where and how to place or apply it in the base picture (position, size, pose, which part of the base to replace or keep). Always call them ATTACHMENT 1, ATTACHMENT 2, ... — Korean wording such as "첨부 1", "두 번째 첨부", "첨부한 이미지" maps to these numbers (an unnumbered "첨부한 이미지" with only one attachment means ATTACHMENT 1). Do not describe parts that stay unchanged.',
   motion: 'Task: write an IMAGE-TO-VIDEO MOTION prompt for a short clip (see "len" seconds) that animates a still frame ("scene" tells you what it shows). Describe only motion over time: character movement and expressions, hair/cloth/environment motion, camera movement (push-in, pan, tilt, handheld shake or static) and pacing, as a short sequence that fits the duration. Keep motion natural and moderate unless the draft asks for dramatic action. Do not change the composition, art style, character design or colors. Do not write dialogue. End the prompt with: Keep the exact same art style, character design and colors. No text.',
 };
@@ -515,11 +517,18 @@ export async function handlePrompt(req, env) {
     const chars = (Array.isArray(b.characters) ? b.characters : []).slice(0, 6).map(c => ({ name: String(c.name || '').slice(0, 40), appearance: String(c.desc || '').slice(0, 300) }));
     const user = JSON.stringify({
       draft, extra: String(b.extra || '').slice(0, 1000), scene: String(b.scene || '').slice(0, 1000), characters: chars,
-      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!b.hasImage, len: +b.len || 5, audio: !!b.audio, attachments: Math.min(8, +b.attachments || 0),
+      aspect: String(b.aspect || '9:16').slice(0, 8), has_image: !!(b.hasImage || b.image), len: +b.len || 5, audio: !!b.audio, attachments: Math.min(8, +b.attachments || 0),
     });
+    // 수정할 이미지를 함께 보내면 Claude 가 그림을 보고 ‘어디를 어떻게’ 를 구체적으로 짚는다
+    let content = user;
+    if (typeof b.image === 'string' && b.image) {
+      const img = await r2Get(env, b.image, who);
+      const mt = /png|webp|gif/.exec(img.type || '') ? 'image/' + /png|webp|gif/.exec(img.type)[0] : 'image/jpeg';
+      if (img.bytes.length <= 3.7 * 1024 * 1024) content = [{ type: 'image', source: { type: 'base64', media_type: mt, data: b64(img.bytes) } }, { type: 'text', text: user }];
+    }
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: PROMPT_MODEL, max_tokens: 1200, system: PROMPT_COMMON + ' ' + PROMPT_TASK[mode], messages: [{ role: 'user', content: user }] }),
+      body: JSON.stringify({ model: PROMPT_MODEL, max_tokens: 1200, system: PROMPT_COMMON + ' ' + PROMPT_TASK[mode], messages: [{ role: 'user', content }] }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) return json({ error: j.error?.message || 'HTTP ' + r.status, kind: r.status === 429 ? 'rate' : r.status === 401 ? 'auth' : 'bad' }, 502);
